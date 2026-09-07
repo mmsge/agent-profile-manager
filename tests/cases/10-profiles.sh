@@ -23,6 +23,21 @@ case_new_sets_mode_700() {
     assert_equals "700" "$mode"
 }
 
+case_new_sets_mode_700_on_the_app_data_dir() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Bouvet")"
+}
+
+case_new_reports_tightening_the_app_data_mode() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/Library/Application Support/Claude-Tide"
+    chmod 755 "$HOME/Library/Application Support/Claude-Tide"
+    out=$("$AP" new tide 2>&1)
+    assert_contains "$out" "app data directory was mode 755 and became 700" || return
+    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Tide")"
+}
+
 case_new_writes_four_keys() {
     HOME=$(new_home); export HOME
     "$AP" new bouvet >/dev/null 2>&1
@@ -257,6 +272,8 @@ case_neither_a_command_nor_a_profile_names_both() {
 
 run_case "new creates an empty root"                  case_new_creates_empty_root
 run_case "new sets mode 700"                          case_new_sets_mode_700
+run_case "new sets mode 700 on the app data dir"      case_new_sets_mode_700_on_the_app_data_dir
+run_case "new reports tightening the app data mode"   case_new_reports_tightening_the_app_data_mode
 run_case "new writes exactly four registry keys"      case_new_writes_four_keys
 run_case "new is idempotent"                          case_new_is_idempotent
 run_case "new refuses to repoint an existing profile" case_new_refuses_to_repoint

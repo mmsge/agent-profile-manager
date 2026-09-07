@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.7.0"
+AGENT_PROFILE_VERSION="0.7.1"
 
 # The name this was invoked as. Every message names the command the reader
 # actually typed, so an install under a short name never tells them to run
@@ -420,9 +420,16 @@ if you really mean to start over."
         _new_had_mode=$(dir_mode "$_new_root")
     fi
 
+    # The app data directory gets the same protection as the root. It holds
+    # the desktop app's own login (docs/FACTS.md F18) and its embedded copy of
+    # the agent (F17), so it is every bit as private, and D07 audits both.
+    _new_data_had_mode=""
+    [ -d "$_new_appdata" ] && _new_data_had_mode=$(dir_mode "$_new_appdata")
+
     mkdir -p "$_new_root" || die "could not create root '$_new_root'"
     chmod 700 "$_new_root" || die "could not chmod 700 '$_new_root'"
     mkdir -p "$_new_appdata" || die "could not create app data dir '$_new_appdata'"
+    chmod 700 "$_new_appdata" || die "could not chmod 700 '$_new_appdata'"
     mkdir -p "$AGENT_PROFILE_REGISTRY" || die "could not create registry '$AGENT_PROFILE_REGISTRY'"
 
     if ! profile_exists "$_new_name"; then
@@ -439,6 +446,12 @@ if you really mean to start over."
     printf '  root      %s\n' "$_new_root"
     printf '  app data  %s\n' "$_new_appdata"
     printf '\n'
+
+    if [ -n "$_new_data_had_mode" ] && [ "$_new_data_had_mode" != "700" ]; then
+        printf 'The app data directory was mode %s and became 700, which is what doctor D07 wants.\n' \
+            "$_new_data_had_mode"
+        printf '\n'
+    fi
 
     if [ -n "$_new_adopted" ]; then
         # Say exactly what was and was not done. This command is the entry
@@ -554,7 +567,7 @@ keychain_has() {
 }
 
 # keychain_services: every Claude credential service name on this machine.
-# dump-keychain without -g lists attributes only and reads no secret.
+# dump-keychain without -d lists attributes only and reads no secret.
 keychain_services() {
     security dump-keychain 2>/dev/null \
         | sed -n 's/.*"svce"<blob>="\(Claude Code[^"]*-credentials[^"]*\)".*/\1/p' \
@@ -850,7 +863,7 @@ applet_pinned_root() {
 reg_set() {
     _rset_file=$(reg_file "$1")
     [ -f "$_rset_file" ] || die "profile '$1' has no registry entry"
-    _rset_tmp="$_rset_file.tmp.$$"
+    _rset_tmp=$(mktemp "$_rset_file.tmp.XXXXXX") || die "could not create a temporary file beside $_rset_file"
     {
         grep -v "^$2=" "$_rset_file" || true
         printf '%s=%s\n' "$2" "$3"
@@ -980,9 +993,11 @@ applet_write() {
         die "$_aw_applet exists but is not an AppleScript applet: no compiled script inside it.
 Refusing to overwrite it. Remove it, or pass --applet with another path."
 
-    _aw_tmp="${TMPDIR:-/tmp}/agent-profile-applet.$$"
-    rm -rf "$_aw_tmp"
-    mkdir -p "$_aw_tmp" || die "could not create $_aw_tmp"
+    # Every temporary path here comes from mktemp. A name built from $$ is
+    # guessable, and under a shared TMPDIR that is a symlink race, so the
+    # test suite refuses the $$ form outright.
+    _aw_tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-profile-applet.XXXXXX") || \
+        die "could not create a temporary directory under ${TMPDIR:-/tmp}"
     osacompile \
         -e "-- agent-profile: launches the desktop app pinned to profile \"$_aw_name\"." \
         -e "-- Generated. To change or repair it: $SELF app $_aw_name" \
@@ -1011,9 +1026,9 @@ applet_set_icon() {
     [ -f "$_ai_png" ] || die "no such image: $_ai_png"
     [ -d "$_ai_applet/Contents/Resources" ] || die "$_ai_applet has no Resources directory"
 
-    _ai_tmp="${TMPDIR:-/tmp}/agent-profile-icon.$$"
-    rm -rf "$_ai_tmp"
-    mkdir -p "$_ai_tmp/icon.iconset" || die "could not create $_ai_tmp"
+    _ai_tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-profile-icon.XXXXXX") || \
+        die "could not create a temporary directory under ${TMPDIR:-/tmp}"
+    mkdir -p "$_ai_tmp/icon.iconset" || die "could not create $_ai_tmp/icon.iconset"
 
     for _ai_s in 16 32 128 256 512; do
         sips -z "$_ai_s" "$_ai_s" "$_ai_png" \
@@ -1116,8 +1131,8 @@ cmd_app() {
         _ap_applet=$(reg_get "$_ap_name" applet)
     fi
     if [ -z "$_ap_applet" ]; then
-        _ap_scan="${TMPDIR:-/tmp}/agent-profile-app.$$"
-        : > "$_ap_scan"
+        _ap_scan=$(mktemp "${TMPDIR:-/tmp}/agent-profile-app.XXXXXX") || \
+            die "could not create a temporary file under ${TMPDIR:-/tmp}"
         applet_scan "$_ap_agent" 2>/dev/null | while IFS= read -r _ap_cand; do
             [ -n "$_ap_cand" ] || continue
             [ "$(applet_pinned_root "$_ap_agent" "$_ap_cand")" = "$_ap_root" ] && \
@@ -1317,6 +1332,20 @@ cmd_doctor() {
                 "Fix with: chmod 700 '$_doc_root'"
         fi
 
+        # The app data directory is held to the same standard. It carries the
+        # desktop app's own login (docs/FACTS.md F18) and its embedded copy of
+        # the agent (F17), so a world-readable one exposes as much as a root.
+        _doc_data_dir=$(reg_get "$_doc_name" app_data)
+        if [ -n "$_doc_data_dir" ] && [ -d "$_doc_data_dir" ]; then
+            _doc_dmode=$(dir_mode "$_doc_data_dir")
+            if [ -n "$_doc_dmode" ] && [ "$_doc_dmode" != "700" ]; then
+                finding "D07" "profile '$_doc_name' app data directory is mode $_doc_dmode, not 700" \
+                    "$_doc_data_dir" \
+                    "It holds the desktop app's own login and its embedded agent." \
+                    "Fix with: chmod 700 '$_doc_data_dir'"
+            fi
+        fi
+
         # D05 and D10. The credential check is exact now that the Keychain
         # naming is known (docs/FACTS.md F03), so a missing credential is a
         # real finding rather than a guess.
@@ -1507,7 +1536,8 @@ cmd_doctor() {
     # is wrong on a real machine. Two working ones were sitting on a Desktop,
     # completely outside the audit, while doctor reported a clean desktop.
     for _doc_agent in $KNOWN_AGENTS; do
-        _doc_scan="${TMPDIR:-/tmp}/agent-profile-d14.$$"
+        _doc_scan=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d14.XXXXXX") || \
+            die "could not create a temporary file under ${TMPDIR:-/tmp}"
         applet_scan "$_doc_agent" > "$_doc_scan" 2>/dev/null
 
         # Read from a file rather than a pipe: a pipeline runs the loop in a
@@ -1617,7 +1647,8 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     # per profile. It needs no configuration, so it cannot go stale and cannot
     # pass quietly because nothing was declared.
     if [ ${#_doc_roots[@]} -gt 0 ]; then
-        _doc_tmp="${TMPDIR:-/tmp}/agent-profile-d03.$$"
+        _doc_tmp=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d03.XXXXXX") || \
+            die "could not create a temporary file under ${TMPDIR:-/tmp}"
         read_project_cwds "${_doc_roots[@]}" | sed '/^$/d' | sort -u | \
             awk -F'\t' '
                 { count[$2]++; roots[$2] = roots[$2] sep[$2] $1; sep[$2] = ", " }

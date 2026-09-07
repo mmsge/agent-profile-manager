@@ -34,19 +34,41 @@ case_registry_lives_outside_every_root() {
     [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "no registry entry"
 }
 
+# AP_SOURCE is the script itself. $AP is a two-line shim that re-executes it
+# under the harness's bash, so grepping $AP proves nothing about the source.
+# Both invariants below once passed against the shim while one of them would
+# have failed against the real script, which is the vacuous pass this note
+# exists to prevent.
+AP_SOURCE="$ROOT/bin/agent-profile"
+
 case_source_never_copies_or_links_between_roots() {
     # Criterion 4 asks a reviewer to verify this by inspection. Assert it too,
     # so a future change cannot quietly introduce it.
     hits=$(grep -nE '(^|[^[:alnum:]_])(ln[[:space:]]+-s|cp[[:space:]]+-|rsync|install[[:space:]]+-m)' \
-        "$AP" | grep -v '^[0-9]*: *#' || true)
+        "$AP_SOURCE" | grep -v '^[0-9]*: *#' || true)
     assert_equals "" "$hits"
 }
 
 case_source_never_reads_credential_content() {
-    # The tool may check that a credential exists. It must never read one, and
-    # must never call security with -g.
-    hits=$(grep -nE 'security[^|]*-g|dump-keychain[^|]*-g|find-generic-password' "$AP" \
-        | grep -v '^[0-9]*: *#' || true)
+    # The tool may check that a credential exists, which is find-generic-password
+    # with its output discarded. It must never ask for the secret itself: -g or
+    # -w on find-generic-password, or -d on dump-keychain.
+    hits=$(grep -nE 'find-generic-password[^|]*[[:space:]]-[gw]([[:space:]]|$)|dump-keychain[^|]*[[:space:]]-d([[:space:]]|$)' \
+        "$AP_SOURCE" | grep -v '^[0-9]*: *#' || true)
+    assert_equals "" "$hits" || return
+    # Prove the grep is reading the real thing. The existence check has to be
+    # in there, or this case is asserting against the wrong file.
+    if ! grep -q 'find-generic-password' "$AP_SOURCE"; then
+        fail "no credential existence check in $AP_SOURCE, so this case is not reading the source"
+    fi
+}
+
+case_source_never_uses_predictable_temp_names() {
+    # A temp path built from $$ is guessable, and under a shared TMPDIR that is
+    # a symlink race waiting to happen. Every temporary file or directory has
+    # to come from mktemp.
+    # shellcheck disable=SC2016  # the pattern is a literal, not an expansion
+    hits=$(grep -nE '\$\$' "$AP_SOURCE" | grep -v '^[0-9]*: *#' || true)
     assert_equals "" "$hits"
 }
 
@@ -88,6 +110,7 @@ run_case "a second profile inherits nothing"          case_a_second_profile_does
 run_case "the registry lives outside every root"      case_registry_lives_outside_every_root
 run_case "the source never copies between roots"      case_source_never_copies_or_links_between_roots
 run_case "the source never reads credentials"         case_source_never_reads_credential_content
+run_case "the source uses no predictable temp names"  case_source_never_uses_predictable_temp_names
 run_case "no command writes the agent state file"     case_no_command_writes_to_the_agents_state_file
 run_case "explain states the scheme"                  case_explain_states_the_scheme
 run_case "help, version and an unknown command"       case_help_and_version

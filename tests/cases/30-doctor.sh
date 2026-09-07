@@ -127,6 +127,18 @@ case_d07_wrong_mode() {
     assert_contains "$DOUT" "mode 755"
 }
 
+# The app data directory holds the desktop app's own login and its embedded
+# agent, so it is audited to the same standard as the root.
+case_d07_app_data_dir_wrong_mode() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    chmod 755 "$HOME/Library/Application Support/Claude-Bouvet"
+    doctor_out
+    assert_status 2 "$DSTATUS" || return
+    assert_contains "$DOUT" "D07" || return
+    assert_contains "$DOUT" "app data directory is mode 755"
+}
+
 case_d08_project_dir_that_is_not_a_path() {
     HOME=$(new_home); export HOME
     two_clean_profiles
@@ -178,6 +190,7 @@ run_case "D05 no credential and no account"           case_d05_no_credential_and
 run_case "D05 stays quiet for a Keychain login"       case_d05_quiet_when_signed_in_via_keychain
 run_case "D06 an unregistered root"                   case_d06_unregistered_root
 run_case "D07 a root that is not mode 700"            case_d07_wrong_mode
+run_case "D07 an app data dir that is not mode 700"   case_d07_app_data_dir_wrong_mode
 run_case "D08 a project dir that is not a path"       case_d08_project_dir_that_is_not_a_path
 run_case "no profiles is not a finding"               case_doctor_with_no_profiles_is_not_a_finding
 run_case "D02 fires though the default root is claimed" case_d02_fires_even_when_the_default_root_is_claimed
