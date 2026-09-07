@@ -158,6 +158,24 @@ Ranked from most to least recommended. Each carries the labels for its
 GitHub issue, the model and effort to run the implementing session at, and a
 prompt that session can act on directly.
 
+| # | Suggestion | Issue |
+| --- | --- | --- |
+| 1 | Establish the Windows facts before any port | [#13](https://github.com/mmsge/agent-profile-manager/issues/13) |
+| 2 | Rewrite as one cross-platform tool, in Go | [#15](https://github.com/mmsge/agent-profile-manager/issues/15) |
+| 3 | Tagged releases, checksums, signed tags and package-manager installs | [#16](https://github.com/mmsge/agent-profile-manager/issues/16) |
+| 4 | Add a copyleft licence: GPL-3.0-or-later | [#17](https://github.com/mmsge/agent-profile-manager/issues/17) |
+| 5 | Cover the IDE extension leak path | [#18](https://github.com/mmsge/agent-profile-manager/issues/18) |
+| 6 | Audit direct launches of the desktop app | [#19](https://github.com/mmsge/agent-profile-manager/issues/19) |
+| 7 | Offboarding: a `remove` command and an engagement-end checklist | [#20](https://github.com/mmsge/agent-profile-manager/issues/20) |
+| 8 | Machine-readable `doctor --json` and a timestamped evidence report | [#21](https://github.com/mmsge/agent-profile-manager/issues/21) |
+| 9 | Baseline guardrails for new profiles | [#22](https://github.com/mmsge/agent-profile-manager/issues/22) |
+| 10 | A ten-minute start, a migration recipe and a threat model in the docs | [#23](https://github.com/mmsge/agent-profile-manager/issues/23) |
+| 11 | Shorter default output, with `--explain` for the rationale | [#24](https://github.com/mmsge/agent-profile-manager/issues/24) |
+| 12 | Shell completions, a fish guard and a `shell` choice in the picker | [#25](https://github.com/mmsge/agent-profile-manager/issues/25) |
+| 13 | CI on Linux as well as macOS, and a release workflow | [#26](https://github.com/mmsge/agent-profile-manager/issues/26) |
+| 14 | Measure and trim the per-prompt cost of `which --label` | [#27](https://github.com/mmsge/agent-profile-manager/issues/27) |
+| 15 | Make the Keychain enumeration in D12 opt-in | [#28](https://github.com/mmsge/agent-profile-manager/issues/28) |
+
 ### 1. Establish the Windows facts before any port
 
 **Why this matters:** Every macOS behaviour the tool rests on is recorded in
