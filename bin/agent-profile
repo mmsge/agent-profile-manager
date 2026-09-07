@@ -1,0 +1,546 @@
+#!/bin/bash
+#
+# agent-profile — Agent Profile Manager
+#
+# Keeps several AI agent accounts separate on one machine by giving each its
+# own config root, and audits that the separation actually holds.
+#
+# Written to bash 3.2, the system bash on macOS. No associative arrays, no
+# mapfile, no ${var^^}. python3 is used only to read JSON.
+
+set -u
+
+AGENT_PROFILE_VERSION="0.1.0"
+
+# Exit codes. Contracted so doctor and verify are usable unattended.
+EX_OK=0        # success, no findings
+EX_ERR=1       # usage error, unknown profile, unknown agent, missing dependency
+EX_FINDINGS=2  # doctor found at least one isolation problem
+EX_BROKEN=3    # verify found an assumption that no longer holds
+EX_UNCHECKED=4 # verify could not check something it wanted to check
+
+# ---------------------------------------------------------------------------
+# Overridable locations. Tests redirect the whole world into a fixture tree by
+# setting these; nothing else in the script hard-codes a path outside a root.
+# ---------------------------------------------------------------------------
+
+: "${AGENT_PROFILE_REGISTRY:=$HOME/.config/agent-profiles}"
+: "${AGENT_PROFILE_APPS_DIR:=$HOME/Applications}"
+: "${AGENT_PROFILE_DRY_RUN:=}"
+
+# ---------------------------------------------------------------------------
+# The agent seam.
+#
+# This function is the only place that knows anything agent-specific. Adding
+# ollama or codex later means adding a case here, not migrating the registry.
+# ---------------------------------------------------------------------------
+
+KNOWN_AGENTS="claude"
+
+# agent_def <agent> <field>
+#
+# Fields:
+#   envvar        environment variable that selects the config root
+#   binary        the agent's CLI executable
+#   root_prefix   basename prefix for a conventional per-profile root
+#   default_root  the root the agent uses when nothing is pinned
+#   state_file    agent state file that sits beside the default root
+#   state_base    basename of that state file, as found inside a pinned root
+#   app_prefix    directory-name prefix for the desktop app's data dir
+#   app_support   parent directory for desktop app data dirs
+agent_def() {
+    _ad_agent="$1"
+    _ad_field="$2"
+    case "$_ad_agent" in
+        claude)
+            case "$_ad_field" in
+                envvar)       printf '%s\n' "CLAUDE_CONFIG_DIR" ;;
+                binary)       printf '%s\n' "claude" ;;
+                root_prefix)  printf '%s\n' ".claude-" ;;
+                default_root) printf '%s\n' "$HOME/.claude" ;;
+                state_file)   printf '%s\n' "$HOME/.claude.json" ;;
+                state_base)   printf '%s\n' ".claude.json" ;;
+                app_prefix)   printf '%s\n' "Claude-" ;;
+                app_support)  printf '%s\n' "$HOME/Library/Application Support" ;;
+                *) die "internal: unknown agent field '$_ad_field'" ;;
+            esac
+            ;;
+        *)
+            die "unknown agent '$_ad_agent' (known: $KNOWN_AGENTS)"
+            ;;
+    esac
+}
+
+is_known_agent() {
+    for _ika in $KNOWN_AGENTS; do
+        [ "$_ika" = "$1" ] && return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+die() {
+    printf 'agent-profile: %s\n' "$*" >&2
+    exit "$EX_ERR"
+}
+
+warn() {
+    printf 'agent-profile: %s\n' "$*" >&2
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "required command '$1' not found"
+}
+
+# ---------------------------------------------------------------------------
+# Registry
+#
+# One file per profile at $AGENT_PROFILE_REGISTRY/<name>.conf, plain key=value.
+# Hand-editable and diffable on purpose.
+# ---------------------------------------------------------------------------
+
+reg_file() {
+    printf '%s\n' "$AGENT_PROFILE_REGISTRY/$1.conf"
+}
+
+# reg_get <name> <key> — prints the value, empty if absent.
+reg_get() {
+    _rg_file=$(reg_file "$1")
+    [ -f "$_rg_file" ] || return 0
+    # Take the first match only; ignore comments and blank lines.
+    sed -n "s/^$2=//p" "$_rg_file" | head -1
+}
+
+profile_exists() {
+    [ -f "$(reg_file "$1")" ]
+}
+
+# profile_names — one per line, sorted. Empty output when the registry is empty.
+profile_names() {
+    [ -d "$AGENT_PROFILE_REGISTRY" ] || return 0
+    for _pn in "$AGENT_PROFILE_REGISTRY"/*.conf; do
+        [ -f "$_pn" ] || continue
+        _pn=${_pn##*/}
+        printf '%s\n' "${_pn%.conf}"
+    done
+}
+
+require_profile() {
+    profile_exists "$1" || die "no such profile '$1' (try: agent-profile list)"
+}
+
+# profile_agent <name> — the agent for a profile, validated.
+profile_agent() {
+    _pa=$(reg_get "$1" agent)
+    [ -n "$_pa" ] || die "profile '$1' has no agent= key; the registry entry is incomplete"
+    is_known_agent "$_pa" || die "profile '$1' names unknown agent '$_pa' (known: $KNOWN_AGENTS)"
+    printf '%s\n' "$_pa"
+}
+
+profile_root() {
+    _pr=$(reg_get "$1" root)
+    [ -n "$_pr" ] || die "profile '$1' has no root= key; the registry entry is incomplete"
+    printf '%s\n' "$_pr"
+}
+
+# ---------------------------------------------------------------------------
+# Label derivation
+#
+# The prompt label is derived from the pinned root every time it is needed and
+# is never stored anywhere. That is what stops it drifting away from the root
+# it claims to describe.
+# ---------------------------------------------------------------------------
+
+# label_for_root <agent> <root>
+label_for_root() {
+    _lfr_prefix=$(agent_def "$1" root_prefix)
+    _lfr_base=${2##*/}
+    case "$_lfr_base" in
+        "$_lfr_prefix"*) printf '%s\n' "${_lfr_base#"$_lfr_prefix"}" ;;
+        *)               printf '%s\n' "$_lfr_base" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Pinned execution
+# ---------------------------------------------------------------------------
+
+# run_pinned <agent> <root> <command> [args...]
+#
+# Everything that execs goes through here, so AGENT_PROFILE_DRY_RUN=1 makes
+# run, shell and desktop assertable in tests without launching anything.
+run_pinned() {
+    _rp_agent="$1"; shift
+    _rp_root="$1"; shift
+    _rp_var=$(agent_def "$_rp_agent" envvar)
+
+    if [ -n "$AGENT_PROFILE_DRY_RUN" ]; then
+        printf '%s=%s' "$_rp_var" "$_rp_root"
+        for _rp_arg in "$@"; do
+            printf ' %s' "$_rp_arg"
+        done
+        printf '\n'
+        return 0
+    fi
+
+    export "$_rp_var=$_rp_root"
+    exec "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+# capitalize <word> — bash 3.2 has no ${var^}, so do it with cut and tr.
+capitalize() {
+    _cap_first=$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')
+    _cap_rest=$(printf '%s' "$1" | cut -c2-)
+    printf '%s%s\n' "$_cap_first" "$_cap_rest"
+}
+
+valid_name() {
+    case "$1" in
+        ""|*[!A-Za-z0-9_-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# session_count <root> — number of transcripts stored under a root.
+session_count() {
+    [ -d "$1/projects" ] || { printf '0\n'; return 0; }
+    find "$1/projects" -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' '
+}
+
+# ---------------------------------------------------------------------------
+# new
+# ---------------------------------------------------------------------------
+
+cmd_new() {
+    _new_name=""
+    _new_agent="claude"
+    _new_root=""
+    _new_appdata=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --agent)     shift; [ $# -gt 0 ] || die "--agent needs a value"; _new_agent="$1" ;;
+            --root)      shift; [ $# -gt 0 ] || die "--root needs a value"; _new_root="$1" ;;
+            --app-data)  shift; [ $# -gt 0 ] || die "--app-data needs a value"; _new_appdata="$1" ;;
+            -*)          die "unknown option '$1'" ;;
+            *)           [ -z "$_new_name" ] || die "unexpected argument '$1'"; _new_name="$1" ;;
+        esac
+        shift
+    done
+
+    [ -n "$_new_name" ] || die "usage: agent-profile new <name> [--agent NAME] [--root PATH] [--app-data PATH]"
+    valid_name "$_new_name" || die "invalid profile name '$_new_name' (letters, digits, dash and underscore only)"
+    is_known_agent "$_new_agent" || die "unknown agent '$_new_agent' (known: $KNOWN_AGENTS)"
+
+    [ -n "$_new_root" ] || _new_root="$HOME/$(agent_def "$_new_agent" root_prefix)$_new_name"
+    if [ -z "$_new_appdata" ]; then
+        _new_appdata="$(agent_def "$_new_agent" app_support)/$(agent_def "$_new_agent" app_prefix)$(capitalize "$_new_name")"
+    fi
+
+    # Idempotent, but never silently relocates: moving a root invalidates its
+    # login, because credentials are keyed to the root path.
+    if profile_exists "$_new_name"; then
+        _new_have_root=$(reg_get "$_new_name" root)
+        if [ "$_new_have_root" != "$_new_root" ]; then
+            die "profile '$_new_name' is already registered with root '$_new_have_root'.
+Refusing to repoint it: credentials are keyed to the root path, so changing it
+would invalidate that profile's login. Remove $(reg_file "$_new_name") by hand
+if you really mean to start over."
+        fi
+        printf 'Profile %s is already registered.\n' "$_new_name"
+    fi
+
+    # The root is created empty. Nothing is copied or seeded into it, ever.
+    mkdir -p "$_new_root" || die "could not create root '$_new_root'"
+    chmod 700 "$_new_root" || die "could not chmod 700 '$_new_root'"
+    mkdir -p "$_new_appdata" || die "could not create app data dir '$_new_appdata'"
+    mkdir -p "$AGENT_PROFILE_REGISTRY" || die "could not create registry '$AGENT_PROFILE_REGISTRY'"
+
+    if ! profile_exists "$_new_name"; then
+        {
+            printf 'agent=%s\n' "$_new_agent"
+            printf 'root=%s\n' "$_new_root"
+            printf 'app_data=%s\n' "$_new_appdata"
+            printf 'created=%s\n' "$(date +%Y-%m-%d)"
+        } > "$(reg_file "$_new_name")" || die "could not write registry entry"
+        printf 'Created profile %s\n' "$_new_name"
+    fi
+
+    printf '  agent     %s\n' "$_new_agent"
+    printf '  root      %s\n' "$_new_root"
+    printf '  app data  %s\n' "$_new_appdata"
+    printf '\n'
+    printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
+    printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
+    printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
+    printf '\n'
+    printf 'Next: agent-profile run %s   (it will ask you to log in)\n' "$_new_name"
+}
+
+# ---------------------------------------------------------------------------
+# Account identity
+#
+# One python3 invocation for all roots rather than one per profile. The key is
+# oauthAccount in the agent's state file; organizationUuid discriminates
+# accounts at different organisations more reliably than the email does.
+# ---------------------------------------------------------------------------
+
+# read_accounts <state_basename> <root>...
+# Emits: root<TAB>email<TAB>organizationUuid
+read_accounts() {
+    python3 - "$@" <<'PY'
+import json, os, sys
+
+state_base = sys.argv[1]
+for root in sys.argv[2:]:
+    path = os.path.join(root, state_base)
+    email = org = ""
+    if os.path.isfile(path):
+        try:
+            with open(path) as fh:
+                data = json.load(fh)
+            account = data.get("oauthAccount") or {}
+            email = account.get("emailAddress") or ""
+            org = account.get("organizationUuid") or ""
+        except Exception:
+            email = "<unreadable>"
+    print("\t".join([root, email, org]))
+PY
+}
+
+# ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+cmd_list() {
+    need python3
+    _list_names=$(profile_names)
+    if [ -z "$_list_names" ]; then
+        printf 'No profiles registered.\n\n'
+        printf 'Create one:  agent-profile new <name>\n'
+        return 0
+    fi
+
+    # Group roots by agent so read_accounts runs once per agent, not once per
+    # profile. Roots can contain spaces, so they go through an array.
+    for _list_agent in $KNOWN_AGENTS; do
+        _list_roots=()
+        for _list_name in $_list_names; do
+            [ "$(reg_get "$_list_name" agent)" = "$_list_agent" ] || continue
+            _list_roots[${#_list_roots[@]}]=$(reg_get "$_list_name" root)
+        done
+        [ ${#_list_roots[@]} -gt 0 ] || continue
+
+        _list_state=$(agent_def "$_list_agent" state_base)
+        _list_accounts=$(read_accounts "$_list_state" "${_list_roots[@]}")
+
+        for _list_name in $_list_names; do
+            [ "$(reg_get "$_list_name" agent)" = "$_list_agent" ] || continue
+            _list_root=$(reg_get "$_list_name" root)
+            _list_line=$(printf '%s\n' "$_list_accounts" | awk -F'\t' -v r="$_list_root" '$1==r {print; exit}')
+            _list_email=$(printf '%s' "$_list_line" | cut -f2)
+            _list_org=$(printf '%s' "$_list_line" | cut -f3)
+            [ -n "$_list_email" ] || _list_email="(not signed in)"
+
+            printf '%s\n' "$_list_name"
+            printf '  agent     %s\n' "$_list_agent"
+            printf '  root      %s' "$_list_root"
+            [ -d "$_list_root" ] || printf '   MISSING'
+            printf '\n'
+            printf '  account   %s\n' "$_list_email"
+            [ -n "$_list_org" ] && printf '  org       %s\n' "$_list_org"
+            printf '  sessions  %s\n' "$(session_count "$_list_root")"
+            printf '\n'
+        done
+    done
+}
+
+# ---------------------------------------------------------------------------
+# run, shell, env, path
+# ---------------------------------------------------------------------------
+
+cmd_run() {
+    [ $# -ge 1 ] || die "usage: agent-profile run <profile> [args...]"
+    _run_name="$1"; shift
+    require_profile "$_run_name"
+    _run_agent=$(profile_agent "$_run_name")
+    _run_root=$(profile_root "$_run_name")
+    _run_bin=$(agent_def "$_run_agent" binary)
+    [ -n "$AGENT_PROFILE_DRY_RUN" ] || command -v "$_run_bin" >/dev/null 2>&1 || \
+        die "the '$_run_bin' command is not on your PATH"
+    run_pinned "$_run_agent" "$_run_root" "$_run_bin" "$@"
+}
+
+cmd_shell() {
+    [ $# -ge 1 ] || die "usage: agent-profile shell <profile>"
+    require_profile "$1"
+    _sh_agent=$(profile_agent "$1")
+    _sh_root=$(profile_root "$1")
+    _sh_shell="${SHELL:-/bin/bash}"
+    printf 'Pinned to %s. Type exit to leave.\n' "$1" >&2
+    run_pinned "$_sh_agent" "$_sh_root" "$_sh_shell"
+}
+
+cmd_env() {
+    [ $# -ge 1 ] || die "usage: eval \"\$(agent-profile env <profile>)\""
+    require_profile "$1"
+    _env_agent=$(profile_agent "$1")
+    _env_root=$(profile_root "$1")
+    printf 'export %s=%s\n' "$(agent_def "$_env_agent" envvar)" "$_env_root"
+}
+
+cmd_path() {
+    [ $# -ge 1 ] || die "usage: agent-profile path <profile>"
+    require_profile "$1"
+    profile_root "$1"
+}
+
+# ---------------------------------------------------------------------------
+# which
+#
+# Reports the profile the current shell is pinned to, derived from the pinned
+# root rather than from anything stored. --label prints the bare label, which
+# is what a shell prompt should call.
+# ---------------------------------------------------------------------------
+
+cmd_which() {
+    _wh_label_only=""
+    [ "${1:-}" = "--label" ] && _wh_label_only=1
+
+    for _wh_agent in $KNOWN_AGENTS; do
+        _wh_var=$(agent_def "$_wh_agent" envvar)
+        eval "_wh_root=\${$_wh_var:-}"
+        [ -n "$_wh_root" ] || continue
+
+        _wh_label=$(label_for_root "$_wh_agent" "$_wh_root")
+        if [ -n "$_wh_label_only" ]; then
+            printf '%s\n' "$_wh_label"
+            return 0
+        fi
+
+        # Name the registered profile if one claims this root, but the label
+        # above is derived from the root either way.
+        _wh_named=""
+        for _wh_name in $(profile_names); do
+            if [ "$(reg_get "$_wh_name" root)" = "$_wh_root" ]; then
+                _wh_named="$_wh_name"
+                break
+            fi
+        done
+
+        printf 'Pinned to %s\n' "$_wh_label"
+        printf '  agent     %s\n' "$_wh_agent"
+        printf '  %s=%s\n' "$_wh_var" "$_wh_root"
+        if [ -n "$_wh_named" ]; then
+            printf '  profile   %s\n' "$_wh_named"
+        else
+            printf '  profile   (not registered; no registry entry claims this root)\n'
+        fi
+        return 0
+    done
+
+    if [ -n "$_wh_label_only" ]; then
+        return 1
+    fi
+    printf 'Not pinned to any profile.\n'
+    printf '\n'
+    printf 'This shell has none of these set: '
+    for _wh_agent in $KNOWN_AGENTS; do
+        printf '%s ' "$(agent_def "$_wh_agent" envvar)"
+    done
+    printf '\n'
+    printf 'Anything you run here writes to the default root, which is what agent-profile\n'
+    printf 'doctor reports as a leak. Pin with: eval "$(agent-profile env <profile>)"\n'
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# doctor, verify, explain — implemented in the commits that follow
+# ---------------------------------------------------------------------------
+
+cmd_doctor()  { die "doctor is not implemented yet"; }
+cmd_verify()  { die "verify is not implemented yet"; }
+cmd_explain() { die "explain is not implemented yet"; }
+
+# ---------------------------------------------------------------------------
+# version, help
+# ---------------------------------------------------------------------------
+
+cmd_version() {
+    printf 'agent-profile %s\n' "$AGENT_PROFILE_VERSION"
+}
+
+cmd_help() {
+    cat <<'HELP'
+agent-profile — Agent Profile Manager
+
+Keeps several agent accounts separate on one machine by giving each its own
+config root, and audits that the separation actually holds.
+
+USAGE
+  agent-profile <command> [arguments]
+
+PROFILES
+  new <name> [--agent NAME] [--root PATH] [--app-data PATH]
+                          Create an empty config root, an app data dir and a
+                          registry entry. Safe to run twice.
+  list                    Every profile with its root, account and session count.
+
+PINNED EXECUTION
+  run <name> [args...]    Run the agent's CLI pinned to a profile.
+  shell <name>            Open an interactive subshell pinned to a profile.
+  env <name>              Print exports. Use: eval "$(agent-profile env work)"
+  path <name>             Print a profile's config root.
+  which [--label]         Which profile this shell is pinned to, if any.
+
+AUDIT
+  doctor                  Check that the profiles are actually isolated.
+  verify                  Re-check the behavioural assumptions this tool rests on.
+  explain                 Explain the scheme and where each profile's data lives.
+
+OTHER
+  version, help
+
+EXIT CODES
+  0  success, nothing to report
+  1  usage error, unknown profile or agent, missing dependency
+  2  doctor found an isolation problem
+  3  verify found an assumption that no longer holds
+  4  verify could not check something it wanted to check
+
+Nothing is ever shared, copied or symlinked between two config roots.
+HELP
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+main() {
+    [ $# -ge 1 ] || { cmd_help; exit "$EX_ERR"; }
+    _main_cmd="$1"; shift
+    case "$_main_cmd" in
+        new)      cmd_new "$@" ;;
+        list|ls)  cmd_list "$@" ;;
+        run)      cmd_run "$@" ;;
+        shell)    cmd_shell "$@" ;;
+        env)      cmd_env "$@" ;;
+        path)     cmd_path "$@" ;;
+        which)    cmd_which "$@" ;;
+        doctor)   cmd_doctor "$@" ;;
+        verify)   cmd_verify "$@" ;;
+        explain)  cmd_explain "$@" ;;
+        version|--version|-V) cmd_version ;;
+        help|--help|-h)       cmd_help ;;
+        *)        die "unknown command '$_main_cmd' (try: agent-profile help)" ;;
+    esac
+}
+
+main "$@"
