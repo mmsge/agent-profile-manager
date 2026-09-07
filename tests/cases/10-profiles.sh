@@ -97,7 +97,38 @@ case_path_and_env() {
     HOME=$(new_home); export HOME
     "$AP" new bouvet >/dev/null 2>&1
     assert_equals "$HOME/.claude-bouvet" "$("$AP" path bouvet)" || return
-    assert_equals "export CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" "$("$AP" env bouvet)"
+    # Assert what eval produces, not the exact quoting, so the quoting can
+    # change without the test caring.
+    got=$(eval "$("$AP" env bouvet)"; printf '%s' "$CLAUDE_CONFIG_DIR")
+    assert_equals "$HOME/.claude-bouvet" "$got"
+}
+
+case_env_survives_a_space_in_the_path() {
+    # env output is fed straight to eval, and the conventional app data path
+    # under ~/Library/Application Support contains a space.
+    HOME=$(new_home); export HOME
+    "$AP" new work --root "$HOME/My Roots/claude-work" >/dev/null 2>&1
+    got=$(eval "$("$AP" env work)"; printf '%s' "$CLAUDE_CONFIG_DIR")
+    assert_equals "$HOME/My Roots/claude-work" "$got"
+}
+
+case_env_survives_an_apostrophe_in_the_path() {
+    HOME=$(new_home); export HOME
+    "$AP" new tricky --root "$HOME/markus's roots" >/dev/null 2>&1
+    got=$(eval "$("$AP" env tricky)"; printf '%s' "$CLAUDE_CONFIG_DIR")
+    assert_equals "$HOME/markus's roots" "$got"
+}
+
+case_a_spaced_root_works_end_to_end() {
+    HOME=$(new_home); export HOME
+    "$AP" new work --root "$HOME/My Roots/claude-work" >/dev/null 2>&1
+    fixture_account "$HOME/My Roots/claude-work" "m@example.com" "org-x"
+    fixture_transcript "$HOME/My Roots/claude-work" "-Users-m-dev-a" "/Users/m/dev/a"
+    assert_contains "$("$AP" list 2>&1)" "m@example.com" || return
+    out=$("$AP" doctor 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    label=$(CLAUDE_CONFIG_DIR="$HOME/My Roots/claude-work" "$AP" which --label)
+    assert_equals "claude-work" "$label"
 }
 
 case_unknown_profile_exits_1() {
@@ -128,5 +159,8 @@ run_case "new warns a fresh root has no guardrails"   case_new_warns_root_has_no
 run_case "list reports account, org and sessions"     case_list_reports_account_and_sessions
 run_case "list flags a missing root"                  case_list_flags_missing_root
 run_case "path and env print the pinned root"         case_path_and_env
+run_case "env survives a space in the path"           case_env_survives_a_space_in_the_path
+run_case "env survives an apostrophe in the path"    case_env_survives_an_apostrophe_in_the_path
+run_case "a spaced root works end to end"            case_a_spaced_root_works_end_to_end
 run_case "an unknown profile exits 1"                 case_unknown_profile_exits_1
 run_case "an unknown agent= is a hard error"          case_unknown_agent_in_registry_is_hard_error

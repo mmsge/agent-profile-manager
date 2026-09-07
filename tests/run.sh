@@ -127,6 +127,12 @@ fixture_account() {
 run_case() {
     CURRENT="$1"
     TESTS_RUN=$((TESTS_RUN + 1))
+    # A missing function must fail loudly. Without this check a typo in a case
+    # name reports ok, because nothing ran and so nothing failed.
+    if ! type "$2" >/dev/null 2>&1; then
+        fail "the case function '$2' is not defined"
+        return
+    fi
     _before="$TESTS_FAILED"
     "$2"
     [ "$TESTS_FAILED" -eq "$_before" ] && pass

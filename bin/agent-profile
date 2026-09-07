@@ -208,6 +208,13 @@ capitalize() {
     printf '%s%s\n' "$_cap_first" "$_cap_rest"
 }
 
+# shell_quote <string>: single-quote a value so it survives eval intact.
+# Paths under ~/Library/Application Support contain spaces, and env output is
+# fed straight to eval, so this is not optional.
+shell_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 valid_name() {
     case "$1" in
         ""|*[!A-Za-z0-9_-]*) return 1 ;;
@@ -400,7 +407,7 @@ cmd_env() {
     require_profile "$1"
     _env_agent=$(profile_agent "$1")
     _env_root=$(profile_root "$1")
-    printf 'export %s=%s\n' "$(agent_def "$_env_agent" envvar)" "$_env_root"
+    printf 'export %s=%s\n' "$(agent_def "$_env_agent" envvar)" "$(shell_quote "$_env_root")"
 }
 
 cmd_path() {
