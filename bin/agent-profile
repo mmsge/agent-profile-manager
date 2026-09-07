@@ -462,12 +462,309 @@ cmd_which() {
 }
 
 # ---------------------------------------------------------------------------
-# doctor, verify, explain — implemented in the commits that follow
+# Project paths
+#
+# Claude Code names a project directory after the working directory with every
+# non-alphanumeric character replaced by "-", truncating and hashing past 200
+# characters, and CLAUDE_CODE_PROJECT_DIR_NAME can override the name outright.
+# That encoding is not reversible, so never try. Each transcript records its
+# own cwd as an absolute path; read that instead.
+#
+# One python3 pass over every root, stopping at the first record that carries a
+# cwd in each transcript.
 # ---------------------------------------------------------------------------
 
-cmd_doctor()  { die "doctor is not implemented yet"; }
-cmd_verify()  { die "verify is not implemented yet"; }
-cmd_explain() { die "explain is not implemented yet"; }
+# read_project_cwds <root>...
+# Emits: root<TAB>cwd
+read_project_cwds() {
+    python3 - "$@" <<'PY'
+import json, os, sys
+
+for root in sys.argv[1:]:
+    projects = os.path.join(root, "projects")
+    if not os.path.isdir(projects):
+        continue
+    for dirpath, _dirnames, filenames in os.walk(projects):
+        for name in filenames:
+            if not name.endswith(".jsonl"):
+                continue
+            try:
+                with open(os.path.join(dirpath, name), errors="replace") as fh:
+                    for line in fh:
+                        if '"cwd"' not in line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        cwd = record.get("cwd")
+                        if cwd:
+                            print("\t".join([root, cwd]))
+                            break
+            except OSError:
+                continue
+PY
+}
+
+# dir_mode <path> — BSD stat on macOS, GNU stat elsewhere.
+#
+# Cannot be a plain "try one, fall back on failure": GNU stat -f succeeds and
+# reports the filesystem rather than failing, so check the shape of the answer.
+dir_mode() {
+    _dm=$(stat -f '%Lp' "$1" 2>/dev/null)
+    case "$_dm" in
+        ''|*[!0-9]*) _dm=$(stat -c '%a' "$1" 2>/dev/null) ;;
+    esac
+    case "$_dm" in
+        ''|*[!0-9]*) _dm="" ;;
+    esac
+    printf '%s\n' "$_dm"
+}
+
+# ---------------------------------------------------------------------------
+# doctor
+#
+# The isolation audit. Every finding names the offender and the rule that found
+# it. Exits EX_FINDINGS when anything is found, so this is usable from cron or
+# a shell hook.
+# ---------------------------------------------------------------------------
+
+DOCTOR_FINDINGS=0
+
+finding() {
+    DOCTOR_FINDINGS=$((DOCTOR_FINDINGS + 1))
+    printf '%s  %s\n' "$1" "$2"
+    shift 2
+    for _f_line in "$@"; do
+        printf '     %s\n' "$_f_line"
+    done
+    printf '\n'
+}
+
+cmd_doctor() {
+    need python3
+    DOCTOR_FINDINGS=0
+    _doc_names=$(profile_names)
+
+    # ---- D04, D05, D07, D08: per registered profile -----------------------
+    _doc_roots=()
+    for _doc_name in $_doc_names; do
+        _doc_agent=$(profile_agent "$_doc_name")
+        _doc_root=$(profile_root "$_doc_name")
+
+        if [ ! -d "$_doc_root" ]; then
+            finding "D04" "profile '$_doc_name' has a registered root that does not exist" \
+                "$_doc_root" \
+                "Either the root was moved or deleted, or the registry entry is wrong." \
+                "Moving a root invalidates its login, so recreate rather than repoint."
+            continue
+        fi
+
+        _doc_roots[${#_doc_roots[@]}]="$_doc_root"
+
+        _doc_mode=$(dir_mode "$_doc_root")
+        if [ -n "$_doc_mode" ] && [ "$_doc_mode" != "700" ]; then
+            finding "D07" "profile '$_doc_name' root is mode $_doc_mode, not 700" \
+                "$_doc_root" \
+                "Fix with: chmod 700 '$_doc_root'"
+        fi
+
+        # D05. A missing credential file is not proof on macOS, where the
+        # credential lives in the Keychain instead. Only report when the root
+        # also has no signed-in account recorded, which means genuinely not
+        # logged in rather than logged in via the Keychain.
+        _doc_state="$_doc_root/$(agent_def "$_doc_agent" state_base)"
+        if [ ! -f "$_doc_root/.credentials.json" ]; then
+            _doc_acct=$(read_accounts "$(agent_def "$_doc_agent" state_base)" "$_doc_root" | cut -f2)
+            if [ -z "$_doc_acct" ] || [ "$_doc_acct" = "<unreadable>" ]; then
+                finding "D05" "profile '$_doc_name' has no credential and no signed-in account" \
+                    "$_doc_root" \
+                    "No .credentials.json and no oauthAccount in $_doc_state." \
+                    "Sign in with: agent-profile run $_doc_name" \
+                    "The Keychain entry name for a non-default root is unverified;" \
+                    "see docs/FACTS.md question 3."
+            fi
+        fi
+
+        # D08. An encoded project directory always begins with "-", because the
+        # working directory is absolute and "/" encodes to "-". Anything else
+        # means CLAUDE_CODE_PROJECT_DIR_NAME named it, so nothing about the name
+        # says where the project is.
+        if [ -d "$_doc_root/projects" ]; then
+            for _doc_pdir in "$_doc_root/projects"/*; do
+                [ -d "$_doc_pdir" ] || continue
+                _doc_pbase=${_doc_pdir##*/}
+                case "$_doc_pbase" in
+                    -*) ;;
+                    *)  finding "D08" "profile '$_doc_name' has a project directory that is not an encoded path" \
+                            "$_doc_pdir" \
+                            "CLAUDE_CODE_PROJECT_DIR_NAME was probably used for this session." \
+                            "Nothing is wrong with the data, but the directory name says nothing" \
+                            "about where the project lives. The cwd checks below still hold." ;;
+                esac
+            done
+        fi
+    done
+
+    # ---- D01, D02: something ran unpinned ---------------------------------
+    for _doc_agent in $KNOWN_AGENTS; do
+        _doc_default=$(agent_def "$_doc_agent" default_root)
+        _doc_claimed=""
+        for _doc_name in $_doc_names; do
+            [ "$(reg_get "$_doc_name" root)" = "$_doc_default" ] && _doc_claimed="$_doc_name"
+        done
+
+        if [ -d "$_doc_default" ] && [ -z "$_doc_claimed" ]; then
+            _doc_sessions=$(session_count "$_doc_default")
+            if [ "$_doc_sessions" -gt 0 ]; then
+                finding "D01" "the default $_doc_agent root holds $_doc_sessions session(s)" \
+                    "$_doc_default" \
+                    "Something ran without a profile pinned and wrote here." \
+                    "Note that pinning to the default root is not the same as not pinning:" \
+                    "the state file moves inside the root when the variable is set."
+            fi
+        fi
+
+        _doc_state=$(agent_def "$_doc_agent" state_file)
+        if [ -f "$_doc_state" ] && [ -n "$_doc_names" ] && [ -z "$_doc_claimed" ]; then
+            finding "D02" "a stray $_doc_agent state file sits outside every profile root" \
+                "$_doc_state" \
+                "This file is written when nothing is pinned. It holds an account," \
+                "per-project trust decisions and personal MCP servers for whichever" \
+                "account last ran unpinned."
+        fi
+    done
+
+    # ---- D06: an unregistered root ----------------------------------------
+    for _doc_agent in $KNOWN_AGENTS; do
+        _doc_prefix=$(agent_def "$_doc_agent" root_prefix)
+        for _doc_cand in "$HOME/$_doc_prefix"*; do
+            [ -d "$_doc_cand" ] || continue
+            _doc_known=""
+            for _doc_name in $_doc_names; do
+                [ "$(reg_get "$_doc_name" root)" = "$_doc_cand" ] && _doc_known=1
+            done
+            [ -n "$_doc_known" ] && continue
+            finding "D06" "a $_doc_agent config root exists that no profile claims" \
+                "$_doc_cand" \
+                "Register it, or remove it if it is left over." \
+                "Unregistered roots are invisible to every other check here."
+        done
+    done
+
+    # ---- D03: the same project under two roots ----------------------------
+    #
+    # This is the check that replaces a hand-maintained list of path prefixes
+    # per profile. It needs no configuration, so it cannot go stale and cannot
+    # pass quietly because nothing was declared.
+    if [ ${#_doc_roots[@]} -gt 0 ]; then
+        _doc_tmp="${TMPDIR:-/tmp}/agent-profile-d03.$$"
+        read_project_cwds "${_doc_roots[@]}" | sed '/^$/d' | sort -u | \
+            awk -F'\t' '
+                { count[$2]++; roots[$2] = roots[$2] sep[$2] $1; sep[$2] = ", " }
+                END { for (c in count) if (count[c] > 1) printf "%s\t%s\n", c, roots[c] }
+            ' | sort > "$_doc_tmp"
+
+        # Read from a file, not a pipe: a pipeline runs the loop in a subshell
+        # and the finding count would not survive it.
+        while IFS="$(printf '\t')" read -r _doc_cwd _doc_where; do
+            [ -n "$_doc_cwd" ] || continue
+            finding "D03" "the same project has sessions under more than one root" \
+                "$_doc_cwd" \
+                "found under: $_doc_where" \
+                "One of these accounts has worked in the other's project."
+        done < "$_doc_tmp"
+        rm -f "$_doc_tmp"
+    fi
+
+    # ---- Summary -----------------------------------------------------------
+    if [ "$DOCTOR_FINDINGS" -eq 0 ]; then
+        if [ -z "$_doc_names" ]; then
+            printf 'No profiles registered, so there is nothing to audit.\n'
+            printf 'Create one:  agent-profile new <name>\n'
+            return "$EX_OK"
+        fi
+        printf 'No isolation problems found across %s profile(s).\n' "$(printf '%s\n' "$_doc_names" | wc -l | tr -d ' ')"
+        return "$EX_OK"
+    fi
+
+    printf '%s finding(s).\n' "$DOCTOR_FINDINGS"
+    return "$EX_FINDINGS"
+}
+# ---------------------------------------------------------------------------
+# explain
+#
+# For the reader who set this up months ago and has forgotten the details,
+# possibly after an update that changed them. States the scheme in plain
+# language and shows where this machine's data actually lives right now.
+# ---------------------------------------------------------------------------
+
+cmd_explain() {
+    cat <<'PROSE'
+THE SCHEME
+
+A profile is one account, kept apart from every other account by giving it its
+own config root. The root is chosen by an environment variable, and everything
+the agent stores goes under it: settings, session transcripts, auto memory,
+commands, skills, agents, plugins, plans, backups, the credential and the state
+file. Two profiles therefore share no file at all.
+
+Credentials are keyed to the root path. That is what makes separate roots give
+genuinely separate logins, and it is also why a root can never be moved or
+renamed: doing so invalidates its login. Create a new profile instead.
+
+Pinning to the default root is not the same as not pinning. When the variable
+is set, the state file moves inside the root, so the two produce different
+layouts. Anything that runs with nothing pinned writes to the default root,
+which is exactly what doctor reports.
+
+NOTHING IS SHARED
+
+No symlinks, no shared parent, no copied settings, no seeding a new root from an
+old one, no template. A new root is empty. That means it also has none of the
+hooks or guardrails your other profiles have, and the fix for that is to set
+them up in the new root directly, never to copy them across.
+
+WHAT THIS TOOL STORES
+
+Only the registry, at the path shown below, outside every config root. One
+plain key=value file per profile holding the agent, the root, the app data
+directory and the creation date. Nothing else. The label you see in a prompt is
+derived from the pinned root every time it is needed, so it cannot drift away
+from the root it names.
+
+The tool never reads, writes or moves a credential, never edits the agent's own
+state files, and never migrates data between roots.
+
+PROSE
+
+    printf 'ON THIS MACHINE\n\n'
+    printf '  registry    %s\n' "$AGENT_PROFILE_REGISTRY"
+    for _ex_agent in $KNOWN_AGENTS; do
+        printf '\n  %s\n' "$_ex_agent"
+        printf '    variable       %s\n' "$(agent_def "$_ex_agent" envvar)"
+        printf '    binary         %s\n' "$(agent_def "$_ex_agent" binary)"
+        printf '    default root   %s\n' "$(agent_def "$_ex_agent" default_root)"
+        printf '    unpinned state %s\n' "$(agent_def "$_ex_agent" state_file)"
+    done
+
+    printf '\n  profiles\n'
+    _ex_names=$(profile_names)
+    if [ -z "$_ex_names" ]; then
+        printf '    (none registered)\n'
+    else
+        for _ex_name in $_ex_names; do
+            printf '    %-12s %s\n' "$_ex_name" "$(reg_get "$_ex_name" root)"
+            printf '    %-12s %s\n' "" "$(reg_get "$_ex_name" app_data)"
+        done
+    fi
+
+    printf '\nAFTER AN AGENT UPDATE\n\n'
+    printf '  Run: agent-profile verify\n'
+    printf '  It re-checks the behavioural assumptions this tool rests on and says\n'
+    printf '  which it could not check. The answers and their evidence are recorded\n'
+    printf '  in docs/FACTS.md in the repository.\n'
+}
 
 # ---------------------------------------------------------------------------
 # version, help
