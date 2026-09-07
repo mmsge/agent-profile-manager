@@ -43,10 +43,30 @@ edits the agent's own state files, and never migrates data between roots.
 
 ## Install
 
-Put `bin/agent-profile` somewhere on your `PATH`:
+```sh
+tools/install.sh
+```
+
+Links both `agpin` and `agent-profile` into the first writable of
+`~/.local/bin` or `/usr/local/bin`. `--prefix DIR` chooses somewhere else,
+`--name NAME` a different short name, `--uninstall` removes only the links it
+made. It symlinks rather than copies, so `git pull` updates the installed
+command and there is never a second copy to drift.
+
+It is idempotent and says which of "installed" and "already installed"
+happened, and it warns when the prefix is not on your `PATH` rather than
+leaving you with a command nothing can find.
+
+**The tool names itself by whichever name you invoke.** Run it as `agpin` and
+every message, error and suggested fix says `agpin`. That matters because a
+finding telling you to run a command not on your `PATH` is worse than no
+suggestion at all.
+
+Two lines worth adding to your shell rc file:
 
 ```sh
-ln -s "$PWD/bin/agent-profile" /usr/local/bin/agent-profile
+eval "$(agpin guard)"
+PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
 ```
 
 No dependencies beyond a stock macOS. It is one bash script, written to bash
@@ -65,6 +85,7 @@ agent-profile list                # every profile, its account and session count
 agent-profile doctor              # is the separation actually holding?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
+eval "$(agent-profile guard)"     # refuse to run the agent unpinned
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -96,6 +117,24 @@ indistinguishable from that profile's own work. D02 and D03 become the only
 rules still watching unpinned use, and moving the root to recover D01 is not an
 option because that invalidates the login. The real guard is never running the
 agent unpinned at all.
+
+### Refusing to run unpinned
+
+```sh
+eval "$(agpin guard)"
+```
+
+This is the only real mitigation for the one hole the audit cannot close. An
+unpinned run writes to the default root, and if a profile owns that root,
+`doctor` can no longer tell the two apart. Stopping the run is what is left.
+
+The function refuses, names the profiles you have, and shows how to pin. An
+explicit `command claude` still works, because an escape hatch you can see
+beats one people find by deleting the guard from their rc file.
+
+It is printed rather than installed, and re-derived on every shell start, for
+the same reason the prompt label is: a copy in a dotfile drifts from the tool,
+and this one would drift silently.
 
 ### A prompt that cannot lie
 
@@ -355,7 +394,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 120 tests, no dependencies
+tests/run.sh              # 135 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

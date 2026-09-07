@@ -10,7 +10,15 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.3.2"
+AGENT_PROFILE_VERSION="0.4.0"
+
+# The name this was invoked as. Every message names the command the reader
+# actually typed, so an install under a short name never tells them to run
+# something that is not on their PATH. Falls back when $0 is not a plain name.
+SELF="${0##*/}"
+case "$SELF" in
+    ''|*[!A-Za-z0-9_.-]*) SELF="agent-profile" ;;
+esac
 
 # The agent version docs/FACTS.md was last checked against.
 AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
@@ -114,12 +122,12 @@ is_known_agent() {
 # ---------------------------------------------------------------------------
 
 die() {
-    printf 'agent-profile: %s\n' "$*" >&2
+    printf '%s: %s\n' "$SELF" "$*" >&2
     exit "$EX_ERR"
 }
 
 warn() {
-    printf 'agent-profile: %s\n' "$*" >&2
+    printf '%s: %s\n' "$SELF" "$*" >&2
 }
 
 need() {
@@ -163,7 +171,7 @@ profile_names() {
 # profile whose agent is unknown. Falling back to a default agent would be the
 # worst possible failure here: it would pin the wrong tool at the wrong root.
 require_profile() {
-    profile_exists "$1" || die "no such profile '$1' (try: agent-profile list)"
+    profile_exists "$1" || die "no such profile '$1' (try: $SELF list)"
     profile_agent "$1" >/dev/null
 }
 
@@ -359,7 +367,7 @@ cmd_new() {
         shift
     done
 
-    [ -n "$_new_name" ] || die "usage: agent-profile new <name> [--agent NAME] [--root PATH] [--app-data PATH]"
+    [ -n "$_new_name" ] || die "usage: $SELF new <name> [--agent NAME] [--root PATH] [--app-data PATH]"
     valid_name "$_new_name" || die "invalid profile name '$_new_name' (letters, digits, dash and underscore only)"
     is_known_agent "$_new_agent" || die "unknown agent '$_new_agent' (known: $KNOWN_AGENTS)"
 
@@ -439,14 +447,14 @@ if you really mean to start over."
             printf 'The one change: mode %s became 700, which is what doctor D07 wants.\n' "$_new_had_mode"
         fi
         printf '\n'
-        printf 'Next: agent-profile list      (check it reports the account you expect)\n'
-        printf '      agent-profile doctor    (audit the isolation)\n'
+        printf 'Next: %s list      (check it reports the account you expect)\n' "$SELF"
+        printf '      %s doctor    (audit the isolation)\n' "$SELF"
     else
         printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
         printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
         printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
         printf '\n'
-        printf 'Next: agent-profile run %s   (it will ask you to log in)\n' "$_new_name"
+        printf 'Next: %s run %s   (it will ask you to log in)\n' "$SELF" "$_new_name"
     fi
 
     # A profile at the default root costs the audit a rule, permanently, and
@@ -587,7 +595,7 @@ cmd_list() {
     _list_names=$(profile_names)
     if [ -z "$_list_names" ]; then
         printf 'No profiles registered.\n\n'
-        printf 'Create one:  agent-profile new <name>\n'
+        printf 'Create one:  %s new <name>\n' "$SELF"
         return 0
     fi
 
@@ -630,7 +638,7 @@ cmd_list() {
 # ---------------------------------------------------------------------------
 
 cmd_run() {
-    [ $# -ge 1 ] || die "usage: agent-profile run <profile> [args...]"
+    [ $# -ge 1 ] || die "usage: $SELF run <profile> [args...]"
     _run_name="$1"; shift
     require_profile "$_run_name"
     _run_agent=$(profile_agent "$_run_name")
@@ -642,7 +650,7 @@ cmd_run() {
 }
 
 cmd_shell() {
-    [ $# -ge 1 ] || die "usage: agent-profile shell <profile>"
+    [ $# -ge 1 ] || die "usage: $SELF shell <profile>"
     require_profile "$1"
     _sh_agent=$(profile_agent "$1")
     _sh_root=$(profile_root "$1")
@@ -652,7 +660,7 @@ cmd_shell() {
 }
 
 cmd_env() {
-    [ $# -ge 1 ] || die "usage: eval \"\$(agent-profile env <profile>)\""
+    [ $# -ge 1 ] || die "usage: eval \"\$($SELF env <profile>)\""
     require_profile "$1"
     _env_agent=$(profile_agent "$1")
     _env_root=$(profile_root "$1")
@@ -660,7 +668,7 @@ cmd_env() {
 }
 
 cmd_path() {
-    [ $# -ge 1 ] || die "usage: agent-profile path <profile>"
+    [ $# -ge 1 ] || die "usage: $SELF path <profile>"
     require_profile "$1"
     profile_root "$1"
 }
@@ -719,9 +727,9 @@ cmd_which() {
         printf '%s ' "$(agent_def "$_wh_agent" envvar)"
     done
     printf '\n'
-    printf 'Anything you run here writes to the default root, which is what agent-profile\n'
+    printf 'Anything you run here writes to the default root, which is what %s\n' "$SELF"
     # shellcheck disable=SC2016  # literal help text; the user types this
-    printf 'doctor reports as a leak. Pin with: eval "$(agent-profile env <profile>)"\n'
+    printf 'doctor reports as a leak. Pin with: eval "$(%s env <profile>)"\n' "$SELF"
     return 0
 }
 
@@ -954,7 +962,7 @@ applet_write() {
         mkdir -p "$(dirname "$_aw_applet")" || die "could not create $(dirname "$_aw_applet")"
         osacompile \
             -e "-- agent-profile: launches the desktop app pinned to profile \"$_aw_name\"." \
-            -e "-- Generated. To change or repair it: agent-profile app $_aw_name" \
+            -e "-- Generated. To change or repair it: $SELF app $_aw_name" \
             -e "-- Why open --env and not a wrapper script: docs/FACTS.md F13, F14, F15." \
             -e "$_aw_line" \
             -o "$_aw_applet" || die "osacompile could not create $_aw_applet"
@@ -971,7 +979,7 @@ Refusing to overwrite it. Remove it, or pass --applet with another path."
     mkdir -p "$_aw_tmp" || die "could not create $_aw_tmp"
     osacompile \
         -e "-- agent-profile: launches the desktop app pinned to profile \"$_aw_name\"." \
-        -e "-- Generated. To change or repair it: agent-profile app $_aw_name" \
+        -e "-- Generated. To change or repair it: $SELF app $_aw_name" \
         -e "-- Why open --env and not a wrapper script: docs/FACTS.md F13, F14, F15." \
         -e "$_aw_line" \
         -o "$_aw_tmp/applet.app" || { rm -rf "$_aw_tmp"; die "osacompile failed"; }
@@ -1036,7 +1044,7 @@ applet_set_icon() {
 # ---------------------------------------------------------------------------
 
 cmd_desktop() {
-    [ $# -ge 1 ] || die "usage: agent-profile desktop <profile> [open args...]"
+    [ $# -ge 1 ] || die "usage: $SELF desktop <profile> [open args...]"
     _dk_name="$1"; shift
     require_profile "$_dk_name"
     _dk_agent=$(profile_agent "$_dk_name")
@@ -1080,7 +1088,7 @@ cmd_app() {
         shift
     done
 
-    [ -n "$_ap_name" ] || die "usage: agent-profile app <profile> [--applet PATH] [--icon PNG]"
+    [ -n "$_ap_name" ] || die "usage: $SELF app <profile> [--applet PATH] [--icon PNG]"
     require_profile "$_ap_name"
     _ap_agent=$(profile_agent "$_ap_name")
     _ap_root=$(profile_root "$_ap_name")
@@ -1324,7 +1332,7 @@ cmd_doctor() {
                 finding "D05" "profile '$_doc_name' has no credential" \
                     "$_doc_root" \
                     "No Keychain entry '$_doc_service' and no .credentials.json." \
-                    "Sign in with: agent-profile run $_doc_name"
+                    "Sign in with: $SELF run $_doc_name"
             fi
         elif [ ! -f "$_doc_root/.credentials.json" ]; then
             # No Keychain to ask, so fall back to whether an account is on
@@ -1335,7 +1343,7 @@ cmd_doctor() {
                     "$_doc_root" \
                     "No .credentials.json and no account on record." \
                     "There is no Keychain on this system, so this check is weaker than on macOS." \
-                    "Sign in with: agent-profile run $_doc_name"
+                    "Sign in with: $SELF run $_doc_name"
             fi
         fi
 
@@ -1385,7 +1393,7 @@ cmd_doctor() {
                     "The desktop app takes its config root from its process environment," \
                     "and open --env is what puts it there. Note that the app's own login" \
                     "can be right while its sessions write somewhere else entirely." \
-                    "Fix with: agent-profile app $_doc_name" ;;
+                    "Fix with: $SELF app $_doc_name" ;;
         esac
     done
 
@@ -1522,13 +1530,13 @@ cmd_doctor() {
                     "It pins $_doc_pins, which profile '$_doc_owner' owns, but no profile" \
                     "names this applet, so the launcher audit has never read it." \
                     "An unregistered launcher is invisible to every other check here." \
-                    "Fix with: agent-profile app $_doc_owner --applet '$_doc_applet'"
+                    "Fix with: $SELF app $_doc_owner --applet '$_doc_applet'"
             else
                 finding "D14" "a $_doc_agent desktop launcher exists that no profile claims" \
                     "$_doc_applet" \
                     "It pins ${_doc_pins:-(no root this tool could read)}, which no registered" \
-                    "profile owns. Register that root first with agent-profile new," \
-                    "then point a profile at this launcher with agent-profile app --applet." \
+                    "profile owns. Register that root first with $SELF new," \
+                    "then point a profile at this launcher with $SELF app --applet." \
                     "Until then nothing here audits what it launches."
             fi
         done < "$_doc_scan"
@@ -1626,7 +1634,7 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     if [ "$DOCTOR_FINDINGS" -eq 0 ]; then
         if [ -z "$_doc_names" ]; then
             printf 'No profiles registered, so there is nothing to audit.\n'
-            printf 'Create one:  agent-profile new <name>\n'
+            printf 'Create one:  %s new <name>\n' "$SELF"
             return "$EX_OK"
         fi
         printf 'No isolation problems found across %s profile(s).\n' "$(printf '%s\n' "$_doc_names" | wc -l | tr -d ' ')"
@@ -1745,7 +1753,7 @@ cmd_verify() {
     VERIFY_BROKEN=0
     VERIFY_UNCHECKED=0
 
-    printf 'Checking the assumptions agent-profile rests on.\n'
+    printf 'Checking the assumptions %s rests on.\n' "$SELF"
     printf 'Full record and evidence: docs/FACTS.md\n\n'
 
     # ---- Agent version drift ----------------------------------------------
@@ -1783,7 +1791,7 @@ cmd_verify() {
         if [ -z "$(profile_names)" ]; then
             _ver_why="no profile is registered, so there is no root to read"
             _ver_hint="Roots already on this machine are not inspected until a profile claims one."
-            _ver_next="Register them with: agent-profile new <name> --root <path>"
+            _ver_next="Register them with: $SELF new <name> --root <path>"
         else
             _ver_why="every registered root is missing from disk"
             _ver_hint="The registry names roots that are not there, and doctor reports each as D04."
@@ -1861,7 +1869,7 @@ cmd_verify() {
         # verify says how to re-confirm it rather than pretending to.
         vnote "F01" "the desktop app does honour the config-dir variable from its environment"
         printf '                 Not checkable from here: it needs a real app launch.\n'
-        printf '                 Re-confirm with: agent-profile desktop <name>, start a Code\n'
+        printf '                 Re-confirm with: %s desktop <name>, start a Code\n' "$SELF"
         # shellcheck disable=SC2016  # literal help text; the user types this
         printf '                 session, then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3\n'
 
@@ -2058,13 +2066,13 @@ PROSE
             if [ -n "$_ex_applet" ]; then
                 printf '    %-12s launcher  %s\n' "" "$_ex_applet"
             else
-                printf '    %-12s launcher  (none; agent-profile app %s)\n' "" "$_ex_name"
+                printf '    %-12s launcher  (none; %s app %s)\n' "" "$SELF" "$_ex_name"
             fi
         done
     fi
 
     printf '\nAFTER AN AGENT UPDATE\n\n'
-    printf '  Run: agent-profile verify\n'
+    printf '  Run: %s verify\n' "$SELF"
     printf '  It re-checks the behavioural assumptions this tool rests on and says\n'
     printf '  which it could not check. The answers and their evidence are recorded\n'
     printf '  in docs/FACTS.md in the repository.\n'
@@ -2075,22 +2083,72 @@ PROSE
 }
 
 # ---------------------------------------------------------------------------
+# guard
+#
+# A shell function that refuses to run the agent unpinned. This is the only
+# real mitigation for the hole the audit cannot close: an unpinned run writes
+# to the default root, and if a profile owns that root, doctor can no longer
+# tell the two apart (docs/FACTS.md F10). Stopping the run is what is left.
+#
+# It is printed rather than installed, and derived on every shell start rather
+# than stored, for the same reason `which --label` is: a copy in a dotfile
+# drifts from the tool, and this one would drift silently.
+# ---------------------------------------------------------------------------
+
+cmd_guard() {
+    # The generated function calls back into this tool, so it needs a name that
+    # will still resolve from the user's shell. Prefer the short name when it
+    # is on PATH; fall back to this script's absolute path when it is not, so
+    # the guard is useful before the installer has been run.
+    _g_self="$SELF"
+    if ! command -v "$SELF" >/dev/null 2>&1; then
+        _g_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+        [ -n "$_g_dir" ] && _g_self="$_g_dir/${0##*/}"
+    fi
+
+    for _g_agent in $KNOWN_AGENTS; do
+        _g_bin=$(agent_def "$_g_agent" binary)
+        _g_var=$(agent_def "$_g_agent" envvar)
+        cat <<GUARD
+$_g_bin() {
+    if [ -z "\${$_g_var:-}" ]; then
+        printf '%s\\n' "Refusing to run $_g_bin unpinned." >&2
+        printf '%s\\n' "Nothing is pinned, so this would write to the default root," >&2
+        printf '%s\\n' "under whichever account last logged in there." >&2
+        printf '%s\\n' "" >&2
+        printf '%s\\n' "Profiles on this machine:" >&2
+        $_g_self list 2>/dev/null | sed -n 's/^\\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\\)\$/  \\1/p' >&2
+        printf '%s\\n' "" >&2
+        printf '%s\\n' "Pin a shell:   eval \\"\\\$($_g_self env <profile>)\\"" >&2
+        printf '%s\\n' "Or run once:   $_g_self run <profile> [args...]" >&2
+        printf '%s\\n' "Override:      command $_g_bin [args...]" >&2
+        return 1
+    fi
+    command $_g_bin "\$@"
+}
+GUARD
+    done
+}
+
+# ---------------------------------------------------------------------------
 # version, help
 # ---------------------------------------------------------------------------
 
 cmd_version() {
-    printf 'agent-profile %s\n' "$AGENT_PROFILE_VERSION"
+    printf '%s %s\n' "$SELF" "$AGENT_PROFILE_VERSION"
 }
 
 cmd_help() {
-    cat <<'HELP'
-agent-profile: Agent Profile Manager
+    # Quoted heredoc, so the literal $( ) in the help text survives. The
+    # command's own name is put back afterwards rather than expanded here.
+    cat <<'HELP' | sed "s/@SELF@/$SELF/g"
+@SELF@: Agent Profile Manager
 
 Keeps several agent accounts separate on one machine by giving each its own
 config root, and audits that the separation actually holds.
 
 USAGE
-  agent-profile <command> [arguments]
+  @SELF@ <command> [arguments]
 
 PROFILES
   new <name> [--agent NAME] [--root PATH] [--app-data PATH]
@@ -2101,7 +2159,7 @@ PROFILES
 PINNED EXECUTION
   run <name> [args...]    Run the agent's CLI pinned to a profile.
   shell <name>            Open an interactive subshell pinned to a profile.
-  env <name>              Print exports. Use: eval "$(agent-profile env work)"
+  env <name>              Print exports. Use: eval "$(@SELF@ env work)"
   path <name>             Print a profile's config root.
   which [--label]         Which profile this shell is pinned to, if any.
 
@@ -2113,6 +2171,11 @@ DESKTOP
                           and it says which of the two happened. --icon takes a
                           1024px PNG; at Dock size only a single initial and a
                           distinct colour per account are legible.
+
+SHELL
+  guard                   Print a shell function that refuses to run the agent
+                          unpinned. Add to your rc file:
+                            eval "$(@SELF@ guard)"
 
 AUDIT
   doctor                  Check that the profiles are actually isolated.
@@ -2148,6 +2211,7 @@ main() {
         env)      cmd_env "$@" ;;
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
+        guard)    cmd_guard "$@" ;;
         desktop)  cmd_desktop "$@" ;;
         app)      cmd_app "$@" ;;
         doctor)   cmd_doctor "$@" ;;
@@ -2155,7 +2219,7 @@ main() {
         explain)  cmd_explain "$@" ;;
         version|--version|-V) cmd_version ;;
         help|--help|-h)       cmd_help ;;
-        *)        die "unknown command '$_main_cmd' (try: agent-profile help)" ;;
+        *)        die "unknown command '$_main_cmd' (try: $SELF help)" ;;
     esac
 }
 
