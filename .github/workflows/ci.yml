@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    # macOS is the only supported platform, and it is the only runner that has
+    # the real bash 3.2 to test against.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # /bin/bash on macOS is 3.2, which is what the tool must run under on
+          # a machine with nothing installed.
+          - name: system bash 3.2
+            bash: /bin/bash
+          # Homebrew's bash, so a modern-bash regression is caught too.
+          - name: latest bash
+            bash: brew
+
+    name: test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install latest bash
+        if: matrix.bash == 'brew'
+        run: brew install bash
+
+      - name: Resolve the interpreter
+        id: sh
+        run: |
+          if [ "${{ matrix.bash }}" = "brew" ]; then
+            echo "path=$(brew --prefix)/bin/bash" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=/bin/bash" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report the version under test
+        run: |
+          "${{ steps.sh.outputs.path }}" --version | head -1
+
+      - name: Fail if the 3.2 job is not actually running 3.2
+        if: matrix.bash != 'brew'
+        run: |
+          v=$(/bin/bash -c 'echo "$BASH_VERSION"')
+          case "$v" in
+            3.2*) echo "confirmed bash $v" ;;
+            *) echo "expected bash 3.2 at /bin/bash, found $v"; exit 1 ;;
+          esac
+
+      - name: Syntax check
+        run: |
+          for f in bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh; do
+            "${{ steps.sh.outputs.path }}" -n "$f"
+          done
+
+      - name: Run the suite
+        run: |
+          "${{ steps.sh.outputs.path }}" tests/run.sh
+
+  lint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: brew install shellcheck
+
+      - name: shellcheck
+        run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
+
+      - name: Refuse bash 4 constructs
+        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tests/run.sh
