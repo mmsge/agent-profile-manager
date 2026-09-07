@@ -1,0 +1,133 @@
+name: Release
+
+# A tag is the release. Nothing is published from a branch, so every artifact
+# corresponds to a commit anyone can check out and rebuild.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # The same matrix branches run, called rather than copied. A release that
+  # skipped a check would be worse than no release at all.
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      # Create the release and upload its assets.
+      contents: write
+      # Mint the OIDC token cosign signs with. Keyless signing is exactly this
+      # token, exchanged for a short-lived certificate, so without it there is
+      # nothing to sign with.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag that disagrees with the version the script reports is a release
+      # nobody can reason about: 'agpin version' would name one thing and the
+      # tarball another. Fail here rather than publish that.
+      - name: Check the tag against the version in the script
+        id: v
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          reported=$(sed -n 's/^AGENT_PROFILE_VERSION="\(.*\)"$/\1/p' bin/agent-profile | head -1)
+          if [ -z "$reported" ]; then
+            echo "could not read AGENT_PROFILE_VERSION from bin/agent-profile" >&2
+            exit 1
+          fi
+          if [ "$version" != "$reported" ]; then
+            echo "tag $tag means version $version, but bin/agent-profile says $reported." >&2
+            echo "Bump AGENT_PROFILE_VERSION in the commit you tag." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tarball=agent-profile-$version.tar.gz" >> "$GITHUB_OUTPUT"
+
+      # Built with fixed ownership, fixed order and the commit's own timestamp,
+      # so anyone who checks the tag out can rebuild the tarball and get the
+      # same sha256. A checksum you cannot reproduce only proves the file did
+      # not change in transit.
+      - name: Build the tarball
+        run: |
+          set -eu
+          version="${{ steps.v.outputs.version }}"
+          stage="dist/agent-profile-$version"
+          mkdir -p "$stage"
+          cp -R bin tools docs "$stage/"
+          cp README.md "$stage/"
+          if [ -f LICENSE ]; then cp LICENSE "$stage/"; fi
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime="@$(git log -1 --format=%ct)" \
+              -czf "dist/${{ steps.v.outputs.tarball }}" -C dist "agent-profile-$version"
+          rm -rf "$stage"
+          cd dist
+          # The same two-space format 'shasum -a 256 -c' reads on macOS, which
+          # is what tools/install.sh verifies the download with.
+          sha256sum "${{ steps.v.outputs.tarball }}" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless: no private key exists to leak or to rotate. The certificate
+      # records the workflow, the repository and the tag, which is what
+      # tools/install.sh checks the bundle against.
+      - name: Sign the tarball and the checksums
+        run: |
+          set -eu
+          cd dist
+          for f in "${{ steps.v.outputs.tarball }}" SHA256SUMS; do
+            cosign sign-blob --yes --bundle "$f.sigstore" "$f"
+          done
+          ls -l
+
+      - name: Write the release notes
+        run: |
+          set -eu
+          cat > dist/NOTES.md <<NOTES
+          Install:
+
+              curl -fsSL https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh | bash
+
+          That downloads this release, verifies it and installs a copy. To pin
+          this version explicitly:
+
+              tools/install.sh --version ${{ steps.v.outputs.tag }}
+
+          ## Verifying by hand
+
+              shasum -a 256 -c SHA256SUMS
+              cosign verify-blob \\
+                --bundle ${{ steps.v.outputs.tarball }}.sigstore \\
+                --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \\
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+                ${{ steps.v.outputs.tarball }}
+
+          The signature is keyless Sigstore. There is no public key to fetch
+          and no private key to steal: the certificate names the workflow, the
+          repository and the tag that produced the file.
+          NOTES
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "${{ steps.v.outputs.tag }}" \
+            --verify-tag \
+            --title "${{ steps.v.outputs.tag }}" \
+            --notes-file dist/NOTES.md \
+            --generate-notes \
+            "dist/${{ steps.v.outputs.tarball }}" \
+            "dist/${{ steps.v.outputs.tarball }}.sigstore" \
+            dist/SHA256SUMS \
+            dist/SHA256SUMS.sigstore
