@@ -456,6 +456,28 @@ if you really mean to start over."
         printf '\n'
         printf 'Next: %s run %s   (it will ask you to log in)\n' "$SELF" "$_new_name"
     fi
+
+    # A profile at the default root costs the audit a rule, permanently, and
+    # nothing else says so. Better here, when it is still a choice, than in
+    # six months when doctor is quietly reporting less than it appears to.
+    if [ "$_new_root" = "$(agent_def "$_new_agent" default_root)" ]; then
+        printf '\n'
+        printf 'NOTE: this profile owns the default root.\n'
+        printf '\n'
+        printf 'Anything that runs with nothing pinned writes to that same root, in the same\n'
+        printf 'layout, so from now on doctor cannot tell an unpinned run apart from this\n'
+        printf "profile's own. D01 goes quiet for good. It is not a bug and there is no\n"
+        printf 'setting for it: on disk the two are identical.\n'
+        printf '\n'
+        printf 'What still watches unpinned use:\n'
+        printf '  D02  the state file beside the root, which names whichever account last\n'
+        printf '       ran unpinned and need not be any profile here\n'
+        printf '  D03  the same project appearing under two roots\n'
+        printf '\n'
+        printf 'This cannot be undone by moving the root: credentials are keyed to the root\n'
+        printf 'path, so relocating it invalidates this login (docs/FACTS.md F06). The real\n'
+        printf 'guard is never running the agent unpinned in the first place.\n'
+    fi
 }
 
 # ---------------------------------------------------------------------------

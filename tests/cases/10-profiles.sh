@@ -202,6 +202,24 @@ case_new_still_explains_an_empty_root() {
     assert_not_contains "$out" "adopted rather than created"
 }
 
+# A profile at the default root permanently silences D01, because an unpinned
+# run and that profile's own runs are identical on disk. Nothing else says so,
+# and by the time it matters the choice cannot be undone: relocating a root
+# invalidates its login.
+case_new_warns_when_a_profile_claims_the_default_root() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" new bouvet --root "$HOME/.claude" 2>&1)
+    assert_contains "$out" "owns the default root" || return
+    assert_contains "$out" "D01 goes quiet" || return
+    assert_contains "$out" "F06"
+}
+
+case_new_is_silent_about_it_for_an_ordinary_root() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" new bouvet 2>&1)
+    assert_not_contains "$out" "owns the default root"
+}
+
 run_case "new creates an empty root"                  case_new_creates_empty_root
 run_case "new sets mode 700"                          case_new_sets_mode_700
 run_case "new writes exactly four registry keys"      case_new_writes_four_keys
@@ -222,3 +240,5 @@ run_case "new adopts a populated root untouched"   case_new_adopts_a_populated_r
 run_case "new does not call a populated root empty" case_new_does_not_call_a_populated_root_empty
 run_case "new reports tightening the mode"         case_new_reports_tightening_the_mode_on_adoption
 run_case "new still explains an empty root"        case_new_still_explains_an_empty_root
+run_case "new warns about the default root"       case_new_warns_when_a_profile_claims_the_default_root
+run_case "new is silent for an ordinary root"     case_new_is_silent_about_it_for_an_ordinary_root
