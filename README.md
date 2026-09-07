@@ -126,7 +126,8 @@ output can hang waiting for an answer.
 
 `new` on a root that already exists and holds data adopts it rather than
 creating it. Nothing is copied, moved, seeded or removed; the only change is
-that the root becomes mode 700. Point it at what you already have:
+that the root and its app data directory become mode 700. Point it at what you
+already have:
 
 ```sh
 agent-profile new tide --root ~/.claude-tide \
@@ -283,7 +284,7 @@ offender, so it works from a cron entry or a shell hook.
 | D04 | A registered root does not exist |
 | D05 | A root has no credential and no signed-in account |
 | D06 | A config root exists that no profile claims |
-| D07 | A root is not mode 700 |
+| D07 | A root or app data directory is not mode 700 |
 | D08 | A project directory is not an encoded path |
 | D09 | A `claude-cli://` handler is installed and cannot be pinned |
 | D10 | A stored root is not in the form its credential is keyed on |
@@ -445,7 +446,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 152 tests, no dependencies
+tests/run.sh              # 156 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
