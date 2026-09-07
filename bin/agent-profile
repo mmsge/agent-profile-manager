@@ -1723,11 +1723,22 @@ cmd_verify() {
     done
 
     if [ ${#_ver_roots[@]} -eq 0 ]; then
-        vunchecked "F07" "no existing config root to inspect" \
-            "Create a profile and sign in, then run verify again."
-        vunchecked "F11" "no existing config root to inspect" \
-            "This is the check that doctor's D03 depends on."
-        vunchecked "F12" "no existing config root to inspect"
+        # Say which of the two this is. "No root to inspect" on a machine that
+        # has three of them sitting on disk is false, and the remedy it used to
+        # offer -- create a profile and sign in -- is wrong for someone already
+        # signed in to all of them and merely not registered yet.
+        if [ -z "$(profile_names)" ]; then
+            _ver_why="no profile is registered, so there is no root to read"
+            _ver_hint="Roots already on this machine are not inspected until a profile claims one."
+            _ver_next="Register them with: agent-profile new <name> --root <path>"
+        else
+            _ver_why="every registered root is missing from disk"
+            _ver_hint="The registry names roots that are not there, and doctor reports each as D04."
+            _ver_next="Fix the registry before trusting anything here."
+        fi
+        vunchecked "F07" "$_ver_why" "$_ver_hint" "$_ver_next"
+        vunchecked "F11" "$_ver_why" "This is the check that doctor's D03 depends on." "$_ver_next"
+        vunchecked "F12" "$_ver_why" "$_ver_next"
     else
         _ver_state=$(agent_def claude state_base)
         # Initialised before the scan so a failed scan cannot leave them unset
@@ -1847,7 +1858,12 @@ cmd_verify() {
                     "false findings until docs/FACTS.md F03 is re-established." \
                     "Re-run: bash tools/probe-claude-desktop.sh"
             else
-                vunchecked "F03" "no root is signed in, so the naming could not be exercised"
+                if [ ${#_ver_roots[@]} -eq 0 ]; then
+                    vunchecked "F03" "no registered root to check the Keychain naming against" \
+                        "Register a profile first; an unregistered root is not read here."
+                else
+                    vunchecked "F03" "no registered root is signed in, so the naming could not be exercised"
+                fi
             fi
         else
             vunchecked "F03" "no security command available"
