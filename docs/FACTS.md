@@ -424,6 +424,399 @@ than deriving one from the other.
 
 ---
 
+## Windows
+
+**No Windows machine has been probed.** Everything in this section was read out
+of the published documentation on 2026-09-07, or argued from it. Nothing here
+was observed on a running Windows install, so nothing here is `VERIFIED` and
+nothing here should be implemented on the strength of a `REASONED` or
+`UNVERIFIED` entry alone.
+
+The documentation pages carry no version stamp of their own. The most recent
+releases they name a requirement against are Claude Code **v2.1.261** and
+Claude Desktop **v1.37937.0**, so they describe at least those. Which versions
+a given Windows machine is actually running is a separate question, and F17
+applies there too: each desktop profile carries its own copy of Claude Code and
+updates on its own schedule.
+
+`tools/probe-claude-windows.ps1` answers W01 to W06 on a real machine. Run it
+there, paste its output back into this section, and change the statuses it
+settles.
+
+### W01 Does Claude Code on Windows honour `CLAUDE_CONFIG_DIR`?
+
+**Status:** `DOCUMENTED`. Answer: **yes**, as far as the documentation goes.
+
+The Windows default root and the override are stated in one breath:
+
+"On Windows, `~/.claude` resolves to `%USERPROFILE%\.claude`. If you set
+`CLAUDE_CONFIG_DIR`, every `~/.claude` path on this page lives under that
+directory instead."
+([.claude directory](https://code.claude.com/docs/en/claude-directory))
+
+The variable's own entry names no platform, and blesses this exact use:
+
+"Override the configuration directory (default: `~/.claude`). All settings,
+session history, and plugins are stored under this path. For credentials, see
+where Claude Code stores credentials. Useful for running multiple accounts side
+by side: for example, `alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work
+claude'`. Set it in your shell, user settings, or managed settings. Ignored in
+project and local settings" ([env-vars](https://code.claude.com/docs/en/env-vars))
+
+The same page documents how a variable is set on Windows, in both shells:
+
+```powershell
+$env:API_TIMEOUT_MS = "1200000"
+claude
+```
+
+```batch
+set API_TIMEOUT_MS=1200000
+claude
+```
+
+The uninstall instructions confirm where an unpinned Windows install writes,
+which is F10's default case with a Windows path:
+
+```powershell
+Remove-Item -Path "$env:USERPROFILE\.claude" -Recurse -Force
+Remove-Item -Path "$env:USERPROFILE\.claude.json" -Force
+```
+
+([setup](https://code.claude.com/docs/en/setup))
+
+So the variable is documented as platform-neutral and F08 holds with Windows
+paths substituted. What is **not** documented is what a Windows *value* may
+look like: whether a backslash path, a forward-slash path, a drive-relative
+path or a UNC path is accepted, whether Claude Code normalises the string, and
+whether a trailing backslash makes a different root. That mattered enormously
+on macOS, where the credential is keyed to the literal string (F03), so `new`
+normalises before storing. A port cannot reuse `canonical_path` as it stands:
+that function is `os.path.normpath` over a POSIX string and knows nothing about
+backslashes or drive letters.
+
+**How to re-check:** run the probe. It runs the CLI with the variable pointed
+at a throwaway root and lists what appears inside it.
+
+### W02 Where does the credential live without a Keychain, and is Windows Credential Manager used?
+
+**Status:** `DOCUMENTED` for the location and the protection, `UNVERIFIED` for
+the access control actually on the file. Answer: `.credentials.json` inside the
+root, protected by file permissions, and the Credential Manager is not used.
+
+Quoted verbatim:
+
+"On Windows, credentials are stored in
+`%USERPROFILE%\.claude\.credentials.json` and inherit the access controls of
+your user profile directory, which restricts the file to your user account by
+default."
+([authentication](https://code.claude.com/docs/en/authentication))
+
+"If you've set the `CLAUDE_CONFIG_DIR` environment variable, Claude Code keeps
+the `.credentials.json` file under that directory instead, including the file
+the macOS fallback writes, and keys the macOS Keychain entry to that directory
+too, so a session with a different `CLAUDE_CONFIG_DIR` reads a different
+entry." (same page, and the same sentence F09 rests on)
+
+"**Secure credential storage**: API keys and tokens are stored in the macOS
+Keychain when available, and protected by file permissions on Windows and
+Linux." ([security](https://code.claude.com/docs/en/security))
+
+"Claude Code stores sensitive options in the macOS Keychain instead, falling
+back to `~/.claude/.credentials.json` when the Keychain rejects the write; on
+platforms without a supported keychain, it stores them in
+`~/.claude/.credentials.json`."
+([settings-reference](https://code.claude.com/docs/en/settings-reference))
+
+The Credential Manager appears nowhere in the documentation, and the security
+page is a positive statement rather than a silence: on Windows the protection
+**is** the file permissions. Take that as the answer until a probe contradicts
+it.
+
+Four consequences for the audit. The first three are `REASONED` from the
+quotes above. The fourth is quoted.
+
+**D05 gets simpler and stays exact.** It becomes a test for
+`<root>\.credentials.json` and needs no equivalent of `security
+find-generic-password`. It still must never read the file.
+
+**D10, D11 and D12 lose their subject.** All three exist because of the macOS
+Keychain naming in F03. With no keychain entry there is no hash over a literal
+path, so a trailing backslash costs nothing at the credential level, there is
+no separate credential trace left by pinning to the default root, and there are
+no stray entries belonging to no known root. What replaces D11 on Windows, if
+anything, is an open design question rather than a fact.
+
+**D07 has no Windows meaning as written.** Mode 700 is a POSIX concept. The
+Windows equivalent is an access control list granting the user alone, and the
+documentation leans on inheritance from the profile directory to get it. A root
+created outside that directory, on a second drive for instance, inherits that
+location's access control list instead, and nothing then restricts a credential
+file to one account. A port must read the actual list rather than assume the
+sentence above applies wherever a root happens to sit.
+
+**Plaintext is plaintext on every platform.** "Transcripts and history are not
+encrypted at rest. OS file permissions are the only protection."
+([.claude directory](https://code.claude.com/docs/en/claude-directory))
+
+**How to re-check:** the probe reports whether a credential file appeared in
+the throwaway root and prints its access control list. It never reads the
+file's content, and it never prints anything from inside it.
+
+### W03 Does Claude Desktop for Windows take `--user-data-dir`, where is it installed, and where is its data directory?
+
+**Status:** `UNVERIFIED`, all three. The values below are reported by others,
+recorded so the probe knows where to look, and are not evidence.
+
+**The flag is undocumented on every platform.** `--user-data-dir` appears
+nowhere in the Claude Code or Claude Desktop documentation. On macOS the tool
+uses it on the strength of direct observation (F13, F17, F18), not of a
+published contract. On Windows it is unknown whether the app accepts it, and
+the harder half of the question is whether a launcher can hand it over at all
+(W05).
+
+**Installation.** The enterprise deployment article describes an MSIX package.
+Claude "is packaged as a per-user application"; `Add-AppxPackage -Path
+"Claude.msix"` registers it for the current user and
+`Add-AppxProvisionedPackage -Online -PackagePath "Claude.msix" -SkipLicense`
+stages it for every user on the device
+([Deploy Claude Desktop for Windows](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows)).
+Microsoft says where such a package lands and how immovable it is: "App
+packages are installed on a per-user basis instead of system-wide. The default
+location for new packages on a new machine is under `C:\Program
+Files\WindowsApps\<package_full_name>`, with the executable named
+*app_name.exe*", and "After deployment, package files are marked read-only, and
+are heavily locked down by the operating system (OS)."
+([Understanding how packaged desktop apps run on Windows](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-behind-the-scenes))
+
+**Data directory.** Two public issues on the Claude Code tracker report
+`%APPDATA%\Claude\` as the desktop app's data directory. One reports that the
+packaged process actually reads
+`C:\Users\<user>\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\`
+while the app's own "Edit Config" button opens the unvirtualised
+`%APPDATA%\Claude\`, on Claude Desktop 1.1.3189.0 installed from
+`C:\Program Files\WindowsApps\Claude_1.1.3189.0_x64__pzs8sxrjxfjjc\app\Claude.exe`
+([issue 26073](https://github.com/anthropics/claude-code/issues/26073)). The
+other asks for a way to move `%APPDATA%\Claude\` elsewhere and states there is
+none ([issue 57998](https://github.com/anthropics/claude-code/issues/57998)).
+Neither is documentation and neither was observed here.
+
+The redirection itself is documented behaviour for a packaged app: "All newly
+created files and folders in the user's `AppData` folder (for example,
+`C:\Users\<user_name>\AppData`) are written to a private per-user, per-app
+location; but merged at runtime to appear in the real `AppData` location."
+(same Microsoft page)
+
+**Why this is worse than the macOS case.** On macOS the app data directory is
+an ordinary directory and `--user-data-dir` moves it, which is what makes two
+app logins possible at once. If Windows redirects `AppData` per package, then a
+directory this tool inspects from outside the package may not be the directory
+the app reads, and an audit that lists `%APPDATA%` and reports a clean
+separation would be reading the wrong files entirely. That is F18's lesson with
+a second failure mode stacked on it: the two identities can disagree, and one
+of them may not even be where it appears to be.
+
+**How to re-check:** the probe prints the installed package, the executable
+path, both candidate data directories, and what appears in each after a launch
+with `--user-data-dir` pointed at a throwaway directory.
+
+### W04 Does the desktop app's embedded Claude Code read `CLAUDE_CONFIG_DIR` from the app's process environment?
+
+**Status:** `UNVERIFIED`. This is F01 asked again for Windows, and F01 is the
+fact the entire desktop half rests on. It is cheap to settle on a real machine
+and it must not be assumed.
+
+Two things point the right way. Neither settles it.
+
+Documented, on what the app inherits:
+
+"The desktop app does not always inherit your full shell environment. On macOS,
+when you launch the app from the Dock or Finder, it reads your shell profile,
+such as `~/.zshrc` or `~/.bashrc`, to extract `PATH` and a fixed set of Claude
+Code variables, but other variables you export there are not picked up. On
+Windows, the app inherits user and system environment variables but does not
+read PowerShell profiles."
+([desktop](https://code.claude.com/docs/en/desktop))
+
+Read that sentence carefully. "User and system environment variables" are the
+two scopes Windows keeps in the registry, not a variable placed in the
+environment of one launch. It says a variable written with
+`[Environment]::SetEnvironmentVariable(..., "User")` reaches the app, and that
+is the one thing a profile manager must never do, because a user-scope variable
+pins every process that account starts, this tool's other profiles included.
+
+Documented, on the app running the same code:
+
+"If you already use the Claude Code CLI, Desktop runs the same underlying
+engine with a graphical interface." (same page)
+
+So the argument runs: the engine reads the variable (W01), and the app is
+documented to inherit environment variables on Windows. What is missing is
+whether a variable injected into one launch reaches the app process at all,
+which is exactly what W05 says is open, and whether the embedded Claude Code
+reads it there rather than a value the app resolved for itself.
+
+Until a probe answers this, no Windows desktop launcher should ship. A launcher
+that pins nothing looks identical to one that works, which is the whole reason
+this file exists: during the migration F18 records, the app named the right
+account for weeks while its sessions wrote into another account's root.
+
+**How to re-check:** the probe launches the app with the variable in the
+process environment and `--user-data-dir` at a throwaway directory, waits for
+the throwaway root to change, and asks whether a Code session was really
+started before it draws any conclusion. Nothing is written until a session
+runs, so quitting early looks exactly like the app ignoring the variable. The
+leak test needs no probe at all:
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.claude*" -Recurse -Filter *.jsonl -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-3) }
+```
+
+### W05 Which launcher form carries the variable, does it survive a pin, and what is the Windows ordering trap?
+
+**Status:** `UNVERIFIED` for the launcher form and for the pin. `REASONED` for
+the three traps, each argued from the documentation quoted below.
+
+macOS has one working answer, `open --env` (F13), and one trap, `--env` after
+`--args`. Windows has no `open`. A launcher there has to put the variable into
+an environment itself and then start the app, and each available form has a
+defect.
+
+| Form | How it carries the variable | Known problem |
+| --- | --- | --- |
+| `.cmd` file | `set "CLAUDE_CONFIG_DIR=..."` then `start "" "<app>" --user-data-dir=...` | A console window appears while it runs. It carries no icon of its own and is not a shortcut, so pinning it is awkward at best. |
+| `.ps1` script | `$env:CLAUDE_CONFIG_DIR = '...'` then `Start-Process` | Double-clicking a `.ps1` opens it in an editor rather than running it, and the execution policy can refuse it. It needs a wrapper before it is a launcher. |
+| Shortcut whose target is `cmd /c set ... && start ...` | as the `.cmd` | Has an icon and lives in the Start Menu. Whether a pin keeps the target is the open question. |
+
+**Trap one, and the closest thing to `--env` after `--args`: `setx`.** It is
+the obvious way to make the variable stick and it is exactly wrong. Verbatim,
+stray word included: "This command writes variables to the master environment
+in the registry. Variables set with **setx** variables are available in future
+command windows only, not in the current command window."
+([setx](https://learn.microsoft.com/windows-server/administration/windows-commands/setx))
+So a launcher built on `setx` pins nothing in the run it belongs to, and pins
+every later process of that account to one root, which is the opposite of what
+a profile manager is for. It also tests as working, because the next window the
+tester opens has the variable. The per-window form is the one to use: "The
+**set** command, which is internal to the command interpreter (Cmd.exe), sets
+user environment variables for the current console window only." (same page)
+`[Environment]::SetEnvironmentVariable(..., "User")` has the same defect as
+`setx`, and it is what the env-vars page recommends for making a variable
+permanent, so the wrong advice is one page away from the right one.
+
+**Trap two: `start` takes a window title first.** Its first parameter is
+`"title"`, "Specifies the title to display in the **Command Prompt** window
+title bar"
+([start](https://learn.microsoft.com/windows-server/administration/windows-commands/start)).
+So `start "C:\Program Files\Claude\Claude.exe" --user-data-dir=...` reads
+correctly, contains every right string, and launches nothing: the quoted
+program path is eaten as a title. The empty first argument, `start "" "C:\..."`,
+is the fix. This is the same shape of mistake as `--env` after `--args`, and
+the lesser of the two, because it fails loudly.
+
+**Trap three, and the one that may sink the whole approach: shell activation
+inherits nothing.** If the app is an MSIX package (W03), a Start Menu entry or
+a taskbar pin does not run an executable path. It activates the package by its
+Application User Model ID. Microsoft treats activation by that identifier and
+launching through an execution alias as different things: "`--with-alias`
+Launch the app using its execution alias instead of AUMID activation. The app
+runs in the current terminal with inherited stdin/stdout/stderr."
+([winapp CLI](https://learn.microsoft.com/windows/apps/dev-tools/winapp-cli/usage))
+An activated app is not a child of whatever asked for it, so a variable in the
+asking process has no obvious route into it. If that holds, a Start Menu or
+taskbar launch is the Windows version of F04's URL handler: a launch path that
+cannot carry a config root at all, which the audit can report and cannot fix.
+Whether Claude Desktop registers an execution alias, whether that alias takes
+`--user-data-dir`, and whether either route carries the environment, are the
+three things the probe has to find out.
+
+**Pinning.** Windows identifies what to pin by the Application User Model ID on
+the shortcut or the window, and that identifier is also what groups an
+application's windows under one taskbar button
+([Application User Model IDs](https://learn.microsoft.com/windows/win32/shell/appids)).
+A launcher that starts the app through `cmd` produces windows owned by the app
+and carrying the app's identity, so the taskbar button the user sees is the
+app's own, and pinning that button pins the app rather than the launcher. Since
+that pin is what a person will reach for every morning, a launcher that only
+works when started from its own shortcut is a launcher that stops being used.
+Whether pinning the shortcut file itself preserves the wrapper is what the
+probe asks the human to try.
+
+**How to re-check:** the probe writes a `.cmd` launcher and a shortcut to it
+into a throwaway directory, proves mechanically whether that form carries the
+variable into a process it starts, launches the app through it, and then asks
+the reader to pin the shortcut and report what happened. The `.ps1` form is not
+tested, because a script that cannot be double-clicked is not a launcher.
+
+### W06 Do the transcript layout and the `cwd` field match F11 and F12, and how is a Windows path encoded?
+
+**Status:** `DOCUMENTED` for the layout and the encoding rule, `REASONED` for
+what a drive letter and backslashes become, `UNVERIFIED` for the `cwd` field.
+
+"By default, Claude Code stores transcripts as JSONL at
+`~/.claude/projects/<project>/<session-id>.jsonl`, where `<project>` is your
+working directory path with non-alphanumeric characters replaced by `-`. For a
+working directory whose converted name exceeds 200 characters, Claude Code
+truncates the name to 200 characters and appends a hash of the full path, so
+the directory name stays within filesystem limits."
+([sessions](https://code.claude.com/docs/en/sessions))
+
+With W01's root, that is
+`%USERPROFILE%\.claude\projects\<project>\<session-id>.jsonl`, or the same
+under a pinned root.
+
+**The encoding rule is platform-neutral, and every character that makes a
+Windows path a Windows path is non-alphanumeric.** So `C:\Users\me\src\my-repo`
+encodes to `C--Users-me-src-my-repo`: the colon and both separators all become
+the same dash. F12's warning gets worse rather than better. Every project on
+one drive shares a prefix, and `C:\a\b`, `C:/a/b` and `C-\a\b` collide. Never
+try to decode a project directory name; read `cwd`.
+
+That is reasoned from the rule, not observed. Whether Claude Code encodes the
+path as typed or after normalising it, and what it makes of a UNC path, which
+opens with two separators, is unknown.
+
+**`cwd` is the field D03 reads**, and D03 is the rule that catches real
+leakage. F11 records it as observed, on macOS and on Linux. The sessions page
+declines to promise it anywhere: "Each line is a JSON object for a message,
+tool use, or metadata entry. The entry format is internal to Claude Code and
+changes between versions, so scripts that parse these files directly can break
+on any release." So on Windows it is unverified until somebody looks.
+
+Two consequences a port must handle even once `cwd` is confirmed present.
+
+**Path comparison changes meaning.** The value will be a Windows path, and
+Windows path comparison is case-insensitive: `C:\Src\app` and `c:\src\app` are
+one directory. D03 compares paths textually today, so a direct port would miss
+a leak between two roots that spell the same directory differently, and D03
+failing to find a leak is the worst outcome this tool has.
+
+**D08 still applies.** `CLAUDE_CODE_PROJECT_DIR_NAME` names the project
+directory outright, and its documented rules already carry a Windows clause:
+"Use 1-64 letters, digits, hyphens, or underscores: don't use a Windows device
+name such as `con`." (same page)
+
+**How to re-check:** the probe prints the project directory names under the
+throwaway root and the `cwd`, `sessionId` and `version` fields of the first
+transcript it finds.
+
+### How these move forward
+
+Someone has to run `tools/probe-claude-windows.ps1` on Windows, with Claude
+Code installed and the desktop app signed in, and paste the output back here.
+That settles W02, W03, W04 and W06, and confirms W01 on a real machine rather
+than on a documentation page. W05 needs one extra minute from a person: pin the
+launcher the probe leaves behind, launch from the pin, and run the leak test to
+see which root the session wrote to.
+
+Until then the cross-platform rewrite has a specification with holes in it: the
+access control list in W02, the whole of W03, W04 and W05, and the `cwd` field
+in W06. W04 is the one that decides whether the Windows desktop half can exist
+in the shape the macOS one has.
+
+---
+
 ## After an agent update
 
 1. `agent-profile verify`

@@ -387,6 +387,31 @@ one profile while holding for the rest.
 `agent-profile explain` states the scheme in plain language and shows where this
 machine's data currently lives, for when you come back to this in six months.
 
+### Windows
+
+Nothing in this tool has been run on Windows. What a port would rest on is
+written down all the same, as W01 to W06 in [`docs/FACTS.md`](docs/FACTS.md),
+with the same statuses the macOS facts carry and an honest one for each. Every
+entry there was read out of the documentation or argued from it. None was
+observed on a Windows machine, so none is `VERIFIED`.
+
+```powershell
+tools\probe-claude-windows.ps1
+```
+
+The probe works in a throwaway config root and app data directory under
+`$env:TEMP`, never touches a real root, never reads the content of a credential
+file, and removes what it made. Run it in Windows PowerShell 5.1 or PowerShell
+7 and paste the output into the Windows section of `docs/FACTS.md`. That
+settles five of the six. W05 needs a person as well: pin the launcher the probe
+leaves behind, launch from the pin, and say which root the session landed in.
+
+W04 is the one that decides the shape of a port. It asks whether the desktop
+app's embedded Claude Code reads the config root from the app's process
+environment, which is F01 asked again for Windows. Until somebody answers it,
+no Windows launcher should ship, because a launcher that pins nothing looks
+exactly like one that works.
+
 ## Three things that are not what they look like
 
 **Pinning to the default root is not the same as not pinning.** Setting
