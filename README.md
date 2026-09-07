@@ -90,6 +90,13 @@ An account living in the **default** root is a supported case: register it with
 leak, because a profile now claims it. It is still a different login from
 running unpinned, and D11 still says so.
 
+It costs you D01 permanently, though, and `new` says so when you do it. An
+unpinned run writes to that same root in the same layout, so on disk it is
+indistinguishable from that profile's own work. D02 and D03 become the only
+rules still watching unpinned use, and moving the root to recover D01 is not an
+option because that invalidates the login. The real guard is never running the
+agent unpinned at all.
+
 ### A prompt that cannot lie
 
 `agent-profile which --label` prints the label and nothing else, derived from
@@ -348,7 +355,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 118 tests, no dependencies
+tests/run.sh              # 120 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

@@ -247,6 +247,17 @@ directory apart.
 This is why `doctor` never treats "pinned to the default root" as equivalent to
 "unpinned", and why D01 and D11 are separate rules with separate causes.
 
+**The converse costs the audit a rule.** A profile registered *at* the default
+root writes to exactly where an unpinned run writes, in the same layout. On
+disk the two are then indistinguishable, so D01 cannot fire for that agent ever
+again and `doctor` sees less than it appears to. It is not a defect and there
+is no setting that recovers it; it follows from this fact.
+
+Nor can it be undone by moving the root, because of F06. So `new` says it
+plainly at registration time, while it is still a choice, and D02 and D03
+become the only rules still watching unpinned use. Observed on a real machine,
+where one of three accounts lives at `~/.claude`.
+
 ### F11 Transcripts record their own working directory
 
 **Status:** `VERIFIED` 2026-09-07 against 2.1.263.
