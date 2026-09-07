@@ -143,6 +143,30 @@ case_doctor_with_no_profiles_is_not_a_finding() {
     assert_contains "$DOUT" "nothing to audit"
 }
 
+# The guard used to be "does some profile claim the default root", which is a
+# different question. The state file lives beside the default root, never
+# inside it, so claiming that root does not make this file legitimate. On the
+# first real machine this ran on, that hid a 104 KB state file holding an
+# account none of the registered profiles owns.
+case_d02_fires_even_when_the_default_root_is_claimed() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet --root "$HOME/.claude" >/dev/null 2>&1
+    fixture_account "$HOME/.claude" "m@bouvet.no" "org-b"
+    # The stray one, beside the root rather than in it, holding someone else.
+    printf '{"oauthAccount":{"emailAddress":"stranger@example.com"}}\n' > "$HOME/.claude.json"
+
+    out=$("$AP" doctor 2>&1)
+    assert_contains "$out" "D02" || return
+    assert_contains "$out" "stranger@example.com"
+}
+
+case_d02_quiet_when_the_state_file_is_inside_a_root() {
+    HOME=$(new_home); export HOME
+    "$AP" new odd --root "$HOME" >/dev/null 2>&1
+    printf '{"oauthAccount":{"emailAddress":"m@example.com"}}\n' > "$HOME/.claude.json"
+    assert_not_contains "$("$AP" doctor 2>&1)" "D02"
+}
+
 run_case "a clean machine exits 0"                    case_clean_exits_zero
 run_case "D01 the default root holds sessions"        case_d01_unpinned_default_root
 run_case "D02 a stray state file"                     case_d02_stray_state_file
@@ -156,3 +180,5 @@ run_case "D06 an unregistered root"                   case_d06_unregistered_root
 run_case "D07 a root that is not mode 700"            case_d07_wrong_mode
 run_case "D08 a project dir that is not a path"       case_d08_project_dir_that_is_not_a_path
 run_case "no profiles is not a finding"               case_doctor_with_no_profiles_is_not_a_finding
+run_case "D02 fires though the default root is claimed" case_d02_fires_even_when_the_default_root_is_claimed
+run_case "D02 quiet when the state file is in a root"   case_d02_quiet_when_the_state_file_is_inside_a_root

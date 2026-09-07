@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.3.0"
+AGENT_PROFILE_VERSION="0.3.1"
 
 # The agent version docs/FACTS.md was last checked against.
 AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
@@ -760,6 +760,18 @@ profile_applet() {
     fi
 }
 
+# leak_test_glob <agent>: the glob the leak test must use to see every root.
+#
+# It has to be built from the default root, not from root_prefix. The prefix is
+# ".claude-", whose glob ".claude-*" silently excludes "~/.claude" itself, and
+# the default root is the single most important place to look: it is where
+# everything unpinned lands. A leak test that cannot see a leak is worse than
+# no leak test.
+leak_test_glob() {
+    _ltg_default=$(agent_def "$1" default_root)
+    printf '%s*\n' "${_ltg_default##*/}"
+}
+
 # applet_scan <agent>: every applet on this machine that pins this agent.
 #
 # Emits one absolute path per line, sorted, or nothing. A bundle qualifies only
@@ -1157,7 +1169,7 @@ overwriting one blind could replace a launcher you edited by hand."
     printf '\n'
     printf 'Confirm it actually pins, by starting a Code session in the app and running:\n'
     # shellcheck disable=SC2016  # literal help text; the user types this
-    printf '  find "$HOME"/%s* -name "*.jsonl" -mmin -3\n' "$(agent_def "$_ap_agent" root_prefix)"
+    printf '  find "$HOME"/%s -name "*.jsonl" -mmin -3\n' "$(leak_test_glob "$_ap_agent")"
     printf 'The path it prints is the root that is really in use.\n'
 }
 
@@ -1374,13 +1386,32 @@ cmd_doctor() {
             fi
         fi
 
+        # D02 asks one question: does the unpinned state file sit outside every
+        # profile root? Whether some profile claims the default root is a
+        # different question and was the wrong guard. The state file lives
+        # beside the default root, never inside it, so claiming that root does
+        # not make this file legitimate. On the first real machine this ran on,
+        # the wrong guard hid a 104 KB state file holding an account none of
+        # the three profiles owns.
         _doc_state=$(agent_def "$_doc_agent" state_file)
-        if [ -f "$_doc_state" ] && [ -n "$_doc_names" ] && [ -z "$_doc_claimed" ]; then
+        _doc_inside=""
+        for _doc_name in $_doc_names; do
+            _doc_r=$(reg_get "$_doc_name" root)
+            [ -n "$_doc_r" ] || continue
+            case "$_doc_state" in
+                "$_doc_r"/*) _doc_inside=1 ;;
+            esac
+        done
+        if [ -f "$_doc_state" ] && [ -n "$_doc_names" ] && [ -z "$_doc_inside" ]; then
+            # Name the account, because "some file exists" is much less useful
+            # than "this file belongs to an account you did not expect".
+            _doc_stray_acct=$(read_accounts "$(agent_def "$_doc_agent" state_base)" "$HOME" | cut -f2)
             finding "D02" "a stray $_doc_agent state file sits outside every profile root" \
                 "$_doc_state" \
+                "account: ${_doc_stray_acct:-(none recorded)}" \
                 "This file is written when nothing is pinned. It holds an account," \
                 "per-project trust decisions and personal MCP servers for whichever" \
-                "account last ran unpinned."
+                "account last ran unpinned, which need not be any profile here."
         fi
     done
 

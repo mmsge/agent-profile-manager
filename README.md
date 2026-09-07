@@ -348,7 +348,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 113 tests, no dependencies
+tests/run.sh              # 118 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
