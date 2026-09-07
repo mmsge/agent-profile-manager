@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# agent-profile — Agent Profile Manager
+# agent-profile: Agent Profile Manager
 #
 # Keeps several AI agent accounts separate on one machine by giving each its
 # own config root, and audits that the separation actually holds.
@@ -109,7 +109,7 @@ reg_file() {
     printf '%s\n' "$AGENT_PROFILE_REGISTRY/$1.conf"
 }
 
-# reg_get <name> <key> — prints the value, empty if absent.
+# reg_get <name> <key>: prints the value, empty if absent.
 reg_get() {
     _rg_file=$(reg_file "$1")
     [ -f "$_rg_file" ] || return 0
@@ -121,7 +121,7 @@ profile_exists() {
     [ -f "$(reg_file "$1")" ]
 }
 
-# profile_names — one per line, sorted. Empty output when the registry is empty.
+# profile_names: one per line, sorted. Empty output when the registry is empty.
 profile_names() {
     [ -d "$AGENT_PROFILE_REGISTRY" ] || return 0
     for _pn in "$AGENT_PROFILE_REGISTRY"/*.conf; do
@@ -131,11 +131,15 @@ profile_names() {
     done
 }
 
+# Validates the entry as well as its existence, so no command can operate on a
+# profile whose agent is unknown. Falling back to a default agent would be the
+# worst possible failure here: it would pin the wrong tool at the wrong root.
 require_profile() {
     profile_exists "$1" || die "no such profile '$1' (try: agent-profile list)"
+    profile_agent "$1" >/dev/null
 }
 
-# profile_agent <name> — the agent for a profile, validated.
+# profile_agent <name>: the agent for a profile, validated.
 profile_agent() {
     _pa=$(reg_get "$1" agent)
     [ -n "$_pa" ] || die "profile '$1' has no agent= key; the registry entry is incomplete"
@@ -197,7 +201,7 @@ run_pinned() {
 # Small helpers
 # ---------------------------------------------------------------------------
 
-# capitalize <word> — bash 3.2 has no ${var^}, so do it with cut and tr.
+# capitalize <word>: bash 3.2 has no ${var^}, so do it with cut and tr.
 capitalize() {
     _cap_first=$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')
     _cap_rest=$(printf '%s' "$1" | cut -c2-)
@@ -211,7 +215,7 @@ valid_name() {
     esac
 }
 
-# session_count <root> — number of transcripts stored under a root.
+# session_count <root>: number of transcripts stored under a root.
 session_count() {
     [ -d "$1/projects" ] || { printf '0\n'; return 0; }
     find "$1/projects" -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' '
@@ -460,6 +464,7 @@ cmd_which() {
     done
     printf '\n'
     printf 'Anything you run here writes to the default root, which is what agent-profile\n'
+    # shellcheck disable=SC2016  # literal help text; the user types this
     printf 'doctor reports as a leak. Pin with: eval "$(agent-profile env <profile>)"\n'
     return 0
 }
@@ -509,7 +514,7 @@ for root in sys.argv[1:]:
 PY
 }
 
-# dir_mode <path> — BSD stat on macOS, GNU stat elsewhere.
+# dir_mode <path>: BSD stat on macOS, GNU stat elsewhere.
 #
 # Cannot be a plain "try one, fall back on failure": GNU stat -f succeeds and
 # reports the filesystem rather than failing, so check the shape of the answer.
@@ -706,7 +711,7 @@ cmd_doctor() {
 VERIFY_BROKEN=0
 VERIFY_UNCHECKED=0
 
-# verify_scan <state_base> <root>... — one pass, emits key=value counts.
+# verify_scan <state_base> <root>...: one pass, emits key=value counts.
 verify_scan() {
     python3 - "$@" <<'PY'
 import json, os, sys
@@ -841,6 +846,11 @@ cmd_verify() {
         vunchecked "F12" "no existing config root to inspect"
     else
         _ver_state=$(agent_def claude state_base)
+        # Initialised before the scan so a failed scan cannot leave them unset
+        # under set -u, and so their origin is visible to a reader.
+        state_files=0; with_account=0
+        transcripts=0; with_cwd=0
+        encoded_dirs=0; odd_dirs=0
         eval "$(verify_scan "$_ver_state" "${_ver_roots[@]}")"
 
         # F07: account identity key.
@@ -1017,7 +1027,7 @@ cmd_version() {
 
 cmd_help() {
     cat <<'HELP'
-agent-profile — Agent Profile Manager
+agent-profile: Agent Profile Manager
 
 Keeps several agent accounts separate on one machine by giving each its own
 config root, and audits that the separation actually holds.

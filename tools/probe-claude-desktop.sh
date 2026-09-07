@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# probe-claude-desktop.sh — answer the questions agent-profile cannot answer
+# probe-claude-desktop.sh: answer the questions agent-profile cannot answer
 # from documentation, on a real Mac.
 #
 # Run this on macOS, then paste the whole output back and update docs/FACTS.md.
@@ -41,7 +41,7 @@ say "macOS        $(sw_vers -productVersion 2>/dev/null)"
 say "throwaway    $TMP"
 
 # ---------------------------------------------------------------------------
-# F05 — where the app binary is, and whether an update moved it
+# F05: where the app binary is, and whether an update moved it
 # ---------------------------------------------------------------------------
 
 head2 "F05  Claude Desktop binary"
@@ -64,6 +64,7 @@ if [ -d "$APP" ]; then
     else
         kv "binary" "NOT FOUND at the expected path"
         say "  Look for it under $APP/Contents/MacOS:"
+        # shellcheck disable=SC2012  # a human-readable listing with modes is the point
         ls -la "$APP/Contents/MacOS" 2>/dev/null | sed 's/^/    /'
     fi
     say ""
@@ -76,7 +77,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F10 — does the state file move inside a pinned root?
+# F10: does the state file move inside a pinned root?
 # ---------------------------------------------------------------------------
 
 head2 "F10  Does .claude.json move inside a pinned root?"
@@ -87,6 +88,7 @@ if command -v claude >/dev/null 2>&1; then
     CLAUDE_CONFIG_DIR="$PROBE_ROOT" claude mcp list >/dev/null 2>&1
     say "  After running the CLI pinned to the throwaway root:"
     if [ -n "$(ls -A "$PROBE_ROOT" 2>/dev/null)" ]; then
+        # shellcheck disable=SC2012  # a human-readable listing with modes is the point
         ls -la "$PROBE_ROOT" | sed 's/^/    /'
     else
         say "    (root is still empty; the CLI may not write on these commands)"
@@ -103,7 +105,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F01 — does the desktop app's embedded Claude Code honour CLAUDE_CONFIG_DIR?
+# F01: does the desktop app's embedded Claude Code honour CLAUDE_CONFIG_DIR?
 #
 # This is the gating question for the whole desktop half.
 # ---------------------------------------------------------------------------
@@ -162,7 +164,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F03 — Keychain naming for a non-default config root
+# F03: Keychain naming for a non-default config root
 #
 # Metadata only. Never dump_keychain -g, never read a secret.
 # ---------------------------------------------------------------------------
@@ -185,7 +187,7 @@ say "  That naming is what doctor's D05 needs in order to check the Keychain"
 say "  rather than only checking for a .credentials.json file."
 
 # ---------------------------------------------------------------------------
-# F04 — the Claude Code URL handler
+# F04: the Claude Code URL handler
 # ---------------------------------------------------------------------------
 
 head2 "F04  Claude Code URL handler"
