@@ -86,6 +86,7 @@ agent-profile doctor              # is the separation actually holding?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
 eval "$(agent-profile guard)"     # refuse to run the agent unpinned
+claude bouvet                     # with the guard on, this pins and runs
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -131,6 +132,20 @@ unpinned run writes to the default root, and if a profile owns that root,
 The function refuses, names the profiles you have, and shows how to pin. An
 explicit `command claude` still works, because an escape hatch you can see
 beats one people find by deleting the guard from their rc file.
+
+**A leading profile name is the shortcut**, so the refusal is rarely the end of
+it:
+
+```sh
+claude bouvet              # runs pinned to bouvet
+claude tide --continue     # arguments after the name are passed straight on
+```
+
+This applies **only when nothing is pinned**, and that is what makes it safe:
+the alternative on that path is a refusal, so there is no working invocation
+for it to shadow. Once a shell is pinned, the argument is left alone, because
+`claude` takes a prompt there and stealing a word that happened to match a
+profile name would break it.
 
 It is printed rather than installed, and re-derived on every shell start, for
 the same reason the prompt label is: a copy in a dotfile drifts from the tool,
@@ -394,7 +409,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 135 tests, no dependencies
+tests/run.sh              # 140 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

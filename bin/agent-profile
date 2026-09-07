@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.4.0"
+AGENT_PROFILE_VERSION="0.5.0"
 
 # The name this was invoked as. Every message names the command the reader
 # actually typed, so an install under a short name never tells them to run
@@ -2112,16 +2112,27 @@ cmd_guard() {
         cat <<GUARD
 $_g_bin() {
     if [ -z "\${$_g_var:-}" ]; then
+        # A first argument naming a profile means "use that one". This is safe
+        # only here, with nothing pinned, because the alternative on this path
+        # is a refusal: there is no working invocation to shadow. Once pinned,
+        # the argument is left alone, since $_g_bin takes a prompt there and
+        # stealing a word that happens to match a profile name would break it.
+        if [ \$# -gt 0 ] && $_g_self path "\$1" >/dev/null 2>&1; then
+            printf '%s\\n' "Pinning to \$1." >&2
+            $_g_self run "\$@"
+            return \$?
+        fi
         printf '%s\\n' "Refusing to run $_g_bin unpinned." >&2
         printf '%s\\n' "Nothing is pinned, so this would write to the default root," >&2
         printf '%s\\n' "under whichever account last logged in there." >&2
         printf '%s\\n' "" >&2
+        printf '%s\\n' "Name one to use it, for example: $_g_bin <profile> [args...]" >&2
+        printf '%s\\n' "" >&2
         printf '%s\\n' "Profiles on this machine:" >&2
         $_g_self list 2>/dev/null | sed -n 's/^\\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\\)\$/  \\1/p' >&2
         printf '%s\\n' "" >&2
-        printf '%s\\n' "Pin a shell:   eval \\"\\\$($_g_self env <profile>)\\"" >&2
-        printf '%s\\n' "Or run once:   $_g_self run <profile> [args...]" >&2
-        printf '%s\\n' "Override:      command $_g_bin [args...]" >&2
+        printf '%s\\n' "Or pin the shell: eval \\"\\\$($_g_self env <profile>)\\"" >&2
+        printf '%s\\n' "Override:         command $_g_bin [args...]" >&2
         return 1
     fi
     command $_g_bin "\$@"
@@ -2174,7 +2185,8 @@ DESKTOP
 
 SHELL
   guard                   Print a shell function that refuses to run the agent
-                          unpinned. Add to your rc file:
+                          unpinned, and turns a leading profile name into a
+                          pinned run. Add to your rc file:
                             eval "$(@SELF@ guard)"
 
 AUDIT
