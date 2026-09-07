@@ -242,6 +242,28 @@ ICONEOF
     chmod +x "$1/sips" "$1/iconutil"
 }
 
+# fixture_release <dir> <version>: a release laid out the way GitHub lays one
+# out, under <dir>/download/v<version>/. curl reaches it over a file:// URL, so
+# the installer's real download, checksum and unpack path runs rather than a
+# simulation of it. The tarball holds this checkout, so what gets installed is
+# the script under test.
+fixture_release() {
+    _fr_dir="$1/download/v$2"
+    mkdir -p "$_fr_dir"
+    _fr_stage=$(mktemp -d "${TMPDIR:-/tmp}/agent-profile-release.XXXXXX")
+    _fr_top="$_fr_stage/agent-profile-$2"
+    mkdir -p "$_fr_top"
+    cp -R "$ROOT/bin" "$ROOT/tools" "$ROOT/docs" "$_fr_top/"
+    cp "$ROOT/README.md" "$_fr_top/"
+    tar -czf "$_fr_dir/agent-profile-$2.tar.gz" -C "$_fr_stage" "agent-profile-$2"
+    rm -rf "$_fr_stage"
+    ( cd "$_fr_dir" && shasum -a 256 "agent-profile-$2.tar.gz" > SHA256SUMS )
+    # Stand-in bundles. Only a stand-in cosign ever reads them; what matters is
+    # that they are fetched and handed over, not what is inside.
+    printf 'stand-in bundle\n' > "$_fr_dir/agent-profile-$2.tar.gz.sigstore"
+    printf 'stand-in bundle\n' > "$_fr_dir/SHA256SUMS.sigstore"
+}
+
 # fixture_release_api <path> <tag>: the shape of the GitHub releases API
 # answer. Its body quotes a tag_name of its own, because the real API puts the
 # field before the body and the parser takes the first match; this fixture is
@@ -258,6 +280,37 @@ fixture_release_api() {
         printf '  "body": "An older note said \\"tag_name\\": \\"v0.0.1\\" in prose."\n'
         printf '}\n'
     } > "$1"
+}
+
+# fake_cosign <bindir> <exit-status>: a stand-in cosign, so the signature path
+# runs on a machine that has no cosign and the refusal path runs at all. It
+# checks the shape of the call rather than any cryptography: that a bundle, an
+# identity and an issuer were passed, and that the blob it was asked about is
+# really there.
+fake_cosign() {
+    mkdir -p "$1"
+    cat > "$1/cosign" <<'COSEOF'
+#!/bin/sh
+[ "$1" = "verify-blob" ] || { echo "cosign: unexpected subcommand $1" >&2; exit 64; }
+shift
+bundle=""; identity=""; issuer=""; blob=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --bundle) shift; bundle="$1" ;;
+        --certificate-identity-regexp) shift; identity="$1" ;;
+        --certificate-oidc-issuer) shift; issuer="$1" ;;
+        -*) ;;
+        *) blob="$1" ;;
+    esac
+    shift
+done
+[ -f "$bundle" ] || { echo "cosign: no bundle at $bundle" >&2; exit 65; }
+[ -f "$blob" ] || { echo "cosign: no blob at $blob" >&2; exit 66; }
+[ -n "$identity" ] || { echo "cosign: no --certificate-identity-regexp" >&2; exit 67; }
+[ -n "$issuer" ] || { echo "cosign: no --certificate-oidc-issuer" >&2; exit 68; }
+COSEOF
+    printf 'exit %s\n' "$2" >> "$1/cosign"
+    chmod +x "$1/cosign"
 }
 
 # fixture_launch_line <bundle> <root> <app-data>: the generated form, verbatim.
