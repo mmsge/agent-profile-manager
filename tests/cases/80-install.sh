@@ -5,6 +5,12 @@
 
 INSTALLER="$ROOT/tools/install.sh"
 
+# The version this checkout reports. Compared against rather than hardcoded: a
+# literal makes every release bump look like a broken installer.
+script_version() {
+    "${BASH:-/bin/bash}" "$ROOT/bin/agent-profile" version | awk '{print $2}'
+}
+
 # as_name <name> <args...>: run the tool through a symlink with that name, so
 # $0 -- and therefore the name it calls itself -- is the installed one.
 as_name() {
@@ -205,6 +211,89 @@ case_guard_suggests_the_shortcut_when_it_refuses() {
     assert_contains "$out" "claude <profile> [args...]"
 }
 
+# ---------------------------------------------------------------------------
+# version --check
+#
+# It needs the network, so the answer comes from a fixture over file://. What
+# is being pinned is that it reads the field, compares numerically, and stays
+# an answer rather than becoming an updater.
+# ---------------------------------------------------------------------------
+
+# A version whose minor field is ten higher. Numerically newer, and for every
+# version this project has published lexically older, so a string comparison
+# would answer "up to date" against a release that is ahead.
+bumped_minor() {
+    _bm=$(script_version)
+    printf 'v%s.%s.%s\n' \
+        "$(printf '%s' "$_bm" | cut -d. -f1)" \
+        "$(( $(printf '%s' "$_bm" | cut -d. -f2) + 10 ))" \
+        "$(printf '%s' "$_bm" | cut -d. -f3)"
+}
+
+check_against() {
+    fixture_release_api "$HOME/latest.json" "$1"
+    AGENT_PROFILE_RELEASE_API_URL="file://$HOME/latest.json" "$AP" version --check 2>&1
+}
+
+case_version_check_says_when_it_is_current() {
+    HOME=$(new_home); export HOME
+    out=$(check_against "v$(script_version)"); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "installed  $(script_version)" || return
+    assert_contains "$out" "latest     $(script_version)" || return
+    assert_contains "$out" "up to date"
+}
+
+case_version_check_exits_non_zero_when_behind() {
+    HOME=$(new_home); export HOME
+    out=$(check_against v99.0.0); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "installed  $(script_version)" || return
+    assert_contains "$out" "latest     99.0.0" || return
+    assert_contains "$out" "is behind"
+}
+
+# 0.10.0 is newer than 0.9.9 and a string comparison says the opposite, which
+# would report a machine as current against a release that is ahead of it.
+case_version_check_compares_numerically() {
+    HOME=$(new_home); export HOME
+    out=$(check_against "$(bumped_minor)"); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "is behind"
+}
+
+# The release body quotes a tag_name of its own. The field is what counts.
+case_version_check_reads_the_field_not_the_prose() {
+    HOME=$(new_home); export HOME
+    out=$(check_against v99.0.0)
+    assert_contains "$out" "latest     99.0.0" || return
+    assert_not_contains "$out" "0.0.1"
+}
+
+# The whole point of --check is that it is not an updater.
+case_version_check_downloads_and_installs_nothing() {
+    HOME=$(new_home); export HOME
+    check_against v99.0.0 >/dev/null 2>&1
+    [ -e "$HOME/.local/share/agent-profile" ] && { fail "it unpacked something"; return; }
+    [ -e "$HOME/.local/bin/agpin" ] && { fail "it installed something"; return; }
+    return 0
+}
+
+case_version_without_check_still_prints_one_line() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" version 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_equals "1" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" || return
+    assert_contains "$out" "agent-profile $(script_version)"
+}
+
+case_version_refuses_an_unknown_option() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" version --nope 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "unknown option"
+}
+
 run_case "messages use the invoked name"          case_messages_use_the_name_it_was_invoked_as
 run_case "errors use the invoked name"            case_errors_use_the_name_it_was_invoked_as
 run_case "findings use the invoked name"          case_findings_use_the_name_it_was_invoked_as
@@ -225,3 +314,10 @@ run_case "guard forwards remaining arguments"     case_guard_forwards_the_remain
 run_case "guard refuses a non-profile first arg"  case_guard_still_refuses_a_first_argument_that_is_not_a_profile
 run_case "guard leaves the arg alone when pinned" case_guard_leaves_the_argument_alone_when_already_pinned
 run_case "guard suggests the shortcut"            case_guard_suggests_the_shortcut_when_it_refuses
+run_case "version --check says when it is current" case_version_check_says_when_it_is_current
+run_case "version --check exits 1 when behind"    case_version_check_exits_non_zero_when_behind
+run_case "version --check compares numerically"   case_version_check_compares_numerically
+run_case "version --check reads the field"        case_version_check_reads_the_field_not_the_prose
+run_case "version --check installs nothing"       case_version_check_downloads_and_installs_nothing
+run_case "version prints one line"                case_version_without_check_still_prints_one_line
+run_case "version refuses an unknown option"      case_version_refuses_an_unknown_option

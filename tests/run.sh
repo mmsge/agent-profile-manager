@@ -242,6 +242,24 @@ ICONEOF
     chmod +x "$1/sips" "$1/iconutil"
 }
 
+# fixture_release_api <path> <tag>: the shape of the GitHub releases API
+# answer. Its body quotes a tag_name of its own, because the real API puts the
+# field before the body and the parser takes the first match; this fixture is
+# what pins that prose cannot be read as the answer.
+fixture_release_api() {
+    {
+        printf '{\n'
+        printf '  "html_url": "https://example.invalid/releases/tag/%s",\n' "$2"
+        printf '  "id": 1,\n'
+        printf '  "tag_name": "%s",\n' "$2"
+        printf '  "name": "%s",\n' "$2"
+        printf '  "draft": false,\n'
+        printf '  "prerelease": false,\n'
+        printf '  "body": "An older note said \\"tag_name\\": \\"v0.0.1\\" in prose."\n'
+        printf '}\n'
+    } > "$1"
+}
+
 # fixture_launch_line <bundle> <root> <app-data>: the generated form, verbatim.
 fixture_launch_line() {
     printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\n' \
