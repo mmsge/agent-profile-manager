@@ -166,6 +166,88 @@ fixture_account() {
         > "$1/.claude.json"
 }
 
+# fake_osa <bindir>: stand-in osacompile and osadecompile.
+#
+# osacompile stores the -e lines verbatim; osadecompile prints them back. That
+# is enough to exercise the round trip the applet machinery actually depends
+# on, which is that a launch line written into a bundle can be read back out.
+fake_osa() {
+    mkdir -p "$1"
+    cat > "$1/osacompile" <<'OSAEOF'
+#!/bin/sh
+lines=""; out=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -e) shift; lines="$lines$1
+" ;;
+        -o) shift; out="$1" ;;
+    esac
+    shift
+done
+[ -n "$out" ] || exit 1
+mkdir -p "$out/Contents/Resources/Scripts" || exit 1
+printf '%s' "$lines" > "$out/Contents/Resources/Scripts/main.scpt"
+OSAEOF
+    cat > "$1/osadecompile" <<'OSDEOF'
+#!/bin/sh
+[ -f "$1" ] || exit 1
+cat "$1"
+OSDEOF
+    chmod +x "$1/osacompile" "$1/osadecompile"
+}
+
+# fake_open <bindir> <env|noenv>: an open(1) that does or does not take --env.
+# The "noenv" form is how the suite exercises the guard that refuses to launch
+# an app it cannot pin.
+fake_open() {
+    mkdir -p "$1"
+    if [ "$2" = "env" ]; then
+        cat > "$1/open" <<'OPENEOF'
+#!/bin/sh
+[ "$1" = "--help" ] && { echo "--env VAR      Add an enviroment variable to the launched process"; exit 0; }
+echo "open: $*"
+OPENEOF
+    else
+        cat > "$1/open" <<'OPENEOF'
+#!/bin/sh
+[ "$1" = "--help" ] && { echo "usage: open [-e] [-t] [-f] [-W] file"; exit 0; }
+echo "open: $*"
+OPENEOF
+    fi
+    chmod +x "$1/open"
+}
+
+# fake_icon_tools <bindir>: stand-in sips and iconutil that only write markers.
+fake_icon_tools() {
+    mkdir -p "$1"
+    cat > "$1/sips" <<'SIPSEOF'
+#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do case "$1" in --out) shift; out="$1" ;; esac; shift; done
+[ -n "$out" ] || exit 1
+mkdir -p "$(dirname "$out")" && printf 'resized\n' > "$out"
+SIPSEOF
+    cat > "$1/iconutil" <<'ICONEOF'
+#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) shift; out="$1" ;; esac; shift; done
+[ -n "$out" ] || exit 1
+printf 'generated-icns\n' > "$out"
+ICONEOF
+    chmod +x "$1/sips" "$1/iconutil"
+}
+
+# fixture_applet <applet> <launch-line>: an applet holding exactly that line.
+fixture_applet() {
+    mkdir -p "$1/Contents/Resources/Scripts"
+    printf '%s\n' "$2" > "$1/Contents/Resources/Scripts/main.scpt"
+}
+
+# applet_line_of <applet>: the launch line an applet currently holds.
+applet_line_of() {
+    sed -n '/^do shell script /p' "$1/Contents/Resources/Scripts/main.scpt" 2>/dev/null | head -1
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
