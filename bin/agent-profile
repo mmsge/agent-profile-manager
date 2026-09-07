@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.5.0"
+AGENT_PROFILE_VERSION="0.6.0"
 
 # The name this was invoked as. Every message names the command the reader
 # actually typed, so an install under a short name never tells them to run
@@ -2168,6 +2168,8 @@ PROFILES
   list                    Every profile with its root, account and session count.
 
 PINNED EXECUTION
+  <name> [args...]        Run the agent's CLI pinned to that profile. A bare
+                          profile name is short for run.
   run <name> [args...]    Run the agent's CLI pinned to a profile.
   shell <name>            Open an interactive subshell pinned to a profile.
   env <name>              Print exports. Use: eval "$(@SELF@ env work)"
@@ -2231,7 +2233,18 @@ main() {
         explain)  cmd_explain "$@" ;;
         version|--version|-V) cmd_version ;;
         help|--help|-h)       cmd_help ;;
-        *)        die "unknown command '$_main_cmd' (try: $SELF help)" ;;
+        # A bare profile name runs it. Every subcommand is matched above, so
+        # a subcommand always wins and a profile can never shadow one: the
+        # worst case for a profile named after a command is that it needs the
+        # explicit "run" form, not that anything breaks.
+        *)
+            if profile_exists "$_main_cmd"; then
+                cmd_run "$_main_cmd" "$@"
+            else
+                die "unknown command or profile '$_main_cmd'
+Try: $SELF help for commands, or $SELF list for profiles."
+            fi
+            ;;
     esac
 }
 

@@ -77,7 +77,8 @@ Command Line Tools only to read JSON. No Homebrew, no `jq`.
 
 ```sh
 agent-profile new bouvet          # create root, app data dir and registry entry
-agent-profile run bouvet          # run Claude Code pinned to that profile
+agent-profile bouvet              # run Claude Code pinned to that profile
+agent-profile run bouvet          # the same thing, spelled out
 agent-profile shell bouvet        # a subshell pinned to that profile
 eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
@@ -140,6 +141,11 @@ it:
 claude bouvet              # runs pinned to bouvet
 claude tide --continue     # arguments after the name are passed straight on
 ```
+
+The tool takes the same shortcut, so `agpin bouvet` is short for
+`agpin run bouvet`. There a subcommand always wins: every command is matched
+before the fallback, so a profile named `doctor` or `app` cannot shadow one,
+and the worst case is that it needs the explicit `run` form.
 
 This applies **only when nothing is pinned**, and that is what makes it safe:
 the alternative on that path is a refusal, so there is no working invocation
@@ -409,7 +415,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 140 tests, no dependencies
+tests/run.sh              # 144 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
