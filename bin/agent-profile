@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.6.0"
+AGENT_PROFILE_VERSION="0.7.0"
 
 # The name this was invoked as. Every message names the command the reader
 # actually typed, so an install under a short name never tells them to run
@@ -49,6 +49,12 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 # less than it appears to be.
 : "${AGENT_PROFILE_APPLET_DIRS:=$AGENT_PROFILE_APPS_DIR:$HOME/Desktop:/Applications}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
+
+# Lets the suite exercise the interactive picker by piping answers. Faking a
+# terminal instead would mean script(1), whose arguments differ between the
+# BSD one on macOS and the util-linux one elsewhere, so the tests would be
+# least reliable on the platform this tool targets.
+: "${AGENT_PROFILE_ASSUME_TTY:=}"
 
 # Resolved once so the test suite can exercise the macOS-only audit rules on
 # another platform rather than shipping them unrun.
@@ -2142,6 +2148,84 @@ GUARD
 }
 
 # ---------------------------------------------------------------------------
+# The picker
+#
+# Bare `agpin` on a terminal asks which profile and which surface, because
+# opening a pinned app is the thing people do many times a day and it should
+# not need eight characters of subcommand first.
+#
+# Every prompt is gated on stdin being a terminal. Piped or scripted, this
+# never runs: the old behaviour, help and exit 1, is what a reader gets, so
+# nothing that consumes output can hang waiting for an answer.
+# ---------------------------------------------------------------------------
+
+is_tty() {
+    [ -n "$AGENT_PROFILE_ASSUME_TTY" ] && return 0
+    [ -t 0 ] && [ -t 2 ]
+}
+
+# ask_choice <prompt> <item>...
+#
+# Numbers the items on stderr, reads a choice, and echoes the chosen item on
+# stdout. Returns 1 if the answer is empty or out of range, so a stray Return
+# cancels rather than picking something.
+ask_choice() {
+    _ac_prompt="$1"; shift
+    [ $# -gt 0 ] || return 1
+
+    _ac_i=0
+    for _ac_item in "$@"; do
+        _ac_i=$((_ac_i + 1))
+        printf '  %s) %s\n' "$_ac_i" "$_ac_item" >&2
+    done
+    printf '\n%s [1-%s, Return to cancel]: ' "$_ac_prompt" "$_ac_i" >&2
+
+    read -r _ac_answer || return 1
+    case "$_ac_answer" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$_ac_answer" -ge 1 ] && [ "$_ac_answer" -le "$_ac_i" ] || return 1
+
+    _ac_i=0
+    for _ac_item in "$@"; do
+        _ac_i=$((_ac_i + 1))
+        if [ "$_ac_i" = "$_ac_answer" ]; then
+            printf '%s\n' "$_ac_item"
+            return 0
+        fi
+    done
+    return 1
+}
+
+cmd_pick() {
+    _pk_names=$(profile_names)
+    if [ -z "$_pk_names" ]; then
+        printf 'No profiles registered yet.\n' >&2
+        printf 'Create one:  %s new <name>\n' "$SELF" >&2
+        return "$EX_ERR"
+    fi
+
+    printf 'Which profile?\n' >&2
+    # shellcheck disable=SC2086  # names are validated, one word each
+    _pk_name=$(ask_choice "Profile" $_pk_names) || {
+        printf 'Nothing chosen.\n' >&2
+        return "$EX_ERR"
+    }
+
+    printf '\nWhere?\n' >&2
+    _pk_where=$(ask_choice "Open" "desktop app" "terminal") || {
+        printf 'Nothing chosen.\n' >&2
+        return "$EX_ERR"
+    }
+
+    printf '\n' >&2
+    case "$_pk_where" in
+        "desktop app") cmd_desktop "$_pk_name" ;;
+        *)             cmd_run "$_pk_name" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # version, help
 # ---------------------------------------------------------------------------
 
@@ -2159,6 +2243,7 @@ Keeps several agent accounts separate on one machine by giving each its own
 config root, and audits that the separation actually holds.
 
 USAGE
+  @SELF@                  Ask which profile and where to open it.
   @SELF@ <command> [arguments]
 
 PROFILES
@@ -2177,7 +2262,8 @@ PINNED EXECUTION
   which [--label]         Which profile this shell is pinned to, if any.
 
 DESKTOP
-  desktop <name>          Launch the desktop app pinned to a profile.
+  desktop <name>          Launch the desktop app pinned to a profile. Running
+                          @SELF@ with no arguments asks instead.
   app <name> [--applet PATH] [--icon PNG]
                           Generate or repair the AppleScript applet that
                           launches a profile from the Dock. Safe to run twice,
@@ -2215,7 +2301,16 @@ HELP
 # ---------------------------------------------------------------------------
 
 main() {
-    [ $# -ge 1 ] || { cmd_help; exit "$EX_ERR"; }
+    # No arguments, on a terminal, means "ask me". Anywhere else it stays what
+    # it was: help, and a non-zero exit.
+    if [ $# -eq 0 ]; then
+        if is_tty; then
+            cmd_pick
+            exit $?
+        fi
+        cmd_help
+        exit "$EX_ERR"
+    fi
     _main_cmd="$1"; shift
     case "$_main_cmd" in
         new)      cmd_new "$@" ;;

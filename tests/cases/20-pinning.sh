@@ -113,6 +113,97 @@ case_d15_quiet_when_every_root_is_distinct() {
     assert_not_contains "$("$AP" doctor 2>&1)" "D15"
 }
 
+# The picker is gated on a terminal. The gate is the part that matters: piped
+# or scripted, this must never prompt, or anything reading the output hangs.
+case_bare_command_is_unchanged_without_a_terminal() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$("$AP" </dev/null 2>&1); status=$?
+    assert_status 1 "$status" || return
+    assert_contains "$out" "USAGE" || return
+    assert_not_contains "$out" "Which profile?"
+}
+
+# pick <input>: run the picker with those answers on stdin.
+#
+# AGENT_PROFILE_ASSUME_TTY stands in for a terminal. The alternative, a real
+# pseudo-terminal via script(1), is not portable: BSD and util-linux disagree
+# on its arguments, so it would be least reliable on macOS, which is the only
+# platform this tool supports.
+pick() {
+    printf '%s' "$1" | AGENT_PROFILE_ASSUME_TTY=1 AGENT_PROFILE_DRY_RUN=1 "$AP" 2>&1
+}
+
+case_picker_opens_the_chosen_profile_on_the_desktop() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new highsoft >/dev/null 2>&1
+    out=$(pick '2
+1
+')
+    assert_contains "$out" "Which profile?" || return
+    assert_contains "$out" "open -n -a" || return
+    assert_contains "$out" ".claude-highsoft"
+}
+
+case_picker_runs_the_cli_when_that_is_chosen() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick '1
+2
+')
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet claude" || return
+    assert_not_contains "$out" "open -n -a"
+}
+
+# A stray Return must cancel, not select. Defaulting to the first profile is
+# how someone opens the wrong account without noticing.
+case_picker_cancels_on_an_empty_answer() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick '
+')
+    assert_contains "$out" "Nothing chosen" || return
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR="
+}
+
+case_picker_rejects_a_number_out_of_range() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick '9
+')
+    assert_contains "$out" "Nothing chosen" || return
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR="
+}
+
+case_picker_rejects_a_non_numeric_answer() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick 'bouvet
+')
+    assert_contains "$out" "Nothing chosen" || return
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR="
+}
+
+# Cancelling at the second question must not fall through to a default
+# surface: the answer to "where" was never given.
+case_picker_cancels_at_the_second_question() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick '1
+
+')
+    assert_contains "$out" "Nothing chosen" || return
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR="
+}
+
+case_picker_says_so_when_nothing_is_registered() {
+    HOME=$(new_home); export HOME
+    out=$(pick '')
+    assert_contains "$out" "No profiles registered" || return
+    assert_contains "$out" "new <name>"
+}
+
 run_case "run pins the config-dir variable"          case_run_pins_the_variable
 run_case "run forwards all arguments"                case_run_forwards_all_arguments
 run_case "shell pins the config-dir variable"        case_shell_pins_the_variable
@@ -126,3 +217,11 @@ run_case "an unclaimed default root falls back"      case_label_falls_back_when_
 run_case "the registry exception does not leak"      case_the_registry_exception_does_not_leak_to_other_roots
 run_case "D15 reports two profiles sharing a root"   case_d15_reports_two_profiles_sharing_a_root
 run_case "D15 quiet when every root is distinct"     case_d15_quiet_when_every_root_is_distinct
+run_case "bare command unchanged without a tty"   case_bare_command_is_unchanged_without_a_terminal
+run_case "picker opens the chosen desktop app"    case_picker_opens_the_chosen_profile_on_the_desktop
+run_case "picker runs the cli when chosen"        case_picker_runs_the_cli_when_that_is_chosen
+run_case "picker cancels on an empty answer"      case_picker_cancels_on_an_empty_answer
+run_case "picker rejects an out-of-range number"  case_picker_rejects_a_number_out_of_range
+run_case "picker rejects a non-numeric answer"    case_picker_rejects_a_non_numeric_answer
+run_case "picker cancels at the second question"  case_picker_cancels_at_the_second_question
+run_case "picker says so with no profiles"        case_picker_says_so_when_nothing_is_registered
