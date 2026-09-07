@@ -1,5 +1,5 @@
 #!/bin/bash
-# shellcheck disable=SC2317  # helpers are called from the sourced case files
+# shellcheck disable=SC2317,SC2329  # helpers are called from the sourced case files
 #
 # tests/run.sh: dependency-free test harness.
 #
