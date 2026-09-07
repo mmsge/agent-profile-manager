@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.2.0"
+AGENT_PROFILE_VERSION="0.2.1"
 
 # The agent version docs/FACTS.md was last checked against.
 AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
@@ -348,6 +348,16 @@ if you really mean to start over."
     fi
 
     # The root is created empty. Nothing is copied or seeded into it, ever.
+    # Whether this root already held data decides what to say at the end.
+    # Adopting a populated root is a supported and lossless thing to do, and
+    # the report has to match: telling someone their live root "is empty" is
+    # both false and alarming.
+    _new_adopted=""
+    if [ -d "$_new_root" ] && [ -n "$(ls -A "$_new_root" 2>/dev/null)" ]; then
+        _new_adopted=1
+        _new_had_mode=$(dir_mode "$_new_root")
+    fi
+
     mkdir -p "$_new_root" || die "could not create root '$_new_root'"
     chmod 700 "$_new_root" || die "could not chmod 700 '$_new_root'"
     mkdir -p "$_new_appdata" || die "could not create app data dir '$_new_appdata'"
@@ -367,11 +377,29 @@ if you really mean to start over."
     printf '  root      %s\n' "$_new_root"
     printf '  app data  %s\n' "$_new_appdata"
     printf '\n'
-    printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
-    printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
-    printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
-    printf '\n'
-    printf 'Next: agent-profile run %s   (it will ask you to log in)\n' "$_new_name"
+
+    if [ -n "$_new_adopted" ]; then
+        # Say exactly what was and was not done. This command is the entry
+        # point for a machine that was set up by hand, so the one thing it
+        # must never leave in doubt is whether it touched the data.
+        printf 'That root already held data, so it was adopted rather than created.\n'
+        printf 'Nothing was copied, moved, seeded or removed: %s session(s) and whatever\n' \
+            "$(session_count "$_new_root")"
+        printf 'settings, hooks and skills were already there are exactly as they were.\n'
+        if [ -n "$_new_had_mode" ] && [ "$_new_had_mode" != "700" ]; then
+            printf '\n'
+            printf 'The one change: mode %s became 700, which is what doctor D07 wants.\n' "$_new_had_mode"
+        fi
+        printf '\n'
+        printf 'Next: agent-profile list      (check it reports the account you expect)\n'
+        printf '      agent-profile doctor    (audit the isolation)\n'
+    else
+        printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
+        printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
+        printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
+        printf '\n'
+        printf 'Next: agent-profile run %s   (it will ask you to log in)\n' "$_new_name"
+    fi
 }
 
 # ---------------------------------------------------------------------------

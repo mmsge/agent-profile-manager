@@ -69,6 +69,27 @@ agent-profile app bouvet          # build its Dock launcher
 
 Adding a fourth account is one command and no edit to any file.
 
+### Adopting a machine you set up by hand
+
+`new` on a root that already exists and holds data adopts it rather than
+creating it. Nothing is copied, moved, seeded or removed; the only change is
+that the root becomes mode 700. Point it at what you already have:
+
+```sh
+agent-profile new tide --root ~/.claude-tide \
+    --app-data ~/Library/Application\ Support/Claude-Tide
+```
+
+It says which of the two it did, and reports the session count it found, so
+"adopted your live root" and "made you an empty one" can never be confused.
+Check with `agent-profile list` that each profile names the account you expect
+before trusting `doctor`.
+
+An account living in the **default** root is a supported case: register it with
+`--root ~/.claude` and `doctor` will stop reporting that root as an unpinned
+leak, because a profile now claims it. It is still a different login from
+running unpinned, and D11 still says so.
+
 ### A prompt that cannot lie
 
 `agent-profile which --label` prints the label and nothing else, derived from
@@ -306,7 +327,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 94 tests, no dependencies
+tests/run.sh              # 98 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
