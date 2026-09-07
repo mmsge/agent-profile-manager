@@ -155,6 +155,11 @@ print(hashlib.sha256(unicodedata.normalize("NFC", sys.argv[1]).encode()).hexdige
 ' "$1")"
 }
 
+# reg_applet_of <name>: the applet recorded in a profile's registry entry.
+reg_applet_of() {
+    sed -n 's/^applet=//p' "$HOME/.config/agent-profiles/$1.conf" 2>/dev/null | head -1
+}
+
 # reg_root_of <name>: the root recorded in a profile's registry entry.
 reg_root_of() {
     sed -n 's/^root=//p' "$HOME/.config/agent-profiles/$1.conf" | head -1
@@ -235,6 +240,12 @@ while [ $# -gt 0 ]; do case "$1" in -o) shift; out="$1" ;; esac; shift; done
 printf 'generated-icns\n' > "$out"
 ICONEOF
     chmod +x "$1/sips" "$1/iconutil"
+}
+
+# fixture_launch_line <bundle> <root> <app-data>: the generated form, verbatim.
+fixture_launch_line() {
+    printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\n' \
+        "$1" "$2" "$3"
 }
 
 # fixture_applet <applet> <launch-line>: an applet holding exactly that line.

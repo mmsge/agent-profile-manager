@@ -11,6 +11,7 @@ desk() {
     PATH="$HOME/fakebin:$PATH" \
     AGENT_PROFILE_PLATFORM=Darwin \
     AGENT_PROFILE_APP_BUNDLE="$HOME/Claude.app" \
+    AGENT_PROFILE_APPLET_DIRS="$HOME/Applications:$HOME/Desktop" \
         "$AP" "$@"
 }
 
@@ -313,6 +314,124 @@ case_explain_names_both_identities() {
     assert_contains "$out" "launcher"
 }
 
+# ---------------------------------------------------------------------------
+# Finding launchers this tool did not create
+# ---------------------------------------------------------------------------
+
+# tide_line: the launch line a correct applet for the tide fixture holds.
+tide_line() {
+    fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-tide" \
+        "$HOME/Library/Application Support/Claude-Tide"
+}
+
+# The depth is the whole trick. A script sits five levels below the search
+# directory, and a -maxdepth 4 returns nothing while looking like a clean
+# machine. That exact mistake was made once against a real Mac, so it is
+# pinned here rather than trusted to a comment.
+case_scan_finds_an_applet_five_levels_down() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    out=$(desk doctor 2>&1)
+    assert_contains "$out" "D14" || return
+    assert_contains "$out" "$HOME/Desktop/Tide-Claude.app"
+}
+
+case_scan_ignores_bundles_that_are_not_ours() {
+    desktop_fixture
+    mkdir -p "$HOME/Desktop/NotAnApplet.app/Contents/MacOS"
+    fixture_applet "$HOME/Desktop/Unrelated.app" 'do shell script "say hello"'
+    out=$(desk doctor 2>&1)
+    assert_not_contains "$out" "D14"
+}
+
+case_d14_names_the_profile_owning_the_root() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    out=$(desk doctor 2>&1)
+    assert_contains "$out" "launcher for profile 'tide' is not registered" || return
+    assert_contains "$out" "agent-profile app tide --applet"
+}
+
+case_d14_reports_a_launcher_no_profile_owns() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Stray.app" \
+        "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-nobody" "$HOME/x")"
+    out=$(desk doctor 2>&1)
+    assert_contains "$out" "no profile claims" || return
+    assert_contains "$out" "agent-profile new"
+}
+
+case_d14_quiet_once_the_applet_is_registered() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    desk app tide --applet "$HOME/Desktop/Tide-Claude.app" >/dev/null 2>&1
+    out=$(desk doctor 2>&1)
+    assert_not_contains "$out" "D14"
+}
+
+# Neither rule subsumes the other: a registered applet can be wrong while an
+# unregistered one sits beside it, and both are worth knowing at once.
+case_d13_and_d14_can_both_fire() {
+    desktop_fixture
+    desk app tide >/dev/null 2>&1
+    fixture_applet "$(reg_applet_of tide)" \
+        "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-elsewhere" "$HOME/x")"
+    fixture_applet "$HOME/Desktop/Stray.app" \
+        "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-nobody" "$HOME/x")"
+    out=$(desk doctor 2>&1)
+    assert_contains "$out" "D13" || return
+    assert_contains "$out" "D14"
+}
+
+# ---------------------------------------------------------------------------
+# app adopting rather than inventing
+# ---------------------------------------------------------------------------
+
+case_app_adopts_a_launcher_outside_the_conventional_dir() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+
+    out=$(desk app tide 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "adopted it" || return
+    assert_contains "$out" "already correct" || return
+    assert_equals "$HOME/Desktop/Tide-Claude.app" "$(reg_applet_of tide)" || return
+
+    # It must not have built a second one at the conventional path.
+    if [ -d "$HOME/Applications/Claude-Tide.app" ]; then
+        fail "app built a second applet instead of adopting the existing one"
+    fi
+}
+
+case_app_refuses_when_two_launchers_pin_one_root() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Tide-Copy.app" "$(tide_line)"
+
+    out=$(desk app tide 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "Tide-Claude.app" || return
+    assert_contains "$out" "Tide-Copy.app" || return
+    assert_contains "$out" "--applet"
+}
+
+case_app_falls_back_to_the_conventional_path() {
+    desktop_fixture
+    out=$(desk app tide 2>&1)
+    assert_contains "$out" "Created" || return
+    assert_not_contains "$out" "adopted it" || return
+    assert_equals "$HOME/Applications/Claude-Tide.app" "$(reg_applet_of tide)"
+}
+
+case_explicit_applet_wins_over_the_scan() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    out=$(desk app tide --applet "$HOME/Applications/Chosen.app" 2>&1)
+    assert_contains "$out" "Chosen.app" || return
+    assert_not_contains "$out" "adopted it" || return
+    assert_equals "$HOME/Applications/Chosen.app" "$(reg_applet_of tide)"
+}
+
 run_case "desktop puts --env before --args"           case_desktop_puts_env_before_args
 run_case "desktop passes extra args through"          case_desktop_passes_extra_args_through
 run_case "desktop does not export the variable"       case_desktop_does_not_export_the_variable
@@ -337,3 +456,13 @@ run_case "verify passes with --env support"           case_verify_passes_with_en
 run_case "verify reports on the applet reader"        case_verify_reports_on_the_applet_reader
 run_case "a registry without applet= still works"     case_registry_without_an_applet_key_still_works
 run_case "explain names both identities"              case_explain_names_both_identities
+run_case "the scan finds an applet five levels down" case_scan_finds_an_applet_five_levels_down
+run_case "the scan ignores bundles that are not ours" case_scan_ignores_bundles_that_are_not_ours
+run_case "D14 names the profile owning the root"    case_d14_names_the_profile_owning_the_root
+run_case "D14 reports a launcher nobody owns"       case_d14_reports_a_launcher_no_profile_owns
+run_case "D14 quiet once the applet is registered"  case_d14_quiet_once_the_applet_is_registered
+run_case "D13 and D14 can both fire"                case_d13_and_d14_can_both_fire
+run_case "app adopts a launcher outside ~/Applications" case_app_adopts_a_launcher_outside_the_conventional_dir
+run_case "app refuses two launchers for one root"   case_app_refuses_when_two_launchers_pin_one_root
+run_case "app falls back to the conventional path"  case_app_falls_back_to_the_conventional_path
+run_case "an explicit --applet wins over the scan"  case_explicit_applet_wins_over_the_scan

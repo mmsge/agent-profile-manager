@@ -104,6 +104,12 @@ setopt PROMPT_SUBST
 PROMPT='$(agent_label) %~ %# '
 ```
 
+One root is an exception, and has to be. A profile living in the **default**
+root has a basename of `.claude`, which names no account, and it cannot be
+moved somewhere better because relocating a root invalidates its login. For
+that root alone the registered name is used, so renaming that one registry
+entry does move its label. Every other root keeps the guarantee.
+
 This works in a shell that is actually pinned, which means `agent-profile
 shell` or `eval "$(agent-profile env …)"`. It cannot work for a per-command
 pin like `CLAUDE_CONFIG_DIR=… claude`, because the variable never enters the
@@ -136,11 +142,16 @@ agent-profile app bouvet              # or build a launcher you can keep
 agent-profile app bouvet --icon ~/icons/bouvet.png
 ```
 
-`app` generates an AppleScript applet in `~/Applications` and puts that command
-inside it, so the profile has a Dock icon that cannot launch unpinned. Run it
-again and it repairs the launch line in place, keeping the icon; if there was
-nothing to repair it says so, because "already applied" and "never worked" must
-not look the same.
+`app` puts that command inside an AppleScript applet, so the profile has a Dock
+icon that cannot launch unpinned. Run it again and it repairs the launch line in
+place, keeping the icon; if there was nothing to repair it says so, because
+"already applied" and "never worked" must not look the same.
+
+**Your launchers do not have to live in `~/Applications`.** Before falling back
+to the conventional path, `app` searches for one that already pins this
+profile's root and adopts it, saying plainly that it found rather than created
+it. If two launchers pin the same root it refuses and asks which, rather than
+rewriting a file you did not name. `--applet` always wins over the search.
 
 `--icon` takes a 1024px PNG and installs it through `sips` and `iconutil`. It
 keeps the applet's original icon once, and never replaces that backup on a
@@ -182,6 +193,8 @@ offender, so it works from a cron entry or a shell hook.
 | D11 | A credential exists for the default root, so something ran pinned to it |
 | D12 | Keychain credential entries belong to no known root |
 | D13 | A desktop launcher does not pin its profile |
+| D14 | A desktop launcher exists that no profile claims |
+| D15 | More than one profile is registered at the same root |
 
 D05 is exact rather than a guess: the Keychain service name is
 `Claude Code-credentials-<first 8 hex of sha256 of the config root path>`, with
@@ -202,6 +215,14 @@ reports an applet that pins nothing, pins the wrong root, selects the wrong app
 data directory, or puts `--env` after `--args`. It stays quiet about a
 hand-tuned line that still pins the right root: that is nobody's business but
 its owner's, and a rule that fires on a working setup gets ignored.
+
+D14 exists because assuming launchers live in `~/Applications` is wrong on a
+real machine. Two working ones were found sitting on a Desktop, entirely
+outside the audit, while `doctor` reported a clean desktop. It searches
+`~/Applications`, `~/Desktop` and `/Applications` for bundles whose launch line
+mentions the config-dir variable, and reports any that no profile names, saying
+which profile owns the root it pins. Set `AGENT_PROFILE_APPLET_DIRS` to search
+elsewhere; it is colon-separated like `PATH`.
 
 D03 is the one that catches real leakage, and it needs no configuration. Claude
 Code names a project directory after the working directory with every
@@ -327,7 +348,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 98 tests, no dependencies
+tests/run.sh              # 113 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

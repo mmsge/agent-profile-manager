@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.2.1"
+AGENT_PROFILE_VERSION="0.3.0"
 
 # The agent version docs/FACTS.md was last checked against.
 AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
@@ -30,6 +30,16 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 : "${AGENT_PROFILE_REGISTRY:=$HOME/.config/agent-profiles}"
 : "${AGENT_PROFILE_APPS_DIR:=$HOME/Applications}"
 : "${AGENT_PROFILE_APP_BUNDLE:=/Applications/Claude.app}"
+
+# Where to look for launchers that were not created by this tool. Colon
+# separated like PATH, with the same consequence: a directory whose name
+# contains a colon cannot be searched. Nobody has one, and inventing a second
+# separator to cover it would cost more than it saves.
+#
+# The Desktop is in the list because that is where real launchers turned out to
+# be. Assuming they live in ~/Applications is how a machine ends up audited
+# less than it appears to be.
+: "${AGENT_PROFILE_APPLET_DIRS:=$AGENT_PROFILE_APPS_DIR:$HOME/Desktop:/Applications}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
 
 # Resolved once so the test suite can exercise the macOS-only audit rules on
@@ -174,19 +184,57 @@ profile_root() {
 # ---------------------------------------------------------------------------
 # Label derivation
 #
-# The prompt label is derived from the pinned root every time it is needed and
+# The prompt label is resolved from the pinned root every time it is needed and
 # is never stored anywhere. That is what stops it drifting away from the root
-# it claims to describe.
+# it claims to describe, and it is unaffected by asking the registry what that
+# root is called: the lookup is still keyed on the root actually in force, on
+# every single call.
 # ---------------------------------------------------------------------------
 
+# profile_claiming_root <root>: the profile registered at this root, or empty.
+# The first match wins; doctor reports two profiles sharing a root separately.
+profile_claiming_root() {
+    for _pcr_name in $(profile_names); do
+        if [ "$(reg_get "$_pcr_name" root)" = "$1" ]; then
+            printf '%s\n' "$_pcr_name"
+            return 0
+        fi
+    done
+}
+
 # label_for_root <agent> <root>
+#
+# The root's basename, with the conventional prefix stripped when it is there.
+# Deriving it from the root is the whole point: rename a registry entry and the
+# label does not follow, because the label was never stored anywhere.
+#
+# The default root is the one exception, and it has to be. Its basename is
+# ".claude", which carries no account at all, and a profile living there cannot
+# be moved somewhere better because relocating a root invalidates its login
+# (docs/FACTS.md F06). So for that one root, and only that one, the registered
+# name is used. An account really does live there on the first machine this
+# met.
+#
+# This is a narrow, deliberate hole in the no-drift property: rename that
+# profile's registry entry and its label does follow. The alternative is a
+# prompt that says ".claude" and names no account, which is worse. Every other
+# root keeps the guarantee, and the test suite pins that boundary.
 label_for_root() {
     _lfr_prefix=$(agent_def "$1" root_prefix)
     _lfr_base=${2##*/}
     case "$_lfr_base" in
-        "$_lfr_prefix"*) printf '%s\n' "${_lfr_base#"$_lfr_prefix"}" ;;
-        *)               printf '%s\n' "$_lfr_base" ;;
+        "$_lfr_prefix"*) printf '%s\n' "${_lfr_base#"$_lfr_prefix"}"; return 0 ;;
     esac
+
+    if [ "$2" = "$(agent_def "$1" default_root)" ]; then
+        _lfr_named=$(profile_claiming_root "$2")
+        if [ -n "$_lfr_named" ]; then
+            printf '%s\n' "$_lfr_named"
+            return 0
+        fi
+    fi
+
+    printf '%s\n' "$_lfr_base"
 }
 
 # ---------------------------------------------------------------------------
@@ -712,6 +760,44 @@ profile_applet() {
     fi
 }
 
+# applet_scan <agent>: every applet on this machine that pins this agent.
+#
+# Emits one absolute path per line, sorted, or nothing. A bundle qualifies only
+# when it holds a compiled script whose launch line mentions the agent's
+# variable, which is what keeps the machine's other AppleScript apps out of the
+# results without needing a naming convention.
+#
+# The depth is load bearing. A script sits five levels below the search
+# directory, at X.app/Contents/Resources/Scripts/main.scpt, and a -maxdepth 4
+# finds nothing at all while looking like a clean result. That mistake has
+# already been made once here, against a real machine, so the depth is pinned
+# in a test rather than trusted to this comment.
+applet_scan() {
+    command -v osadecompile >/dev/null 2>&1 || return 0
+    _as_var=$(agent_def "$1" envvar)
+
+    printf '%s\n' "$AGENT_PROFILE_APPLET_DIRS" | tr ':' '\n' | while IFS= read -r _as_dir; do
+        [ -n "$_as_dir" ] || continue
+        [ -d "$_as_dir" ] || continue
+        find "$_as_dir" -maxdepth 5 -path '*/Contents/Resources/Scripts/main.scpt' 2>/dev/null
+    done | while IFS= read -r _as_script; do
+        [ -n "$_as_script" ] || continue
+        # Strip the four trailing path components back to the bundle.
+        _as_app=${_as_script%/Contents/Resources/Scripts/main.scpt}
+        case "$(applet_current_line "$_as_app")" in
+            *"$_as_var="*) printf '%s\n' "$_as_app" ;;
+        esac
+    done | sort -u
+}
+
+# applet_pinned_root <agent> <applet>: the root an applet pins, or empty.
+applet_pinned_root() {
+    _apr_var=$(agent_def "$1" envvar)
+    _apr_line=$(applet_current_line "$2")
+    # Anchored on " --args" so a root containing spaces still comes back whole.
+    printf '%s' "$_apr_line" | sed -n "s/.*$_apr_var=\(.*\) --args.*/\1/p"
+}
+
 # reg_set <name> <key> <value>: replace one key, leave every other one alone.
 reg_set() {
     _rset_file=$(reg_file "$1")
@@ -967,7 +1053,47 @@ cmd_app() {
     _ap_data=$(reg_get "$_ap_name" app_data)
     [ -n "$_ap_data" ] || _ap_data="$(agent_def "$_ap_agent" app_support)/$(agent_def "$_ap_agent" app_prefix)$(capitalize "$_ap_name")"
 
-    [ -n "$_ap_applet" ] || _ap_applet=$(profile_applet "$_ap_name" "$_ap_agent")
+    # Resolving which applet this profile means, in strict order:
+    #   1. --applet, which always wins. Explicit beats inferred.
+    #   2. the registry, if a previous run recorded one.
+    #   3. a launcher already on this machine that pins this profile's root.
+    #   4. the conventional path, as before.
+    #
+    # Step 3 exists because the conventional path was wrong on the first real
+    # machine this met: the working launchers were on the Desktop. Without it,
+    # `app tide` builds a second applet beside a working one and leaves the
+    # working one unaudited, which is worse than doing nothing.
+    _ap_found=""
+    if [ -z "$_ap_applet" ]; then
+        _ap_applet=$(reg_get "$_ap_name" applet)
+    fi
+    if [ -z "$_ap_applet" ]; then
+        _ap_scan="${TMPDIR:-/tmp}/agent-profile-app.$$"
+        : > "$_ap_scan"
+        applet_scan "$_ap_agent" 2>/dev/null | while IFS= read -r _ap_cand; do
+            [ -n "$_ap_cand" ] || continue
+            [ "$(applet_pinned_root "$_ap_agent" "$_ap_cand")" = "$_ap_root" ] && \
+                printf '%s\n' "$_ap_cand"
+        done > "$_ap_scan"
+        _ap_hits=$(grep -c '' < "$_ap_scan")
+
+        if [ "$_ap_hits" -eq 1 ]; then
+            _ap_applet=$(cat "$_ap_scan")
+            _ap_found=1
+        elif [ "$_ap_hits" -gt 1 ]; then
+            _ap_list=$(sed 's/^/  /' "$_ap_scan")
+            rm -f "$_ap_scan"
+            die "$_ap_hits launchers already pin profile '$_ap_name':
+
+$_ap_list
+
+Refusing to guess which one is canonical, because repairing the wrong one
+rewrites a file you did not name. Say which with --applet, and remove or
+re-point the other so doctor stops reporting it as D14."
+        fi
+        rm -f "$_ap_scan"
+    fi
+    [ -n "$_ap_applet" ] || _ap_applet=$(applet_default_path "$_ap_agent" "$_ap_name")
     case "$_ap_applet" in
         /*) ;;
         *)  die "--applet must be an absolute path. Got: $_ap_applet" ;;
@@ -984,6 +1110,13 @@ cmd_app() {
 
     _ap_line=$(applet_launch_line "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
     _ap_verdict=$(applet_verdict "$_ap_applet" "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
+
+    if [ -n "$_ap_found" ]; then
+        printf 'Found an existing launcher for %s and adopted it:\n' "$_ap_name"
+        printf '  %s\n' "$_ap_applet"
+        printf 'It was not created just now, and it is not at the conventional path.\n'
+        printf '\n'
+    fi
 
     case "$_ap_verdict" in
         ok)
@@ -1267,6 +1400,86 @@ cmd_doctor() {
                 "Register it, or remove it if it is left over." \
                 "Unregistered roots are invisible to every other check here."
         done
+    done
+
+    # ---- D15: two profiles claiming one root ------------------------------
+    #
+    # Nothing else catches this, and it makes the prompt label ambiguous: the
+    # label resolves a root to a name, and with two names for one root it has
+    # to pick one. It also means one account's sessions are being reported
+    # under two identities everywhere else in this audit.
+    for _doc_name in $_doc_names; do
+        _doc_root=$(reg_get "$_doc_name" root)
+        [ -n "$_doc_root" ] || continue
+        _doc_sharers=""
+        for _doc_other in $_doc_names; do
+            [ "$_doc_other" = "$_doc_name" ] && continue
+            [ "$(reg_get "$_doc_other" root)" = "$_doc_root" ] || continue
+            _doc_sharers="$_doc_sharers $_doc_other"
+        done
+        # Report once, from the alphabetically first of the group.
+        [ -n "$_doc_sharers" ] || continue
+        _doc_first=$(printf '%s\n' "$_doc_name$_doc_sharers" | tr ' ' '\n' | sort | head -1)
+        [ "$_doc_first" = "$_doc_name" ] || continue
+        finding "D15" "more than one profile is registered at the same root" \
+            "$_doc_root" \
+            "profiles:$_doc_name$_doc_sharers" \
+            "They are one account wearing several names, so every count and" \
+            "label here is ambiguous, and a prompt has to pick one arbitrarily." \
+            "Remove the registry entries you do not want from $AGENT_PROFILE_REGISTRY."
+    done
+
+    # ---- D14: a desktop launcher no profile claims ------------------------
+    #
+    # D13 audits the applet a profile names. This finds the ones nobody told
+    # the tool about, and the two do not overlap: a machine can have a
+    # registered applet pinning the wrong root and an unregistered one beside
+    # it, and both are worth knowing.
+    #
+    # It exists because assuming launchers live in the conventional directory
+    # is wrong on a real machine. Two working ones were sitting on a Desktop,
+    # completely outside the audit, while doctor reported a clean desktop.
+    for _doc_agent in $KNOWN_AGENTS; do
+        _doc_scan="${TMPDIR:-/tmp}/agent-profile-d14.$$"
+        applet_scan "$_doc_agent" > "$_doc_scan" 2>/dev/null
+
+        # Read from a file rather than a pipe: a pipeline runs the loop in a
+        # subshell and the finding count would not survive it. An applet path
+        # can hold spaces, so never iterate it with word splitting.
+        while IFS= read -r _doc_applet; do
+            [ -n "$_doc_applet" ] || continue
+
+            _doc_claimed=""
+            for _doc_name in $_doc_names; do
+                [ "$(reg_get "$_doc_name" applet)" = "$_doc_applet" ] && _doc_claimed=1
+            done
+            [ -n "$_doc_claimed" ] && continue
+
+            # Naming the profile that owns the root turns this from a report
+            # into an instruction.
+            _doc_pins=$(applet_pinned_root "$_doc_agent" "$_doc_applet")
+            _doc_owner=""
+            for _doc_name in $_doc_names; do
+                [ "$(reg_get "$_doc_name" root)" = "$_doc_pins" ] && _doc_owner="$_doc_name"
+            done
+
+            if [ -n "$_doc_owner" ]; then
+                finding "D14" "a desktop launcher for profile '$_doc_owner' is not registered" \
+                    "$_doc_applet" \
+                    "It pins $_doc_pins, which profile '$_doc_owner' owns, but no profile" \
+                    "names this applet, so the launcher audit has never read it." \
+                    "An unregistered launcher is invisible to every other check here." \
+                    "Fix with: agent-profile app $_doc_owner --applet '$_doc_applet'"
+            else
+                finding "D14" "a $_doc_agent desktop launcher exists that no profile claims" \
+                    "$_doc_applet" \
+                    "It pins ${_doc_pins:-(no root this tool could read)}, which no registered" \
+                    "profile owns. Register that root first with agent-profile new," \
+                    "then point a profile at this launcher with agent-profile app --applet." \
+                    "Until then nothing here audits what it launches."
+            fi
+        done < "$_doc_scan"
+        rm -f "$_doc_scan"
     done
 
     # ---- D09: a deep-link handler that cannot carry a config root ---------
