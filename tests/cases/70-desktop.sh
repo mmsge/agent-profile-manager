@@ -271,13 +271,24 @@ case_verify_passes_with_env_support() {
 }
 
 # Without osadecompile, D13 audits nothing while looking perfectly healthy.
-# That is a "could not look", not a "nothing wrong".
-case_verify_flags_a_missing_osadecompile() {
+# That is a "could not look", not a "nothing wrong", and verify has to say so.
+#
+# Removing the stand-in only hides it on a machine that has no osadecompile of
+# its own. A stock macOS carries one in /usr/bin, so there the removal falls
+# straight through to the real one. Assert whichever branch this machine can
+# actually reach, rather than one that happens to hold on Linux and quietly
+# tests nothing on the platform the tool targets.
+case_verify_reports_on_the_applet_reader() {
     desktop_fixture
     rm -f "$HOME/fakebin/osadecompile"
     out=$(desk verify 2>&1); status=$?
-    assert_contains "$out" "osadecompile is missing" || return
-    assert_status 4 "$status" "$out"
+
+    if command -v osadecompile >/dev/null 2>&1; then
+        assert_contains "$out" "ok        F13  osadecompile is available"
+    else
+        assert_contains "$out" "osadecompile is missing" || return
+        assert_status 4 "$status" "$out"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -323,6 +334,6 @@ run_case "D13 quiet when there is no applet"          case_d13_quiet_when_there_
 run_case "D13 quiet on a hand-tuned correct line"     case_d13_quiet_on_a_hand_tuned_but_correct_line
 run_case "verify is broken without --env support"     case_verify_is_broken_without_env_support
 run_case "verify passes with --env support"           case_verify_passes_with_env_support
-run_case "verify flags a missing osadecompile"        case_verify_flags_a_missing_osadecompile
+run_case "verify reports on the applet reader"        case_verify_reports_on_the_applet_reader
 run_case "a registry without applet= still works"     case_registry_without_an_applet_key_still_works
 run_case "explain names both identities"              case_explain_names_both_identities
