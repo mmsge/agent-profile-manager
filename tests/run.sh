@@ -29,6 +29,14 @@ AP="$AP_SHIM_DIR/agent-profile"
 chmod +x "$AP"
 trap 'rm -rf "$AP_SHIM_DIR"' EXIT INT TERM
 
+# Pin the platform so the suite never consults the host's real Keychain and
+# gives the same answer on every machine. Without this the macOS-only rules
+# query the running machine's credentials, so the same commit passes on Linux
+# and fails on a Mac. 60-credentials opts back into the macOS paths
+# deliberately, against a stand-in security(1).
+AGENT_PROFILE_PLATFORM=test-not-darwin
+export AGENT_PROFILE_PLATFORM
+
 TESTS_RUN=0
 TESTS_FAILED=0
 CURRENT=""
