@@ -63,6 +63,8 @@ eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
 agent-profile list                # every profile, its account and session count
 agent-profile doctor              # is the separation actually holding?
+agent-profile desktop bouvet      # launch the desktop app pinned
+agent-profile app bouvet          # build its Dock launcher
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -80,6 +82,64 @@ agent_label() { agent-profile which --label 2>/dev/null; }
 setopt PROMPT_SUBST
 PROMPT='$(agent_label) %~ %# '
 ```
+
+This works in a shell that is actually pinned, which means `agent-profile
+shell` or `eval "$(agent-profile env …)"`. It cannot work for a per-command
+pin like `CLAUDE_CONFIG_DIR=… claude`, because the variable never enters the
+shell and the prompt only redraws once the command has exited.
+
+The same caveat applies one level up: an indicator like this covers the
+terminal only. The desktop app renders no status line of its own, so there is
+nothing inside it that says which root it is using. For the desktop, the
+launcher is the guarantee and `doctor`'s D13 is the check.
+
+## The desktop
+
+The desktop app takes its config root from its process environment, and macOS
+`open` puts it there:
+
+```sh
+open -n -a /Applications/Claude.app \
+    --env CLAUDE_CONFIG_DIR=~/.claude-bouvet \
+    --args --user-data-dir=~/Library/Application\ Support/Claude-Bouvet
+```
+
+**`--env` must come before `--args`.** Everything after `--args` is handed to
+the application rather than to `open`, so an `--env` on the wrong side of it
+produces a launch line that reads correctly, contains every right string, and
+pins nothing.
+
+```sh
+agent-profile desktop bouvet          # launch it pinned, once
+agent-profile app bouvet              # or build a launcher you can keep
+agent-profile app bouvet --icon ~/icons/bouvet.png
+```
+
+`app` generates an AppleScript applet in `~/Applications` and puts that command
+inside it, so the profile has a Dock icon that cannot launch unpinned. Run it
+again and it repairs the launch line in place, keeping the icon; if there was
+nothing to repair it says so, because "already applied" and "never worked" must
+not look the same.
+
+`--icon` takes a 1024px PNG and installs it through `sips` and `iconutil`. It
+keeps the applet's original icon once, and never replaces that backup on a
+later run. At Dock size a word is illegible: one large initial and a distinct
+colour per account is what actually reads.
+
+Two things this tool will not do, both because they do not work. It will not
+build a `.app` whose executable is a shell script: such a bundle has no Mach-O
+header, so macOS cannot determine its architecture and the Dock icon bounces
+forever. And it will not run the app binary from your shell: Electron inherits
+the terminal's stdin, and the app dies with the shell.
+
+### Two identities, and they can disagree
+
+A profile has two. `--user-data-dir` selects the app's own login, the account
+name you see in the app. `CLAUDE_CONFIG_DIR` selects where its embedded Claude
+Code writes. They are independent, and they have been seen disagreeing: the app
+showed the right account for weeks while its sessions were writing into another
+account's root. The app naming an account is not evidence that anything is
+pinned. `explain` prints both.
 
 ## The audit
 
@@ -100,6 +160,7 @@ offender, so it works from a cron entry or a shell hook.
 | D10 | A stored root is not in the form its credential is keyed on |
 | D11 | A credential exists for the default root, so something ran pinned to it |
 | D12 | Keychain credential entries belong to no known root |
+| D13 | A desktop launcher does not pin its profile |
 
 D05 is exact rather than a guess: the Keychain service name is
 `Claude Code-credentials-<first 8 hex of sha256 of the config root path>`, with
@@ -111,6 +172,15 @@ the **literal path string**, so `~/.claude-work` and `~/.claude-work/` are two
 different logins (D10, and `new` normalizes to prevent it). And the suffix is
 present whenever the variable is **set at all**, so pinning to the default root
 is a different login from not pinning, which D11 reports.
+
+D13 is the desktop's only tell. The app renders no status line, and its own
+login can be right while its sessions write elsewhere, so the launch line
+inside the applet is the thing to read. It shares one definition of "correct"
+with `agent-profile app`, so the audit and the repair cannot disagree. It
+reports an applet that pins nothing, pins the wrong root, selects the wrong app
+data directory, or puts `--env` after `--args`. It stays quiet about a
+hand-tuned line that still pins the right root: that is nobody's business but
+its owner's, and a rule that fires on a working setup gets ignored.
 
 D03 is the one that catches real leakage, and it needs no configuration. Claude
 Code names a project directory after the working directory with every
@@ -146,10 +216,17 @@ installed, and says plainly which it could not check. The record of every
 assumption, its evidence and the version it was last checked against lives in
 [`docs/FACTS.md`](docs/FACTS.md).
 
-The check that earns the command is **F11**: transcripts record their own `cwd`.
-`doctor`'s D03 is built on it. If a future version stops recording `cwd`, D03
-finds nothing and reports a clean machine, which is worse than failing. `verify`
-catches exactly that and tells you not to trust `doctor` until it is fixed.
+Two checks earn the command.
+
+**F11**: transcripts record their own `cwd`. `doctor`'s D03 is built on it. If
+a future version stops recording `cwd`, D03 finds nothing and reports a clean
+machine, which is worse than failing. `verify` catches exactly that and tells
+you not to trust `doctor` until it is fixed.
+
+**F13**: `open` still takes `--env`. Without it, nothing can pin the desktop
+app, and `desktop`, `app` and D13 are all invalid at once while continuing to
+look healthy. `verify` reports that as broken rather than unchecked, because an
+applet that no longer pins still launches perfectly.
 
 If the desktop app updated, also run:
 
@@ -161,10 +238,16 @@ It works in a throwaway root, never touches a real one, never reads credential
 content, and answers the questions that need a real Mac. Paste its output into
 `docs/FACTS.md`.
 
+"After an update" is a per-profile question rather than a per-machine one. Each
+desktop profile downloads its own copy of Claude Code under its app data
+directory, so they update independently of each other and of the CLI. There is
+no single agent version on a machine like this, and an assumption can break for
+one profile while holding for the rest.
+
 `agent-profile explain` states the scheme in plain language and shows where this
 machine's data currently lives, for when you come back to this in six months.
 
-## Two things that are not what they look like
+## Three things that are not what they look like
 
 **Pinning to the default root is not the same as not pinning.** Setting
 `CLAUDE_CONFIG_DIR=~/.claude` produces a different layout from leaving it unset,
@@ -176,22 +259,54 @@ path, so a root at a new path reads a different Keychain entry and a different
 `.credentials.json`. That is why there is no `rename` and no `move`, and why
 `new` refuses to repoint an existing profile. Create a new profile instead.
 
+**The app naming an account is not evidence that anything is pinned.** The
+app's own login and the config root its embedded Claude Code writes to are two
+independent identities, and they have been seen disagreeing for weeks. Read
+both, which is what `explain` prints and what D13 checks.
+
 ## Status
 
-macOS only. The terminal half is complete, and the Keychain, URL handler and
-state-file questions are answered (see [`docs/FACTS.md`](docs/FACTS.md)).
+macOS only. Both halves are implemented.
 
-The desktop half, `desktop` and `app`, is not implemented yet. Whether the
-desktop app honours `CLAUDE_CONFIG_DIR` from its process environment decides
-that half's architecture and is still unanswered: the first probe run confirmed
-the app starts and that `--user-data-dir` works, but was interrupted before a
-Code session ran, and the embedded Claude Code writes nothing until one does.
-Re-run the probe and answer its prompt to settle it.
+The question that gated the desktop half is answered: the desktop app's
+embedded Claude Code does honour `CLAUDE_CONFIG_DIR` from its process
+environment, and `open --env` is what delivers it. That was established on a
+real machine during two account migrations and confirmed twice, once per
+account. The Keychain naming, the URL handler and the state-file questions are
+answered too. The record is [`docs/FACTS.md`](docs/FACTS.md).
+
+Not built, and deliberately:
+
+- **`statusline install`.** A per-root status line is the right terminal
+  indicator, and it is tamper-proof by construction: a script that lives inside
+  one config root can only run while that root is in use, so its label cannot
+  name the wrong account. Installing one means writing inside a root, which
+  this tool does not do yet, and doing it safely means merging a single key
+  into `settings.json` while preserving every key it does not understand. Real
+  roots carry hooks, permission blocks and a dozen other settings that a
+  rewritten file would destroy.
+- **`doctor --recent`**, the leak test below as a command.
+- **Settings-content validation.** An invalid model id and permission rules
+  written as English sentences both sit quietly in a live root today and pass
+  every check that only looks at directory layout.
+
+### The leak test
+
+Whatever else you check, this is the one that settles an argument. Run a real
+session, then:
+
+```sh
+find "$HOME"/.claude* -name '*.jsonl' -mmin -3
+```
+
+The path it prints is the root that is really in use. It needs no throwaway
+root, no probe and no documentation, and it works the same for the terminal and
+the desktop.
 
 ## Development
 
 ```sh
-tests/run.sh              # 70 tests, no dependencies
+tests/run.sh              # 94 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
