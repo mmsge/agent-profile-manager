@@ -96,6 +96,21 @@ offender, so it works from a cron entry or a shell hook.
 | D06 | A config root exists that no profile claims |
 | D07 | A root is not mode 700 |
 | D08 | A project directory is not an encoded path |
+| D09 | A `claude-cli://` handler is installed and cannot be pinned |
+| D10 | A stored root is not in the form its credential is keyed on |
+| D11 | A credential exists for the default root, so something ran pinned to it |
+| D12 | Keychain credential entries belong to no known root |
+
+D05 is exact rather than a guess: the Keychain service name is
+`Claude Code-credentials-<first 8 hex of sha256 of the config root path>`, with
+the account set to `$USER`. Existence is checked with `find-generic-password`
+and its output discarded, never with `-g`, so no secret is read.
+
+Two things follow from that naming, and each has its own rule. The hash covers
+the **literal path string**, so `~/.claude-work` and `~/.claude-work/` are two
+different logins (D10, and `new` normalizes to prevent it). And the suffix is
+present whenever the variable is **set at all**, so pinning to the default root
+is a different login from not pinning, which D11 reports.
 
 D03 is the one that catches real leakage, and it needs no configuration. Claude
 Code names a project directory after the working directory with every
@@ -163,16 +178,20 @@ path, so a root at a new path reads a different Keychain entry and a different
 
 ## Status
 
-macOS only. The terminal half is complete. The desktop half, `desktop` and
-`app`, is not implemented yet: whether the desktop app honours
-`CLAUDE_CONFIG_DIR` from its process environment decides that half's
-architecture, and it has to be measured on a Mac rather than guessed. Run the
-probe above to answer it.
+macOS only. The terminal half is complete, and the Keychain, URL handler and
+state-file questions are answered (see [`docs/FACTS.md`](docs/FACTS.md)).
+
+The desktop half, `desktop` and `app`, is not implemented yet. Whether the
+desktop app honours `CLAUDE_CONFIG_DIR` from its process environment decides
+that half's architecture and is still unanswered: the first probe run confirmed
+the app starts and that `--user-data-dir` works, but was interrupted before a
+Code session ran, and the embedded Claude Code writes nothing until one does.
+Re-run the probe and answer its prompt to settle it.
 
 ## Development
 
 ```sh
-tests/run.sh              # 52 tests, no dependencies
+tests/run.sh              # 70 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

@@ -9,12 +9,8 @@ case_verify_unchecked_exits_4() {
     fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
     fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
     out=$("$AP" verify 2>&1); status=$?
-    if [ "$(uname -s)" = "Darwin" ]; then
-        assert_status 4 "$status" "$out" || return
-    else
-        assert_status 4 "$status" "$out" || return
-        assert_contains "$out" "not running on macOS" || return
-    fi
+    assert_status 4 "$status" "$out" || return
+    assert_contains "$out" "not running on macOS" || return
     assert_contains "$out" "could not be checked"
 }
 
