@@ -96,7 +96,10 @@ assert_equals() {
 # new_home: a fresh throwaway HOME, echoed. Registered for cleanup.
 new_home() {
     _nh=$(mktemp -d "${TMPDIR:-/tmp}/agent-profile-test.XXXXXX")
-    printf '%s\n' "$_nh"
+    # TMPDIR ends in a slash on macOS, so the result contains "//". That is a
+    # genuinely different path string, and doctor is right to flag it, so give
+    # the fixtures a canonical home rather than teaching the rule to ignore it.
+    (cd "$_nh" && pwd)
 }
 
 # file_mode <path>: portable. GNU stat -f succeeds and reports the filesystem

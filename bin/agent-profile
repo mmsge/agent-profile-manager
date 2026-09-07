@@ -265,20 +265,22 @@ cmd_new() {
 
     [ -n "$_new_root" ] || _new_root="$HOME/$(agent_def "$_new_agent" root_prefix)$_new_name"
 
-    # Strip trailing slashes before storing. The credential is keyed on the
-    # literal path string, so "/a/b" and "/a/b/" are two different logins and
-    # only one of them is the one the user means.
-    while [ "$_new_root" != "/" ] && [ "$_new_root" != "${_new_root%/}" ]; do
-        _new_root="${_new_root%/}"
-    done
     case "$_new_root" in
         /*) ;;
         *)  die "--root must be an absolute path, because the credential is keyed
 on the literal path string. Got: $_new_root" ;;
     esac
+
+    # Canonicalise before storing. The credential is keyed on the literal path
+    # string, so "/a/b", "/a/b/", "/a//b" and "/a/./b" are four different
+    # logins and only one of them is the one the user means. Note that $TMPDIR
+    # on macOS ends in a slash, so this is reachable in ordinary use.
+    _new_root=$(canonical_path "$_new_root")
+
     if [ -z "$_new_appdata" ]; then
         _new_appdata="$(agent_def "$_new_agent" app_support)/$(agent_def "$_new_agent" app_prefix)$(capitalize "$_new_name")"
     fi
+    _new_appdata=$(canonical_path "$_new_appdata")
 
     # Idempotent, but never silently relocates: moving a root invalidates its
     # login, because credentials are keyed to the root path.
@@ -364,6 +366,17 @@ for root in sys.argv[1:]:
     digest = hashlib.sha256(unicodedata.normalize("NFC", root).encode()).hexdigest()
     print("%s\t%s\t%s" % (root, digest[:8], form))
 PY
+}
+
+# canonical_path <path>: the form cred_info calls "ok". Collapses doubled and
+# trailing slashes and "." segments, and normalises to NFC. Does not resolve
+# symlinks: the credential is keyed on the string the user exports, not on
+# where it eventually points.
+canonical_path() {
+    python3 -c '
+import os, sys, unicodedata
+print(os.path.normpath(unicodedata.normalize("NFC", sys.argv[1])))
+' "$1"
 }
 
 # keychain_available: is there a Keychain to ask at all?

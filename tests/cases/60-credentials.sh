@@ -150,6 +150,36 @@ case_new_rejects_a_relative_root() {
     assert_contains "$out" "must be an absolute path"
 }
 
+case_new_canonicalises_a_doubled_slash() {
+    # Reachable in ordinary use: $TMPDIR ends in a slash on macOS, so
+    # --root "$TMPDIR/x" arrives with "//" in it. That is a different literal
+    # string and so a different credential.
+    HOME=$(new_home); export HOME
+    "$AP" new y --root "$HOME//roots//y" >/dev/null 2>&1
+    assert_equals "$HOME/roots/y" "$(reg_root_of y)"
+}
+
+case_new_canonicalises_a_dot_segment() {
+    HOME=$(new_home); export HOME
+    "$AP" new y --root "$HOME/roots/./y" >/dev/null 2>&1
+    assert_equals "$HOME/roots/y" "$(reg_root_of y)"
+}
+
+case_doctor_flags_a_hand_written_doubled_slash() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/.config/agent-profiles" "$HOME/.claude-dbl"
+    chmod 700 "$HOME/.claude-dbl"
+    printf 'agent=claude\nroot=%s//.claude-dbl\napp_data=%s/x\ncreated=2026-09-07\n' \
+        "$HOME" "$HOME" > "$HOME/.config/agent-profiles/dbl.conf"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME//.claude-dbl")"
+    out=$(mac doctor 2>&1)
+    assert_contains "$out" "D10" || return
+    assert_contains "$out" "not-normalized"
+}
+
+run_case "new canonicalises a doubled slash"            case_new_canonicalises_a_doubled_slash
+run_case "new canonicalises a dot segment"              case_new_canonicalises_a_dot_segment
+run_case "D10 flags a hand-written doubled slash"       case_doctor_flags_a_hand_written_doubled_slash
 run_case "the credential hash matches verified values"  case_cred_hash_matches_the_verified_values
 run_case "a trailing slash is a different credential"   case_a_trailing_slash_is_a_different_credential
 run_case "D05 quiet when the Keychain has the entry"    case_d05_quiet_when_the_keychain_has_the_entry
