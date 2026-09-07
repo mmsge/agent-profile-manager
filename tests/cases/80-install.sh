@@ -101,7 +101,10 @@ case_install_links_both_names() {
     assert_status 0 "$status" "$out" || return
     [ -L "$HOME/bin/agpin" ] || { fail "no agpin link"; return; }
     [ -L "$HOME/bin/agent-profile" ] || { fail "no agent-profile link"; return; }
-    assert_equals "0.4.0" "$("${BASH:-/bin/bash}" "$HOME/bin/agpin" version | awk '{print $2}')"
+    # Compare against this checkout rather than a literal: a hardcoded version
+    # makes every release bump look like a broken installer.
+    want=$("${BASH:-/bin/bash}" "$ROOT/bin/agent-profile" version | awk '{print $2}')
+    assert_equals "$want" "$("${BASH:-/bin/bash}" "$HOME/bin/agpin" version | awk '{print $2}')"
 }
 
 case_install_is_idempotent_and_says_so() {
@@ -158,6 +161,49 @@ case_uninstall_will_not_remove_a_foreign_file_of_the_same_name() {
     assert_equals "not ours" "$(cat "$HOME/bin/agpin")"
 }
 
+# The shortcut exists only where the alternative is a refusal. That is what
+# makes it safe: there is no working unpinned invocation for it to shadow.
+case_guard_treats_a_leading_profile_name_as_the_pin() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(with_guard 'claude bouvet')
+    assert_contains "$out" "Pinning to bouvet" || return
+    assert_contains "$out" "agent ran:"
+}
+
+case_guard_forwards_the_remaining_arguments() {
+    HOME=$(new_home); export HOME
+    "$AP" new tide >/dev/null 2>&1
+    out=$(with_guard 'claude tide --continue --verbose')
+    assert_contains "$out" "agent ran: --continue --verbose"
+}
+
+case_guard_still_refuses_a_first_argument_that_is_not_a_profile() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(with_guard "claude 'fix the bug'")
+    assert_contains "$out" "Refusing to run claude unpinned" || return
+    assert_not_contains "$out" "agent ran:"
+}
+
+# Pinned, claude takes a prompt. Stealing a word that happens to match a
+# profile name would break that, so the shortcut must not apply here.
+case_guard_leaves_the_argument_alone_when_already_pinned() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new tide >/dev/null 2>&1
+    out=$(with_guard "export CLAUDE_CONFIG_DIR=$HOME/.claude-tide; claude bouvet")
+    assert_contains "$out" "agent ran: bouvet" || return
+    assert_not_contains "$out" "Pinning to"
+}
+
+case_guard_suggests_the_shortcut_when_it_refuses() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(with_guard 'claude')
+    assert_contains "$out" "claude <profile> [args...]"
+}
+
 run_case "messages use the invoked name"          case_messages_use_the_name_it_was_invoked_as
 run_case "errors use the invoked name"            case_errors_use_the_name_it_was_invoked_as
 run_case "findings use the invoked name"          case_findings_use_the_name_it_was_invoked_as
@@ -173,3 +219,8 @@ run_case "install refuses to replace a real file" case_install_refuses_to_replac
 run_case "install takes a custom name"            case_install_takes_a_custom_name
 run_case "uninstall leaves other files alone"     case_uninstall_leaves_anything_it_did_not_create
 run_case "uninstall spares a foreign file"        case_uninstall_will_not_remove_a_foreign_file_of_the_same_name
+run_case "guard takes a leading profile name"     case_guard_treats_a_leading_profile_name_as_the_pin
+run_case "guard forwards remaining arguments"     case_guard_forwards_the_remaining_arguments
+run_case "guard refuses a non-profile first arg"  case_guard_still_refuses_a_first_argument_that_is_not_a_profile
+run_case "guard leaves the arg alone when pinned" case_guard_leaves_the_argument_alone_when_already_pinned
+run_case "guard suggests the shortcut"            case_guard_suggests_the_shortcut_when_it_refuses
