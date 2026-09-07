@@ -396,7 +396,7 @@ entry there was read out of the documentation or argued from it. None was
 observed on a Windows machine, so none is `VERIFIED`.
 
 ```powershell
-tools\probe-claude-windows.ps1
+powershell -ExecutionPolicy Bypass -File tools\probe-claude-windows.ps1
 ```
 
 The probe works in a throwaway config root and app data directory under

@@ -803,8 +803,13 @@ transcript it finds.
 
 ### How these move forward
 
-Someone has to run `tools/probe-claude-windows.ps1` on Windows, with Claude
-Code installed and the desktop app signed in, and paste the output back here.
+Someone has to run the probe on Windows, with Claude Code installed and the
+desktop app signed in, and paste the output back here.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\probe-claude-windows.ps1
+```
+
 That settles W02, W03, W04 and W06, and confirms W01 on a real machine rather
 than on a documentation page. W05 needs one extra minute from a person: pin the
 launcher the probe leaves behind, launch from the pin, and run the leak test to
