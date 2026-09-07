@@ -640,10 +640,12 @@ read PowerShell profiles."
 
 Read that sentence carefully. "User and system environment variables" are the
 two scopes Windows keeps in the registry, not a variable placed in the
-environment of one launch. It says a variable written with
-`[Environment]::SetEnvironmentVariable(..., "User")` reaches the app, and that
-is the one thing a profile manager must never do, because a user-scope variable
-pins every process that account starts, this tool's other profiles included.
+environment of one launch. Read that way, it promises that a variable written
+with `[Environment]::SetEnvironmentVariable(..., "User")` reaches the app, and
+that is the one thing a profile manager must never write, because a user-scope
+variable pins every process that account starts, this tool's other profiles
+included. What the sentence does not say either way is whether one launch's own
+environment reaches the app, which is the question W04 asks.
 
 Documented, on the app running the same code:
 
