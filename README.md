@@ -458,3 +458,12 @@ redirects all of them into a throwaway tree.
 
 Versioning is semantic. `Z` for fixes, `Y` for backwards-compatible features,
 `X` for breaking changes.
+
+## Licence
+
+`agent-profile` is licensed under the GNU General Public License version 3 or
+later (GPL-3.0-or-later). See `LICENSE` for the full text.
+
+Use it on any machine, for any customer, for any purpose, free of charge. The
+one condition is on redistribution: if you hand out a modified copy, or a
+repackaged one, you must publish those modifications under the same licence.

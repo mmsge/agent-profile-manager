@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
 # run, shell, which: pinned execution and the derived label.
 
