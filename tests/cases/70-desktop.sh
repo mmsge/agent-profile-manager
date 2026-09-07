@@ -15,6 +15,12 @@ desk() {
 }
 
 # desktop_fixture: a throwaway HOME with one profile and every stand-in tool.
+#
+# The stand-in security(1) is not optional. These cases pin the platform to
+# Darwin, and on a real Mac that would send doctor and verify at the runner's
+# own Keychain, so the same commit would pass on Linux and behave differently
+# on macOS. It is given tide's own service so the Keychain-backed rules are
+# quiet and a D13 assertion is testing D13.
 desktop_fixture() {
     HOME=$(new_home); export HOME
     mkdir -p "$HOME/Claude.app"
@@ -22,6 +28,7 @@ desktop_fixture() {
     fake_open "$HOME/fakebin" env
     fake_icon_tools "$HOME/fakebin"
     "$AP" new tide >/dev/null 2>&1
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-tide")"
 }
 
 # want_line: the launch line the tool should produce for the tide fixture.
