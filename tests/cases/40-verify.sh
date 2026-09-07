@@ -73,7 +73,7 @@ case_verify_unchecked_without_roots() {
     HOME=$(new_home); export HOME
     out=$("$AP" verify 2>&1); status=$?
     assert_status 4 "$status" || return
-    assert_contains "$out" "no existing config root"
+    assert_contains "$out" "no profile is registered"
 }
 
 case_verify_notes_version_drift() {
@@ -89,6 +89,30 @@ case_verify_notes_version_drift() {
     assert_contains "$out" "facts were checked against"
 }
 
+# "No root to inspect" on a machine holding three of them is false, and the
+# remedy it used to offer is wrong for someone already signed in and merely
+# not registered. Verify must say which of the two situations it is in.
+case_verify_says_unregistered_not_absent() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/.claude-tide"
+    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
+
+    out=$("$AP" verify 2>&1)
+    assert_contains "$out" "no profile is registered" || return
+    assert_not_contains "$out" "no existing config root" || return
+    assert_not_contains "$out" "Create a profile and sign in"
+}
+
+case_verify_reports_registered_roots_that_vanished() {
+    HOME=$(new_home); export HOME
+    "$AP" new gone >/dev/null 2>&1
+    rm -rf "$HOME/.claude-gone"
+
+    out=$("$AP" verify 2>&1)
+    assert_contains "$out" "every registered root is missing" || return
+    assert_not_contains "$out" "no profile is registered"
+}
+
 run_case "verify exits 4 when only unchecked remain"  case_verify_unchecked_exits_4
 run_case "verify confirms cwd is recorded"            case_verify_confirms_cwd_is_recorded
 run_case "verify catches cwd disappearing (F11)"      case_verify_catches_cwd_disappearing
@@ -96,3 +120,5 @@ run_case "verify catches the account key moving"      case_verify_catches_accoun
 run_case "verify reports partial cwd coverage"        case_verify_reports_partial_cwd_coverage
 run_case "verify is unchecked without any roots"      case_verify_unchecked_without_roots
 run_case "verify notes agent version drift"           case_verify_notes_version_drift
+run_case "verify says unregistered, not absent"    case_verify_says_unregistered_not_absent
+run_case "verify reports vanished registered roots" case_verify_reports_registered_roots_that_vanished
