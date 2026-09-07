@@ -31,6 +31,10 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 : "${AGENT_PROFILE_APPS_DIR:=$HOME/Applications}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
 
+# Resolved once so the test suite can exercise the macOS-only audit rules on
+# another platform rather than shipping them unrun.
+: "${AGENT_PROFILE_PLATFORM:=$(uname -s)}"
+
 # ---------------------------------------------------------------------------
 # The agent seam.
 #
@@ -49,6 +53,9 @@ KNOWN_AGENTS="claude"
 #   default_root  the root the agent uses when nothing is pinned
 #   state_file    agent state file that sits beside the default root
 #   state_base    basename of that state file, as found inside a pinned root
+#   cred_service  Keychain service name, before the per-root suffix
+#   url_handler   bundle that registers the agent's deep-link scheme
+#   url_scheme    that scheme
 #   app_prefix    directory-name prefix for the desktop app's data dir
 #   app_support   parent directory for desktop app data dirs
 agent_def() {
@@ -63,6 +70,9 @@ agent_def() {
                 default_root) printf '%s\n' "$HOME/.claude" ;;
                 state_file)   printf '%s\n' "$HOME/.claude.json" ;;
                 state_base)   printf '%s\n' ".claude.json" ;;
+                cred_service) printf '%s\n' "Claude Code-credentials" ;;
+                url_handler)  printf '%s\n' "$HOME/Applications/Claude Code URL Handler.app" ;;
+                url_scheme)   printf '%s\n' "claude-cli" ;;
                 app_prefix)   printf '%s\n' "Claude-" ;;
                 app_support)  printf '%s\n' "$HOME/Library/Application Support" ;;
                 *) die "internal: unknown agent field '$_ad_field'" ;;
@@ -254,6 +264,18 @@ cmd_new() {
     is_known_agent "$_new_agent" || die "unknown agent '$_new_agent' (known: $KNOWN_AGENTS)"
 
     [ -n "$_new_root" ] || _new_root="$HOME/$(agent_def "$_new_agent" root_prefix)$_new_name"
+
+    # Strip trailing slashes before storing. The credential is keyed on the
+    # literal path string, so "/a/b" and "/a/b/" are two different logins and
+    # only one of them is the one the user means.
+    while [ "$_new_root" != "/" ] && [ "$_new_root" != "${_new_root%/}" ]; do
+        _new_root="${_new_root%/}"
+    done
+    case "$_new_root" in
+        /*) ;;
+        *)  die "--root must be an absolute path, because the credential is keyed
+on the literal path string. Got: $_new_root" ;;
+    esac
     if [ -z "$_new_appdata" ]; then
         _new_appdata="$(agent_def "$_new_agent" app_support)/$(agent_def "$_new_agent" app_prefix)$(capitalize "$_new_name")"
     fi
@@ -296,6 +318,70 @@ if you really mean to start over."
     printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
     printf '\n'
     printf 'Next: agent-profile run %s   (it will ask you to log in)\n' "$_new_name"
+}
+
+# ---------------------------------------------------------------------------
+# Credentials
+#
+# Existence only. This tool never reads, writes or moves a credential, and
+# never calls security with -g, so no secret is ever touched.
+#
+# Verified against the Claude Code implementation (see docs/FACTS.md F03). The
+# service name is built as:
+#
+#     "Claude Code" + OAUTH_FILE_SUFFIX + "-credentials" + suffix
+#
+# where suffix is empty when CLAUDE_CONFIG_DIR is unset, and otherwise the
+# first 8 hex characters of sha256 over the NFC-normalized *raw value* of the
+# variable. The account is $USER.
+#
+# Two consequences the audit rules below depend on. The suffix is present
+# whenever the variable is set at all, so pinning to the default root produces
+# a different login from not pinning. And because the hash is over the literal
+# string rather than a resolved path, a trailing slash is a different login.
+# ---------------------------------------------------------------------------
+
+# cred_info <root>...: emits root<TAB>hash<TAB>form, one python3 call for all.
+#
+# form is "ok", or names the way the path departs from the form its credential
+# is keyed on. Because the hash covers the literal string, "/a/b" and "/a/b/"
+# are different logins, so a stored root that is not in canonical form will
+# quietly fail to find its own credential.
+cred_info() {
+    python3 - "$@" <<'PY'
+import hashlib, os, sys, unicodedata
+
+for root in sys.argv[1:]:
+    form = "ok"
+    if not root.startswith("/"):
+        form = "not-absolute"
+    elif root != root.rstrip("/"):
+        form = "trailing-slash"
+    elif root != unicodedata.normalize("NFC", root):
+        form = "not-nfc"
+    elif os.path.normpath(root) != root:
+        form = "not-normalized"
+    digest = hashlib.sha256(unicodedata.normalize("NFC", root).encode()).hexdigest()
+    print("%s\t%s\t%s" % (root, digest[:8], form))
+PY
+}
+
+# keychain_available: is there a Keychain to ask at all?
+keychain_available() {
+    [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ] && command -v security >/dev/null 2>&1
+}
+
+# keychain_has <service>: does an entry exist? Existence only, never -g.
+keychain_has() {
+    security find-generic-password -s "$1" -a "${USER:-}" >/dev/null 2>&1
+}
+
+# keychain_services: every Claude credential service name on this machine.
+# dump-keychain without -g lists attributes only and reads no secret.
+keychain_services() {
+    security dump-keychain 2>/dev/null \
+        | sed -n 's/.*"svce"<blob>="\(Claude Code[^"]*-credentials[^"]*\)".*/\1/p' \
+        | sort -u
 }
 
 # ---------------------------------------------------------------------------
@@ -584,20 +670,39 @@ cmd_doctor() {
                 "Fix with: chmod 700 '$_doc_root'"
         fi
 
-        # D05. A missing credential file is not proof on macOS, where the
-        # credential lives in the Keychain instead. Only report when the root
-        # also has no signed-in account recorded, which means genuinely not
-        # logged in rather than logged in via the Keychain.
-        _doc_state="$_doc_root/$(agent_def "$_doc_agent" state_base)"
-        if [ ! -f "$_doc_root/.credentials.json" ]; then
+        # D05 and D10. The credential check is exact now that the Keychain
+        # naming is known (docs/FACTS.md F03), so a missing credential is a
+        # real finding rather than a guess.
+        _doc_info=$(cred_info "$_doc_root")
+        _doc_hash=$(printf '%s' "$_doc_info" | cut -f2)
+        _doc_form=$(printf '%s' "$_doc_info" | cut -f3)
+        _doc_service="$(agent_def "$_doc_agent" cred_service)-$_doc_hash"
+
+        if [ "$_doc_form" != "ok" ]; then
+            finding "D10" "profile '$_doc_name' has a root that is not in canonical form ($_doc_form)" \
+                "$_doc_root" \
+                "The credential is keyed on this literal string, not on a resolved path," \
+                "so this root and its canonical spelling are two different logins." \
+                "Recreate the profile with the canonical path."
+        fi
+
+        if keychain_available; then
+            if ! keychain_has "$_doc_service" && [ ! -f "$_doc_root/.credentials.json" ]; then
+                finding "D05" "profile '$_doc_name' has no credential" \
+                    "$_doc_root" \
+                    "No Keychain entry '$_doc_service' and no .credentials.json." \
+                    "Sign in with: agent-profile run $_doc_name"
+            fi
+        elif [ ! -f "$_doc_root/.credentials.json" ]; then
+            # No Keychain to ask, so fall back to whether an account is on
+            # record and say plainly that the check was weaker.
             _doc_acct=$(read_accounts "$(agent_def "$_doc_agent" state_base)" "$_doc_root" | cut -f2)
             if [ -z "$_doc_acct" ] || [ "$_doc_acct" = "<unreadable>" ]; then
                 finding "D05" "profile '$_doc_name' has no credential and no signed-in account" \
                     "$_doc_root" \
-                    "No .credentials.json and no oauthAccount in $_doc_state." \
-                    "Sign in with: agent-profile run $_doc_name" \
-                    "The Keychain entry name for a non-default root is unverified;" \
-                    "see docs/FACTS.md question 3."
+                    "No .credentials.json and no account on record." \
+                    "There is no Keychain on this system, so this check is weaker than on macOS." \
+                    "Sign in with: agent-profile run $_doc_name"
             fi
         fi
 
@@ -657,7 +762,8 @@ cmd_doctor() {
             [ -d "$_doc_cand" ] || continue
             _doc_known=""
             for _doc_name in $_doc_names; do
-                [ "$(reg_get "$_doc_name" root)" = "$_doc_cand" ] && _doc_known=1
+                _doc_regroot=$(reg_get "$_doc_name" root)
+                [ "${_doc_regroot%/}" = "${_doc_cand%/}" ] && _doc_known=1
             done
             [ -n "$_doc_known" ] && continue
             finding "D06" "a $_doc_agent config root exists that no profile claims" \
@@ -666,6 +772,68 @@ cmd_doctor() {
                 "Unregistered roots are invisible to every other check here."
         done
     done
+
+    # ---- D09: a deep-link handler that cannot carry a config root ---------
+    #
+    # The handler is launched by LaunchServices, which passes no environment
+    # from any shell, so a link opens against whatever the default root is
+    # regardless of what this tool has set up. See docs/FACTS.md F04.
+    for _doc_agent in $KNOWN_AGENTS; do
+        _doc_handler=$(agent_def "$_doc_agent" url_handler)
+        [ -d "$_doc_handler" ] || continue
+        finding "D09" "a $(agent_def "$_doc_agent" url_scheme):// handler is installed and cannot be pinned" \
+            "$_doc_handler" \
+            "LaunchServices passes no environment, so a deep link opens against the" \
+            "default root whatever this tool has configured. Treat links as a leak" \
+            "path: open the project through a pinned shell instead of clicking them."
+    done
+
+    # ---- D11, D12: what the Keychain says --------------------------------
+    if keychain_available; then
+        for _doc_agent in $KNOWN_AGENTS; do
+            _doc_base=$(agent_def "$_doc_agent" cred_service)
+            _doc_default=$(agent_def "$_doc_agent" default_root)
+
+            # D11. A credential for the default root can only exist if the
+            # variable was set to the default path. That is a different login
+            # from not pinning at all, and it is how a default root ends up
+            # holding one account's sessions while another runs unpinned.
+            _doc_dhash=$(cred_info "$_doc_default" | cut -f2)
+            _doc_claimed=""
+            for _doc_name in $_doc_names; do
+                [ "$(reg_get "$_doc_name" root)" = "$_doc_default" ] && _doc_claimed=1
+            done
+            if [ -z "$_doc_claimed" ] && keychain_has "$_doc_base-$_doc_dhash"; then
+                finding "D11" "a credential exists for the default $_doc_agent root, so something ran pinned to it" \
+                    "$_doc_base-$_doc_dhash  ($_doc_default)" \
+                    "Setting the variable to the default path is not the same as leaving" \
+                    "it unset: it is a separate login, stored under a separate entry." \
+                    "The unpinned login is '$_doc_base' with no suffix."
+            fi
+
+            # D12. Entries whose suffix matches no root on this machine. The
+            # hash is one-way, so these can only be reported, never resolved.
+            _doc_known="$_doc_base
+$_doc_base-$_doc_dhash"
+            for _doc_name in $_doc_names; do
+                _doc_r=$(reg_get "$_doc_name" root)
+                [ -n "$_doc_r" ] || continue
+                _doc_known="$_doc_known
+$_doc_base-$(cred_info "$_doc_r" | cut -f2)"
+            done
+
+            _doc_orphans=$(keychain_services \
+                | grep -c -F -x -v -f <(printf '%s\n' "$_doc_known") 2>/dev/null)
+            if [ "${_doc_orphans:-0}" -gt 0 ]; then
+                finding "D12" "$_doc_orphans Keychain credential entr(ies) belong to no known root" \
+                    "service prefix: $_doc_base-" \
+                    "Left over from roots that no longer exist, or from roots this tool" \
+                    "does not know about. The suffix is a one-way hash, so they cannot be" \
+                    "traced back to a path. Harmless, but they accumulate." \
+                    "This tool will not delete them: it never touches credentials."
+            fi
+        done
+    fi
 
     # ---- D03: the same project under two roots ----------------------------
     #
@@ -912,21 +1080,64 @@ cmd_verify() {
     printf '\n'
 
     # ---- Facts that need macOS and the desktop app ------------------------
-    if [ "$(uname -s)" != "Darwin" ]; then
-        vunchecked "F01" "not running on macOS" "F02, F03, F04 and F05 need macOS too."
-        VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 4))
+    if [ "$AGENT_PROFILE_PLATFORM" != "Darwin" ]; then
+        vunchecked "F01" "not running on macOS" "F02 and F05 need macOS too."
+        VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 1))
     else
         vunchecked "F01" "does the desktop app honour the config-dir variable?" \
-            "Run: bash tools/probe-claude-desktop.sh"
+            "Run: bash tools/probe-claude-desktop.sh" \
+            "Answer its prompt about whether a Code session actually ran."
         vunchecked "F02" "does the app's local environment editor set it early enough?" \
             "Manual. Only matters if F01 is negative."
-        vunchecked "F03" "Keychain service and account naming for a non-default root" \
-            "Run: bash tools/probe-claude-desktop.sh" \
-            "Until this is known, doctor's D05 cannot check the Keychain."
-        vunchecked "F04" "what the Claude Code URL handler launches" \
-            "Run: bash tools/probe-claude-desktop.sh"
-        vunchecked "F05" "whether an app update relocated the Claude binary" \
-            "Run: bash tools/probe-claude-desktop.sh"
+
+        # F03 is known, so this is a real check now: the naming must still
+        # produce an entry for a root that has a signed-in account.
+        _ver_found=0
+        _ver_missing=0
+        if keychain_available; then
+            for _ver_root in ${_ver_roots[@]+"${_ver_roots[@]}"}; do
+                _ver_svc="$(agent_def claude cred_service)-$(cred_info "$_ver_root" | cut -f2)"
+                if keychain_has "$_ver_svc"; then
+                    _ver_found=$((_ver_found + 1))
+                else
+                    _ver_missing=$((_ver_missing + 1))
+                fi
+            done
+            if [ "$_ver_found" -gt 0 ]; then
+                vok "F03" "the Keychain naming still resolves: $_ver_found of $((_ver_found + _ver_missing)) root(s) found"
+            elif [ "$_ver_missing" -gt 0 ] && [ "$with_account" -gt 0 ]; then
+                vbroken "F03" "no root's credential was found under the expected Keychain name" \
+                    "$with_account root(s) record a signed-in account, so entries should exist." \
+                    "The service naming has probably changed. doctor's D05 will report" \
+                    "false findings until docs/FACTS.md F03 is re-established." \
+                    "Re-run: bash tools/probe-claude-desktop.sh"
+            else
+                vunchecked "F03" "no root is signed in, so the naming could not be exercised"
+            fi
+        else
+            vunchecked "F03" "no security command available"
+        fi
+
+        # F05: has the app binary moved since the recorded baseline?
+        _ver_app="/Applications/Claude.app"
+        if [ -d "$_ver_app" ]; then
+            _ver_exe=$(defaults read "$_ver_app/Contents/Info.plist" CFBundleExecutable 2>/dev/null)
+            if [ -n "$_ver_exe" ] && [ -x "$_ver_app/Contents/MacOS/$_ver_exe" ]; then
+                vok "F05" "the app binary resolves via CFBundleExecutable ($_ver_exe)"
+            else
+                vbroken "F05" "the app binary is not where the bundle says it is" \
+                    "Generated .app launchers will be broken until this is fixed."
+            fi
+        else
+            vunchecked "F05" "Claude Desktop is not installed at $_ver_app"
+        fi
+
+        # F04: the deep-link handler is a known leak path, reported by D09.
+        if [ -d "$(agent_def claude url_handler)" ]; then
+            vnote "F04" "the claude-cli:// handler is installed; doctor reports it as D09"
+        else
+            vok "F04" "no claude-cli:// handler is installed, so there is no link leak path"
+        fi
     fi
 
     vnote "F06" "a root cannot be relocated without losing its login"

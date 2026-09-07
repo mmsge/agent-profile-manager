@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2317,SC2329  # helpers are called from the sourced case files
+# shellcheck disable=SC2016  # fake_keychain generates script text; it must not expand here
 #
 # tests/run.sh: dependency-free test harness.
 #
@@ -112,6 +113,40 @@ fixture_transcript() {
 fixture_transcript_nocwd() {
     mkdir -p "$1/projects/$2"
     printf '{"type":"user","version":"9.9.9","sessionId":"s1"}\n' > "$1/projects/$2/s1.jsonl"
+}
+
+# fake_keychain <bindir> <service>...: a stand-in security(1) that knows only
+# the services named. Lets the macOS-only audit rules run on any platform,
+# paired with AGENT_PROFILE_PLATFORM=Darwin.
+fake_keychain() {
+    _fk_dir="$1"; shift
+    mkdir -p "$_fk_dir"
+    {
+        printf '#!/bin/sh\n'
+        printf 'KNOWN=$(cat <<KCEOF\n'
+        for _fk_svc in ${1+"$@"}; do printf '%s\n' "$_fk_svc"; done
+        printf 'KCEOF\n)\n'
+        printf 'case "$1" in\n'
+        printf '  find-generic-password) shift; svc=""\n'
+        printf '    while [ $# -gt 0 ]; do [ "$1" = "-s" ] && { shift; svc="$1"; }; shift; done\n'
+        printf '    printf "%%s\\n" "$KNOWN" | grep -qxF "$svc" && exit 0 || exit 44 ;;\n'
+        printf '  dump-keychain) printf "%%s\\n" "$KNOWN" | sed \x27s/^/    "svce"<blob>="/; s/$/"/\x27 ;;\n'
+        printf 'esac\n'
+    } > "$_fk_dir/security"
+    chmod +x "$_fk_dir/security"
+}
+
+# cred_service_for <root>: the Keychain service name the agent uses for a root.
+cred_service_for() {
+    printf 'Claude Code-credentials-%s\n' "$(python3 -c '
+import hashlib, sys, unicodedata
+print(hashlib.sha256(unicodedata.normalize("NFC", sys.argv[1]).encode()).hexdigest()[:8])
+' "$1")"
+}
+
+# reg_root_of <name>: the root recorded in a profile's registry entry.
+reg_root_of() {
+    sed -n 's/^root=//p' "$HOME/.config/agent-profiles/$1.conf" | head -1
 }
 
 # fixture_account <root> <email> <org>

@@ -33,7 +33,9 @@ chmod 700 "$PROBE_ROOT"
 cleanup() {
     rm -rf "$TMP"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'INTERRUPTED=1' INT
+INTERRUPTED=0
 
 say "agent-profile desktop probe, format $PROBE_VERSION"
 say "date         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -119,47 +121,80 @@ else
     say "  Launching the app binary directly (not via open, which dispatches"
     say "  through launchd and would drop the environment entirely)."
     say ""
-    say "  IMPORTANT: when the app opens, click the Code tab and start one local"
-    say "  session, then quit the app. The embedded Claude Code only writes once"
-    say "  it actually runs."
+    say "  DO THIS, or the result means nothing:"
+    say "    1. When the app opens, click the Code tab."
+    say "    2. Start one local session and let it load."
+    say "    3. Come back here."
+    say ""
+    say "  The embedded Claude Code writes nothing until a session actually runs,"
+    say "  so quitting early looks identical to the app ignoring the variable."
     say ""
 
     CLAUDE_CONFIG_DIR="$PROBE_ROOT" "$BIN" --user-data-dir="$PROBE_APPDATA" >/dev/null 2>&1 &
     PROBE_PID=$!
-    say "  Launched as pid $PROBE_PID. Waiting up to 180s for you to do that."
-    say "  Press Ctrl-C once you have quit the app if you finish sooner."
+    say "  Launched as pid $PROBE_PID. Waiting up to 300s, or until the root changes."
 
     WAITED=0
-    while [ "$WAITED" -lt 180 ]; do
+    while [ "$WAITED" -lt 300 ]; do
         sleep 5
         WAITED=$((WAITED + 5))
+        [ "$INTERRUPTED" = "1" ] && break
         NOW=$(find "$PROBE_ROOT" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')
         [ "$NOW" -gt "$BEFORE" ] && break
+        kill -0 "$PROBE_PID" 2>/dev/null || break
     done
 
-    kill "$PROBE_PID" 2>/dev/null
-
     AFTER=$(find "$PROBE_ROOT" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')
+    APPDATA_ENTRIES=$(find "$PROBE_APPDATA" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+
     say ""
     kv "entries in root before" "$BEFORE"
     kv "entries in root after" "$AFTER"
+    kv "entries in app data dir" "$APPDATA_ENTRIES"
+    say ""
+
     if [ "$AFTER" -gt "$BEFORE" ]; then
         say "  ANSWER: YES. The app's embedded Claude Code wrote to the pinned root."
         say "  What appeared:"
         find "$PROBE_ROOT" -mindepth 1 -maxdepth 2 | sed 's/^/    /'
+        kill "$PROBE_PID" 2>/dev/null
     else
-        say "  ANSWER: NO, or the session never ran. Nothing was written to the"
-        say "  pinned root."
-        say ""
-        say "  Check the app data dir, which --user-data-dir should have populated"
-        say "  regardless. If that is also empty, the app never really started and"
-        say "  this run says nothing about F01:"
-        find "$PROBE_APPDATA" -mindepth 1 -maxdepth 1 2>/dev/null | head -10 | sed 's/^/    /'
-        say ""
-        say "  If the app data dir IS populated but the root is empty, F01 is a"
-        say "  genuine no, and F02 becomes the route: open the app pinned to this"
-        say "  app data dir, use the environment dropdown, hover Local, click the"
-        say "  gear, set CLAUDE_CONFIG_DIR, then re-run this probe."
+        # Nothing was written. That is only a NO if a session really ran, so
+        # ask rather than guess. Reporting a false NO here would send the whole
+        # desktop design down the wrong road.
+        RAN=""
+        if [ -r /dev/tty ]; then
+            printf '  Did you start a Code session in the app before coming back? [y/N] ' > /dev/tty
+            read -r RAN < /dev/tty
+        fi
+        kill "$PROBE_PID" 2>/dev/null
+
+        case "$RAN" in
+            [yY]*)
+                if [ "$APPDATA_ENTRIES" -gt 0 ]; then
+                    say ""
+                    say "  ANSWER: NO. A Code session ran and the pinned root stayed empty,"
+                    say "  while --user-data-dir populated its directory, so the app started"
+                    say "  fine and simply does not take CLAUDE_CONFIG_DIR from its process"
+                    say "  environment."
+                    say ""
+                    say "  F02 is now the route. In the app, with this app data dir:"
+                    say "    environment dropdown -> hover Local -> gear icon"
+                    say "    set CLAUDE_CONFIG_DIR=$PROBE_ROOT"
+                    say "  then re-run this probe and answer y again."
+                else
+                    say ""
+                    say "  ANSWER: INCONCLUSIVE. The app data dir is empty too, so the app"
+                    say "  never really started and this run says nothing about F01."
+                fi
+                ;;
+            *)
+                say ""
+                say "  ANSWER: INCONCLUSIVE. No Code session ran, and the embedded Claude"
+                say "  Code writes nothing until one does. This is not evidence either way."
+                say "  Re-run and start a session before returning."
+                ;;
+        esac
     fi
 fi
 

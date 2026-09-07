@@ -9,7 +9,8 @@ tool quietly rotting.
 tells you which it could not. Run it after an agent update, then update this
 file if anything moved.
 
-**Last full review:** 2026-09-07, against Claude Code **2.1.263**.
+**Last full review:** 2026-09-07, against Claude Code **2.1.263** and Claude
+Desktop **1.46388.4**, on macOS 26.6.2.
 
 Status values:
 
@@ -43,6 +44,18 @@ profile. Launching the Mach-O binary directly passes the environment through;
 `open -n -a … --args …` does not, because it dispatches through launchd and the
 child inherits nothing from the invoking shell.
 
+**Attempted 2026-09-07, inconclusive.** The probe launched the binary with the
+variable set and `--user-data-dir` pointed at a throwaway directory. The app
+data directory was populated (`Preferences`, `GPUCache`, `blob_storage`,
+`claude_desktop_config.json` and more), which proves the app started and that
+`--user-data-dir` works. The config root gained nothing, but the run was
+interrupted before a Code session was started, and the embedded Claude Code
+only writes once it actually runs. So this says nothing about F01 either way.
+
+The probe now asks, at the end, whether a Code session was actually started,
+and reports `INCONCLUSIVE` rather than `NO` when it was not. Re-run it and
+answer that prompt to settle this.
+
 **How to check:** `bash tools/probe-claude-desktop.sh`
 
 ### F02 Does the app's local environment editor set `CLAUDE_CONFIG_DIR` early enough?
@@ -60,31 +73,80 @@ job becomes configuring and auditing it rather than launching around it.
 
 ### F03 What is the Keychain service and account naming for a non-default root?
 
-**Status:** `UNVERIFIED`. Undocumented.
+**Status:** `VERIFIED` 2026-09-07 against 2.1.263, from the implementation and
+confirmed against real entries.
 
-This is why `doctor`'s D05 does not treat a missing `.credentials.json` as
-proof that a root has no credential: on macOS the credential is in the
-Keychain. D05 only reports when the root also records no signed-in account.
+The service name is built as:
 
-The tool must never read credential content and must never call `security` with
-`-g`. Establishing the naming means reading entry *metadata* only.
+```
+"Claude Code" + OAUTH_FILE_SUFFIX + "-credentials" + suffix
+```
 
-**How to check:** `bash tools/probe-claude-desktop.sh`
+`OAUTH_FILE_SUFFIX` is empty by default (`-custom-oauth` and `-local-oauth`
+exist for other sign-in modes). `suffix` is empty when `CLAUDE_CONFIG_DIR` is
+unset, and otherwise a dash followed by the **first 8 hex characters of
+sha256** over the **NFC-normalized raw value of the variable**. The account is
+`$USER`.
+
+Confirmed against three real entries on the target machine:
+
+| Path | sha256[:8] | Present |
+| --- | --- | --- |
+| `/Users/markus.mg/.claude` | `1c128223` | yes |
+| `/Users/markus.mg/.claude-bouvet` | `2241c977` | yes |
+| `/Users/markus.mg/.claude-tide` | `4c36052e` | yes |
+
+Two consequences the audit depends on.
+
+**The suffix is present whenever the variable is set at all**, not when it
+differs from the default. So `CLAUDE_CONFIG_DIR=~/.claude` is a *different
+login* from leaving it unset, stored under a different entry. This is the
+credential half of F10, and D11 reports it.
+
+**The hash covers the literal string, not a resolved path.** A trailing slash,
+a relative path or a non-NFC spelling is a different login. That is why `new`
+normalizes a root before storing it, and why D10 reports a stored root that is
+not in canonical form.
+
+D05 uses this to check a credential exactly, with
+`security find-generic-password -s <service> -a $USER`, discarding the output
+and reading only the exit status. Never `-g`, so no secret is touched.
 
 ### F04 What does `~/Applications/Claude Code URL Handler.app` launch?
 
-**Status:** `UNVERIFIED`. If `claude-cli://` links cannot be pinned to a
-profile, they are a leak path and `doctor` should grow a rule for them.
+**Status:** `VERIFIED` 2026-09-07. It is a leak path.
 
-**How to check:** `bash tools/probe-claude-desktop.sh`
+Bundle identifier `com.anthropic.claude-code-url-handler`, claiming the
+`claude-cli` URL scheme, executing a Mach-O binary at `Contents/MacOS/claude`.
+
+It is launched by LaunchServices, which passes no environment from any shell,
+so a `claude-cli://` link cannot carry a config root and opens against the
+default root whatever this tool has configured. `open` has the same problem for
+the same reason, which is why the desktop launcher execs the app binary
+directly.
+
+D09 reports the handler's presence for this reason. There is no fix available
+from this tool: the remedy is to open a project through a pinned shell rather
+than by clicking a link.
 
 ### F05 Does an app update replace or relocate the Claude binary?
 
-**Status:** `UNVERIFIED`. Decides whether generated `.app` bundles need a
-version-independent way to resolve the binary, or can hard-code the path.
+**Status:** baseline recorded 2026-09-07. Needs a second reading after an
+update to answer the question.
 
-**How to check:** `bash tools/probe-claude-desktop.sh`, then again after an
-update. It records the path, inode and `CFBundleShortVersionString`.
+| | |
+| --- | --- |
+| Bundle | `/Applications/Claude.app` |
+| `CFBundleShortVersionString` | 1.46388.4 |
+| `CFBundleExecutable` | Claude |
+| Binary | `/Applications/Claude.app/Contents/MacOS/Claude` |
+| inode | 29735765 |
+| size | 120064 |
+
+The path is the conventional one and the executable name is stable in the
+bundle metadata, so resolving it through `CFBundleExecutable` rather than
+hard-coding `Claude` is the cheap safeguard. Re-run the probe after the next
+desktop update and compare.
 
 ### F06 Can a config root be relocated without losing its login?
 
@@ -138,20 +200,19 @@ separate logins, and moving a root invalidates its login (F06).
 
 ### F10 Setting the variable to the default path is not a no-op
 
-**Status:** `UNVERIFIED` in this repository; observed by the owner.
+**Status:** `VERIFIED` 2026-09-07 against 2.1.263.
 
-`CLAUDE_CONFIG_DIR=~/.claude` is claimed to produce a different layout from
-leaving it unset, because `.claude.json` moves inside the root. The owner
-observed two `.claude.json` files holding different accounts' state on the
-machine this tool was written for.
+Running the CLI with `CLAUDE_CONFIG_DIR` pointed at a throwaway root wrote
+`.claude.json` and `backups/` **inside that root**. So the state file does move
+under the variable, and `CLAUDE_CONFIG_DIR=~/.claude` produces a different
+layout from leaving the variable unset.
 
-The documentation is genuinely ambiguous here: `~/.claude.json` is not literally
-a `~/.claude` path, so F08's sweeping statement does not settle it.
+F03 shows the same split applies to credentials: the hashed Keychain entry
+exists whenever the variable is set, including when it is set to the default
+path, and that is a separate login from the unsuffixed entry.
 
 This is why `doctor` never treats "pinned to the default root" as equivalent to
-"unpinned", and why D01 says so in its output.
-
-**How to check:** `bash tools/probe-claude-desktop.sh` reports it.
+"unpinned", and why D01 and D11 are separate rules with separate causes.
 
 ### F11 Transcripts record their own working directory
 
