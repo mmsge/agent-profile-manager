@@ -10,7 +10,7 @@
 
 set -u
 
-AGENT_PROFILE_VERSION="0.1.0"
+AGENT_PROFILE_VERSION="0.2.0"
 
 # The agent version docs/FACTS.md was last checked against.
 AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
@@ -29,6 +29,7 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 
 : "${AGENT_PROFILE_REGISTRY:=$HOME/.config/agent-profiles}"
 : "${AGENT_PROFILE_APPS_DIR:=$HOME/Applications}"
+: "${AGENT_PROFILE_APP_BUNDLE:=/Applications/Claude.app}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
 
 # Resolved once so the test suite can exercise the macOS-only audit rules on
@@ -58,6 +59,10 @@ KNOWN_AGENTS="claude"
 #   url_scheme    that scheme
 #   app_prefix    directory-name prefix for the desktop app's data dir
 #   app_support   parent directory for desktop app data dirs
+#   app_bundle    the desktop app itself, resolved by open -a rather than by
+#                 a path to a binary inside it (docs/FACTS.md F05)
+#   app_flag      the flag that selects the app's own data directory
+#   applet_prefix name prefix for the AppleScript applet that launches it
 agent_def() {
     _ad_agent="$1"
     _ad_field="$2"
@@ -75,6 +80,9 @@ agent_def() {
                 url_scheme)   printf '%s\n' "claude-cli" ;;
                 app_prefix)   printf '%s\n' "Claude-" ;;
                 app_support)  printf '%s\n' "$HOME/Library/Application Support" ;;
+                app_bundle)   printf '%s\n' "$AGENT_PROFILE_APP_BUNDLE" ;;
+                app_flag)     printf '%s\n' "--user-data-dir" ;;
+                applet_prefix) printf '%s\n' "Claude-" ;;
                 *) die "internal: unknown agent field '$_ad_field'" ;;
             esac
             ;;
@@ -204,6 +212,50 @@ run_pinned() {
     fi
 
     export "$_rp_var=$_rp_root"
+    exec "$@"
+}
+
+# open_supports_env: does this macOS open(1) take --env?
+#
+# The whole desktop half rests on it (docs/FACTS.md F13). Checked rather than
+# assumed, because an open without --env would launch the app happily and
+# unpinned, which is the precise failure this tool exists to prevent.
+open_supports_env() {
+    open --help 2>&1 | grep -q -- '--env'
+}
+
+# open_pinned <agent> <root> <app-data> [extra open args...]
+#
+# The desktop counterpart of run_pinned. It does not export the variable and
+# must not: open inherits nothing from the invoking shell, so the pin travels
+# in --env and nowhere else (docs/FACTS.md F13). Exporting as well would only
+# suggest the environment is doing work it is not.
+#
+# --env comes before --args because everything after --args is handed to the
+# application instead of to open. That ordering is the whole trick, so it is
+# asserted in the test suite rather than trusted to this comment.
+open_pinned() {
+    _op_agent="$1"; shift
+    _op_root="$1"; shift
+    _op_data="$1"; shift
+    _op_var=$(agent_def "$_op_agent" envvar)
+    _op_bundle=$(agent_def "$_op_agent" app_bundle)
+    _op_flag=$(agent_def "$_op_agent" app_flag)
+
+    set -- open -n -a "$_op_bundle" \
+        --env "$_op_var=$_op_root" \
+        --args "$_op_flag=$_op_data" "$@"
+
+    if [ -n "$AGENT_PROFILE_DRY_RUN" ]; then
+        _op_sep=""
+        for _op_arg in "$@"; do
+            printf '%s%s' "$_op_sep" "$_op_arg"
+            _op_sep=" "
+        done
+        printf '\n'
+        return 0
+    fi
+
     exec "$@"
 }
 
@@ -576,6 +628,379 @@ cmd_which() {
 }
 
 # ---------------------------------------------------------------------------
+# The desktop half
+#
+# The desktop app takes its config root from its process environment, and
+# `open --env` is what puts it there (docs/FACTS.md F01 and F13). Two routes
+# that look reasonable and are not: a .app bundle whose executable is a shell
+# script never launches at all (F14), and exec'ing the app binary from an
+# interactive shell kills it (F15). Neither is attempted here.
+#
+# The launcher form that survives a reboot and a Dock click is an AppleScript
+# applet, so `app` generates and repairs one with osacompile rather than
+# assembling a bundle by hand.
+# ---------------------------------------------------------------------------
+
+# applet_script_path <applet>: where an applet keeps its compiled source.
+applet_script_path() {
+    printf '%s\n' "$1/Contents/Resources/Scripts/main.scpt"
+}
+
+# applet_safe_path <label> <path>
+#
+# The launch line nests a shell command inside an AppleScript string literal,
+# so a path carrying a quote, a backslash, a dollar or a backtick would have to
+# survive two layers of quoting intact. Refuse rather than escape: these are
+# directories under $HOME, and a launcher that is subtly wrong is worse than
+# one that will not be built.
+applet_safe_path() {
+    # A literal newline, because a case pattern cannot spell one any other way.
+    _asp_nl='
+'
+    case "$2" in
+        *[\"\\\$\`]*|*"$_asp_nl"*)
+            die "$1 contains a character the launch line cannot carry safely: $2
+The applet nests a shell command inside an AppleScript string, so a quote,
+backslash, dollar or backtick in this path would need to survive two layers of
+quoting. Choose a path without them." ;;
+    esac
+}
+
+# applet_default_path <agent> <name>
+applet_default_path() {
+    printf '%s/%s%s.app\n' \
+        "$AGENT_PROFILE_APPS_DIR" "$(agent_def "$1" applet_prefix)" "$(capitalize "$2")"
+}
+
+# profile_applet <name> <agent>: the registered applet, or the default path.
+# reg_get returns empty for a key that is not there, so entries written before
+# applet= existed keep working.
+profile_applet() {
+    _pa_stored=$(reg_get "$1" applet)
+    if [ -n "$_pa_stored" ]; then
+        printf '%s\n' "$_pa_stored"
+    else
+        applet_default_path "$2" "$1"
+    fi
+}
+
+# reg_set <name> <key> <value>: replace one key, leave every other one alone.
+reg_set() {
+    _rset_file=$(reg_file "$1")
+    [ -f "$_rset_file" ] || die "profile '$1' has no registry entry"
+    _rset_tmp="$_rset_file.tmp.$$"
+    {
+        grep -v "^$2=" "$_rset_file" || true
+        printf '%s=%s\n' "$2" "$3"
+    } > "$_rset_tmp" || die "could not write $_rset_tmp"
+    mv "$_rset_tmp" "$_rset_file" || die "could not update $_rset_file"
+}
+
+# applet_launch_line <bundle> <var> <root> <flag> <app-data>
+#
+# The verified form, verbatim from docs/FACTS.md F13. --env before --args,
+# because everything after --args goes to the application rather than to open.
+applet_launch_line() {
+    printf 'do shell script "open -n -a \\"%s\\" --env \\"%s=%s\\" --args %s=\\"%s\\" > /dev/null 2>&1 &"\n' \
+        "$1" "$2" "$3" "$4" "$5"
+}
+
+# applet_line_norm: read a launch line on stdin, emit it without quoting.
+#
+# osadecompile is free to re-spell AppleScript's string escapes, so every
+# comparison happens with the quoting stripped out. What is being compared is
+# the command, not its spelling.
+applet_line_norm() {
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\\"'
+}
+
+# applet_current_line <applet>: the applet's launch line, normalised, or empty.
+applet_current_line() {
+    command -v osadecompile >/dev/null 2>&1 || return 0
+    osadecompile "$(applet_script_path "$1")" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*//; /^do shell script /p' \
+        | head -1 \
+        | applet_line_norm
+}
+
+# applet_verdict <applet> <bundle> <var> <root> <flag> <app-data>
+#
+# One definition of "this applet is correct", used by both `app` and doctor's
+# D13, so the audit and the repair can never disagree about what correct means.
+#
+# Emits one word:
+#   ok          the launch line is exactly right
+#   no-applet   there is no applet at that path
+#   no-script   the bundle has no compiled script (not an applet)
+#   unreadable  osadecompile is missing or would not read it
+#   no-line     the script has no do-shell-script line
+#   nopin       it launches the app without pinning anything
+#   badorder    --env sits after --args, so open hands it to the app instead
+#   wrongroot   it pins a root other than this profile's
+#   wrongdata   it selects a different app data directory
+#   differs     right root and right data dir, but not the generated form
+applet_verdict() {
+    _av_applet="$1"; _av_bundle="$2"; _av_var="$3"
+    _av_root="$4"; _av_flag="$5"; _av_data="$6"
+
+    [ -d "$_av_applet" ] || { printf 'no-applet\n'; return 0; }
+    [ -f "$(applet_script_path "$_av_applet")" ] || { printf 'no-script\n'; return 0; }
+    command -v osadecompile >/dev/null 2>&1 || { printf 'unreadable\n'; return 0; }
+
+    _av_have=$(applet_current_line "$_av_applet")
+    [ -n "$_av_have" ] || { printf 'no-line\n'; return 0; }
+
+    _av_want=$(applet_launch_line "$_av_bundle" "$_av_var" "$_av_root" "$_av_flag" "$_av_data" \
+        | applet_line_norm)
+    [ "$_av_have" = "$_av_want" ] && { printf 'ok\n'; return 0; }
+
+    case "$_av_have" in
+        *"--env $_av_var="*) ;;
+        *) printf 'nopin\n'; return 0 ;;
+    esac
+
+    # Everything after --args belongs to the application, so an --env that only
+    # appears there is not a pin at all, however right it looks.
+    case "${_av_have%%--args*}" in
+        *"--env $_av_var="*) ;;
+        *) printf 'badorder\n'; return 0 ;;
+    esac
+
+    case "$_av_have" in
+        *"--env $_av_var=$_av_root --args"*) ;;
+        *) printf 'wrongroot\n'; return 0 ;;
+    esac
+
+    case "$_av_have" in
+        *"$_av_flag=$_av_data "*) ;;
+        *) printf 'wrongdata\n'; return 0 ;;
+    esac
+
+    printf 'differs\n'
+}
+
+# applet_verdict_says <verdict>: one sentence, shared by `app` and D13.
+applet_verdict_says() {
+    case "$1" in
+        nopin)      printf 'it launches the app with nothing pinned, so its sessions write to the default root' ;;
+        badorder)   printf 'its --env comes after --args, so open passes it to the app instead of setting it' ;;
+        wrongroot)  printf 'it pins a different config root from the one this profile owns' ;;
+        wrongdata)  printf 'it selects a different app data directory, so the app signs in as someone else' ;;
+        no-line)    printf 'its script has no launch line at all' ;;
+        no-script)  printf 'it is not an AppleScript applet: there is no compiled script inside it' ;;
+        differs)    printf 'its launch line is not the generated form' ;;
+        *)          printf 'it is %s' "$1" ;;
+    esac
+}
+
+# applet_write <applet> <profile> <launch-line>
+#
+# Creates the applet if it is not there. If it is, only the compiled script is
+# replaced, by moving it in from a scratch applet, so an icon and any other
+# bundle contents survive being repaired.
+applet_write() {
+    _aw_applet="$1"; _aw_name="$2"; _aw_line="$3"
+    need osacompile
+
+    if [ ! -d "$_aw_applet" ]; then
+        mkdir -p "$(dirname "$_aw_applet")" || die "could not create $(dirname "$_aw_applet")"
+        osacompile \
+            -e "-- agent-profile: launches the desktop app pinned to profile \"$_aw_name\"." \
+            -e "-- Generated. To change or repair it: agent-profile app $_aw_name" \
+            -e "-- Why open --env and not a wrapper script: docs/FACTS.md F13, F14, F15." \
+            -e "$_aw_line" \
+            -o "$_aw_applet" || die "osacompile could not create $_aw_applet"
+        printf 'Created %s\n' "$_aw_applet"
+        return 0
+    fi
+
+    [ -f "$(applet_script_path "$_aw_applet")" ] || \
+        die "$_aw_applet exists but is not an AppleScript applet: no compiled script inside it.
+Refusing to overwrite it. Remove it, or pass --applet with another path."
+
+    _aw_tmp="${TMPDIR:-/tmp}/agent-profile-applet.$$"
+    rm -rf "$_aw_tmp"
+    mkdir -p "$_aw_tmp" || die "could not create $_aw_tmp"
+    osacompile \
+        -e "-- agent-profile: launches the desktop app pinned to profile \"$_aw_name\"." \
+        -e "-- Generated. To change or repair it: agent-profile app $_aw_name" \
+        -e "-- Why open --env and not a wrapper script: docs/FACTS.md F13, F14, F15." \
+        -e "$_aw_line" \
+        -o "$_aw_tmp/applet.app" || { rm -rf "$_aw_tmp"; die "osacompile failed"; }
+
+    if ! mv "$_aw_tmp/applet.app/Contents/Resources/Scripts/main.scpt" \
+            "$(applet_script_path "$_aw_applet")"; then
+        rm -rf "$_aw_tmp"
+        die "could not replace the script inside $_aw_applet"
+    fi
+    rm -rf "$_aw_tmp"
+    printf 'Repaired the launch line in %s\n' "$_aw_applet"
+}
+
+# applet_set_icon <applet> <png>
+#
+# The stock recipe: sips for every size the Dock asks for, iconutil to pack
+# them. The original is kept once, and only once: a second run must not
+# overwrite the real original with something this tool generated.
+applet_set_icon() {
+    _ai_applet="$1"; _ai_png="$2"
+    need sips
+    need iconutil
+    [ -f "$_ai_png" ] || die "no such image: $_ai_png"
+    [ -d "$_ai_applet/Contents/Resources" ] || die "$_ai_applet has no Resources directory"
+
+    _ai_tmp="${TMPDIR:-/tmp}/agent-profile-icon.$$"
+    rm -rf "$_ai_tmp"
+    mkdir -p "$_ai_tmp/icon.iconset" || die "could not create $_ai_tmp"
+
+    for _ai_s in 16 32 128 256 512; do
+        sips -z "$_ai_s" "$_ai_s" "$_ai_png" \
+            --out "$_ai_tmp/icon.iconset/icon_${_ai_s}x${_ai_s}.png" >/dev/null 2>&1 || \
+            { rm -rf "$_ai_tmp"; die "sips could not resize $_ai_png to ${_ai_s}px"; }
+        _ai_d=$((_ai_s * 2))
+        sips -z "$_ai_d" "$_ai_d" "$_ai_png" \
+            --out "$_ai_tmp/icon.iconset/icon_${_ai_s}x${_ai_s}@2x.png" >/dev/null 2>&1 || \
+            { rm -rf "$_ai_tmp"; die "sips could not resize $_ai_png to ${_ai_d}px"; }
+    done
+
+    iconutil -c icns "$_ai_tmp/icon.iconset" -o "$_ai_tmp/applet.icns" || \
+        { rm -rf "$_ai_tmp"; die "iconutil could not build an icns from $_ai_png"; }
+
+    _ai_dest="$_ai_applet/Contents/Resources/applet.icns"
+    if [ -f "$_ai_dest" ] && [ ! -f "$_ai_dest.orig" ]; then
+        mv "$_ai_dest" "$_ai_dest.orig" || { rm -rf "$_ai_tmp"; die "could not back up $_ai_dest"; }
+        printf 'Kept the original icon as %s\n' "$_ai_dest.orig"
+    fi
+    mv "$_ai_tmp/applet.icns" "$_ai_dest" || { rm -rf "$_ai_tmp"; die "could not install the icon"; }
+    rm -rf "$_ai_tmp"
+    touch "$_ai_applet"
+
+    printf 'Set the icon on %s\n' "$_ai_applet"
+    printf '\n'
+    printf 'The Dock caches icons. If it still shows the old one, drag the applet out of\n'
+    printf 'the Dock and back in; killall Dock if that is not enough.\n'
+    printf 'At Dock size a word is illegible. One large initial and a distinct colour per\n'
+    printf 'account is what actually reads.\n'
+}
+
+# ---------------------------------------------------------------------------
+# desktop
+# ---------------------------------------------------------------------------
+
+cmd_desktop() {
+    [ $# -ge 1 ] || die "usage: agent-profile desktop <profile> [open args...]"
+    _dk_name="$1"; shift
+    require_profile "$_dk_name"
+    _dk_agent=$(profile_agent "$_dk_name")
+    _dk_root=$(profile_root "$_dk_name")
+    _dk_data=$(reg_get "$_dk_name" app_data)
+    [ -n "$_dk_data" ] || _dk_data="$(agent_def "$_dk_agent" app_support)/$(agent_def "$_dk_agent" app_prefix)$(capitalize "$_dk_name")"
+
+    if [ -z "$AGENT_PROFILE_DRY_RUN" ]; then
+        _dk_bundle=$(agent_def "$_dk_agent" app_bundle)
+        [ -d "$_dk_bundle" ] || die "the desktop app is not installed at $_dk_bundle"
+        command -v open >/dev/null 2>&1 || die "the 'open' command is not on your PATH (this command is macOS only)"
+        open_supports_env || die "this open(1) does not support --env, so the app cannot be pinned.
+Launching it anyway would start an unpinned session writing to the default
+root, which is the leak this tool exists to prevent, so nothing was launched.
+See docs/FACTS.md F13."
+    fi
+
+    open_pinned "$_dk_agent" "$_dk_root" "$_dk_data" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# app
+#
+# Generate or repair the AppleScript applet that launches a profile from the
+# Dock. Idempotent, and it says which of the two happened: an already-correct
+# applet and one that was never built must not look the same from here.
+# ---------------------------------------------------------------------------
+
+cmd_app() {
+    _ap_name=""
+    _ap_applet=""
+    _ap_icon=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --applet) shift; [ $# -gt 0 ] || die "--applet needs a value"; _ap_applet="$1" ;;
+            --icon)   shift; [ $# -gt 0 ] || die "--icon needs a value"; _ap_icon="$1" ;;
+            -*)       die "unknown option '$1'" ;;
+            *)        [ -z "$_ap_name" ] || die "unexpected argument '$1'"; _ap_name="$1" ;;
+        esac
+        shift
+    done
+
+    [ -n "$_ap_name" ] || die "usage: agent-profile app <profile> [--applet PATH] [--icon PNG]"
+    require_profile "$_ap_name"
+    _ap_agent=$(profile_agent "$_ap_name")
+    _ap_root=$(profile_root "$_ap_name")
+    _ap_data=$(reg_get "$_ap_name" app_data)
+    [ -n "$_ap_data" ] || _ap_data="$(agent_def "$_ap_agent" app_support)/$(agent_def "$_ap_agent" app_prefix)$(capitalize "$_ap_name")"
+
+    [ -n "$_ap_applet" ] || _ap_applet=$(profile_applet "$_ap_name" "$_ap_agent")
+    case "$_ap_applet" in
+        /*) ;;
+        *)  die "--applet must be an absolute path. Got: $_ap_applet" ;;
+    esac
+    _ap_applet=$(canonical_path "$_ap_applet")
+
+    _ap_bundle=$(agent_def "$_ap_agent" app_bundle)
+    _ap_var=$(agent_def "$_ap_agent" envvar)
+    _ap_flag=$(agent_def "$_ap_agent" app_flag)
+
+    applet_safe_path "the config root" "$_ap_root"
+    applet_safe_path "the app data directory" "$_ap_data"
+    applet_safe_path "the app bundle path" "$_ap_bundle"
+
+    _ap_line=$(applet_launch_line "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
+    _ap_verdict=$(applet_verdict "$_ap_applet" "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
+
+    case "$_ap_verdict" in
+        ok)
+            printf '%s is already correct.\n' "$_ap_applet"
+            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+            printf '  app data  %s\n' "$_ap_data"
+            printf 'Nothing to do. This is what an applied change looks like on a second run;\n'
+            printf 'it is not the same as one that never worked.\n'
+            ;;
+        unreadable)
+            die "cannot read $_ap_applet: osadecompile is not available.
+Without it there is no way to tell a correct applet from a broken one, and
+overwriting one blind could replace a launcher you edited by hand."
+            ;;
+        no-applet)
+            applet_write "$_ap_applet" "$_ap_name" "$_ap_line"
+            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+            printf '  app data  %s\n' "$_ap_data"
+            ;;
+        *)
+            printf 'Repairing %s: %s.\n' "$_ap_applet" "$(applet_verdict_says "$_ap_verdict")"
+            applet_write "$_ap_applet" "$_ap_name" "$_ap_line"
+            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+            printf '  app data  %s\n' "$_ap_data"
+            ;;
+    esac
+
+    _ap_stored=$(reg_get "$_ap_name" applet)
+    if [ "$_ap_stored" != "$_ap_applet" ]; then
+        reg_set "$_ap_name" applet "$_ap_applet"
+    fi
+
+    if [ -n "$_ap_icon" ]; then
+        printf '\n'
+        applet_set_icon "$_ap_applet" "$_ap_icon"
+    fi
+
+    printf '\n'
+    printf 'Confirm it actually pins, by starting a Code session in the app and running:\n'
+    # shellcheck disable=SC2016  # literal help text; the user types this
+    printf '  find "$HOME"/%s* -name "*.jsonl" -mmin -3\n' "$(agent_def "$_ap_agent" root_prefix)"
+    printf 'The path it prints is the root that is really in use.\n'
+}
+
+# ---------------------------------------------------------------------------
 # Project paths
 #
 # Claude Code names a project directory after the working directory with every
@@ -737,6 +1162,36 @@ cmd_doctor() {
                 esac
             done
         fi
+
+        # D13. The applet that launches this profile from the Dock, if there
+        # is one. An applet is the desktop's only tell: the app renders no
+        # status line (docs/FACTS.md F16) and its own login can be correct
+        # while its sessions write elsewhere (F18), so the launch line is the
+        # thing to read.
+        #
+        # Only real isolation problems are reported. "differs" means a
+        # hand-tuned launch line that still pins the right root, which is
+        # nobody's business but its owner's, and "unreadable" is a question
+        # for verify rather than a finding here.
+        _doc_applet=$(profile_applet "$_doc_name" "$_doc_agent")
+        _doc_data=$(reg_get "$_doc_name" app_data)
+        [ -n "$_doc_data" ] || _doc_data="$(agent_def "$_doc_agent" app_support)/$(agent_def "$_doc_agent" app_prefix)$(capitalize "$_doc_name")"
+        _doc_verdict=$(applet_verdict "$_doc_applet" \
+            "$(agent_def "$_doc_agent" app_bundle)" \
+            "$(agent_def "$_doc_agent" envvar)" \
+            "$_doc_root" \
+            "$(agent_def "$_doc_agent" app_flag)" \
+            "$_doc_data")
+        case "$_doc_verdict" in
+            nopin|badorder|wrongroot|wrongdata|no-line|no-script)
+                finding "D13" "profile '$_doc_name' has a desktop launcher that does not pin it" \
+                    "$_doc_applet" \
+                    "$(applet_verdict_says "$_doc_verdict")." \
+                    "The desktop app takes its config root from its process environment," \
+                    "and open --env is what puts it there. Note that the app's own login" \
+                    "can be right while its sessions write somewhere else entirely." \
+                    "Fix with: agent-profile app $_doc_name" ;;
+        esac
     done
 
     # ---- D01, D02: something ran unpinned ---------------------------------
@@ -1094,14 +1549,40 @@ cmd_verify() {
 
     # ---- Facts that need macOS and the desktop app ------------------------
     if [ "$AGENT_PROFILE_PLATFORM" != "Darwin" ]; then
-        vunchecked "F01" "not running on macOS" "F02 and F05 need macOS too."
-        VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 1))
+        vunchecked "F13" "not running on macOS" "F01, F03, F04 and F05 need macOS too."
     else
-        vunchecked "F01" "does the desktop app honour the config-dir variable?" \
-            "Run: bash tools/probe-claude-desktop.sh" \
-            "Answer its prompt about whether a Code session actually ran."
-        vunchecked "F02" "does the app's local environment editor set it early enough?" \
-            "Manual. Only matters if F01 is negative."
+        # F01 is answered and is not automatically checkable: settling it needs
+        # a real app launch and a real Code session. It is a recorded fact, so
+        # verify says how to re-confirm it rather than pretending to.
+        vnote "F01" "the desktop app does honour the config-dir variable from its environment"
+        printf '                 Not checkable from here: it needs a real app launch.\n'
+        printf '                 Re-confirm with: agent-profile desktop <name>, start a Code\n'
+        # shellcheck disable=SC2016  # literal help text; the user types this
+        printf '                 session, then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3\n'
+
+        # F13. The mechanism the whole desktop half rests on. If --env is gone,
+        # desktop, app and D13 are all invalid at once, so this is broken
+        # rather than unchecked: the tool would launch unpinned apps happily.
+        if ! command -v open >/dev/null 2>&1; then
+            vunchecked "F13" "no open command on PATH, so --env could not be exercised"
+        elif open_supports_env; then
+            vok "F13" "open still supports --env, so the desktop app can be pinned"
+        else
+            vbroken "F13" "open no longer supports --env" \
+                "This is the only way a config root reaches the desktop app." \
+                "desktop, app and doctor's D13 are all invalid until it is replaced." \
+                "Do not trust an existing applet either: it will launch unpinned."
+        fi
+
+        # D13 reads an applet by decompiling it. Without osadecompile the
+        # desktop audit silently checks nothing, which is the failure mode this
+        # command exists to catch.
+        if command -v osadecompile >/dev/null 2>&1; then
+            vok "F13" "osadecompile is available, so doctor can read applet launch lines"
+        else
+            vunchecked "F13" "osadecompile is missing, so doctor's D13 cannot read any applet" \
+                "It ships with macOS. Until it is back, the desktop half is unaudited."
+        fi
 
         # F03 is known, so this is a real check now: the naming must still
         # produce an entry for a root that has a signed-in account.
@@ -1153,6 +1634,8 @@ cmd_verify() {
         fi
     fi
 
+    vnote "F02" "moot: the app's environment editor only mattered if F01 was negative"
+
     vnote "F06" "a root cannot be relocated without losing its login"
     printf '                 Reasoned from F09, not tested: confirming it costs a real login.\n'
     printf '                 This is why there is no rename and no move command.\n'
@@ -1200,6 +1683,27 @@ is set, the state file moves inside the root, so the two produce different
 layouts. Anything that runs with nothing pinned writes to the default root,
 which is exactly what doctor reports.
 
+TWO IDENTITIES, AND THEY CAN DISAGREE
+
+A profile has two of them. The app data directory selects the desktop app's own
+login, the one whose name you see in the app. The config root selects where its
+embedded agent writes. They are independent, and they have already been seen
+disagreeing: the app showed the right account for weeks while its sessions were
+writing into another account's root. So the app naming an account is not
+evidence that anything is pinned. Read both, always.
+
+The terminal and the desktop are pinned by different means. In a terminal the
+variable is exported, by run, shell or env. The desktop app gets it through
+`open --env`, which is what `desktop` runs and what the applet `app` generates
+contains. There is no third way that works: a bundle wrapping a shell script
+never launches, and running the app binary from a terminal kills it when the
+shell exits.
+
+One more asymmetry worth knowing. A status line shows which root a terminal
+session is using, but the desktop pane renders none, so there is no equivalent
+indicator inside the app. For the desktop, the launcher is the guarantee and
+doctor's D13 is the check.
+
 NOTHING IS SHARED
 
 No symlinks, no shared parent, no copied settings, no seeding a new root from an
@@ -1211,7 +1715,8 @@ WHAT THIS TOOL STORES
 
 Only the registry, at the path shown below, outside every config root. One
 plain key=value file per profile holding the agent, the root, the app data
-directory and the creation date. Nothing else. The label you see in a prompt is
+directory, the applet that launches it and the creation date. Nothing else. The
+label you see in a prompt is
 derived from the pinned root every time it is needed, so it cannot drift away
 from the root it names.
 
@@ -1228,6 +1733,7 @@ PROSE
         printf '    binary         %s\n' "$(agent_def "$_ex_agent" binary)"
         printf '    default root   %s\n' "$(agent_def "$_ex_agent" default_root)"
         printf '    unpinned state %s\n' "$(agent_def "$_ex_agent" state_file)"
+        printf '    desktop app    %s\n' "$(agent_def "$_ex_agent" app_bundle)"
     done
 
     printf '\n  profiles\n'
@@ -1236,8 +1742,14 @@ PROSE
         printf '    (none registered)\n'
     else
         for _ex_name in $_ex_names; do
-            printf '    %-12s %s\n' "$_ex_name" "$(reg_get "$_ex_name" root)"
-            printf '    %-12s %s\n' "" "$(reg_get "$_ex_name" app_data)"
+            printf '    %-12s root      %s\n' "$_ex_name" "$(reg_get "$_ex_name" root)"
+            printf '    %-12s app data  %s\n' "" "$(reg_get "$_ex_name" app_data)"
+            _ex_applet=$(reg_get "$_ex_name" applet)
+            if [ -n "$_ex_applet" ]; then
+                printf '    %-12s launcher  %s\n' "" "$_ex_applet"
+            else
+                printf '    %-12s launcher  (none; agent-profile app %s)\n' "" "$_ex_name"
+            fi
         done
     fi
 
@@ -1246,6 +1758,10 @@ PROSE
     printf '  It re-checks the behavioural assumptions this tool rests on and says\n'
     printf '  which it could not check. The answers and their evidence are recorded\n'
     printf '  in docs/FACTS.md in the repository.\n'
+    printf '\n'
+    printf '  There is no single agent version on a machine like this. Each desktop\n'
+    printf '  profile downloads its own copy under its app data directory, so they\n'
+    printf '  update independently of each other and of the CLI.\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -1278,6 +1794,15 @@ PINNED EXECUTION
   env <name>              Print exports. Use: eval "$(agent-profile env work)"
   path <name>             Print a profile's config root.
   which [--label]         Which profile this shell is pinned to, if any.
+
+DESKTOP
+  desktop <name>          Launch the desktop app pinned to a profile.
+  app <name> [--applet PATH] [--icon PNG]
+                          Generate or repair the AppleScript applet that
+                          launches a profile from the Dock. Safe to run twice,
+                          and it says which of the two happened. --icon takes a
+                          1024px PNG; at Dock size only a single initial and a
+                          distinct colour per account are legible.
 
 AUDIT
   doctor                  Check that the profiles are actually isolated.
@@ -1313,6 +1838,8 @@ main() {
         env)      cmd_env "$@" ;;
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
+        desktop)  cmd_desktop "$@" ;;
+        app)      cmd_app "$@" ;;
         doctor)   cmd_doctor "$@" ;;
         verify)   cmd_verify "$@" ;;
         explain)  cmd_explain "$@" ;;
