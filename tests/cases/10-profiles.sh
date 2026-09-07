@@ -220,6 +220,41 @@ case_new_is_silent_about_it_for_an_ordinary_root() {
     assert_not_contains "$out" "owns the default root"
 }
 
+case_a_bare_profile_name_runs_it() {
+    HOME=$(new_home); export HOME
+    "$AP" new tide >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" tide 2>&1)
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-tide claude"
+}
+
+case_a_bare_profile_name_forwards_arguments() {
+    HOME=$(new_home); export HOME
+    "$AP" new tide >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" tide --continue --verbose 2>&1)
+    assert_contains "$out" "claude --continue --verbose"
+}
+
+# A profile can never shadow a subcommand: every command is matched before the
+# fallback. The worst case for a profile named after one is that it needs the
+# explicit run form, not that anything breaks.
+case_a_subcommand_wins_over_a_profile_of_the_same_name() {
+    HOME=$(new_home); export HOME
+    "$AP" new list >/dev/null 2>&1
+    out=$("$AP" list 2>&1)
+    assert_contains "$out" "sessions" || return
+
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" run list 2>&1)
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-list claude"
+}
+
+case_neither_a_command_nor_a_profile_names_both() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" nonsense 2>&1); status=$?
+    assert_status 1 "$status" || return
+    assert_contains "$out" "unknown command or profile 'nonsense'" || return
+    assert_contains "$out" "list for profiles"
+}
+
 run_case "new creates an empty root"                  case_new_creates_empty_root
 run_case "new sets mode 700"                          case_new_sets_mode_700
 run_case "new writes exactly four registry keys"      case_new_writes_four_keys
@@ -242,3 +277,7 @@ run_case "new reports tightening the mode"         case_new_reports_tightening_t
 run_case "new still explains an empty root"        case_new_still_explains_an_empty_root
 run_case "new warns about the default root"       case_new_warns_when_a_profile_claims_the_default_root
 run_case "new is silent for an ordinary root"     case_new_is_silent_about_it_for_an_ordinary_root
+run_case "a bare profile name runs it"            case_a_bare_profile_name_runs_it
+run_case "a bare profile name forwards arguments" case_a_bare_profile_name_forwards_arguments
+run_case "a subcommand wins over a profile"       case_a_subcommand_wins_over_a_profile_of_the_same_name
+run_case "neither a command nor a profile"        case_neither_a_command_nor_a_profile_names_both

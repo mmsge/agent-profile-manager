@@ -28,7 +28,8 @@ case_errors_use_the_name_it_was_invoked_as() {
     out=$(as_name agpin nosuchcommand 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "agpin: unknown command" || return
-    assert_contains "$out" "try: agpin help"
+    assert_contains "$out" "agpin help for commands" || return
+    assert_contains "$out" "agpin list for profiles"
 }
 
 case_findings_use_the_name_it_was_invoked_as() {
