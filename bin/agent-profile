@@ -12,6 +12,9 @@ set -u
 
 AGENT_PROFILE_VERSION="0.1.0"
 
+# The agent version docs/FACTS.md was last checked against.
+AGENT_PROFILE_VERIFIED_AGAINST="2.1.263"
+
 # Exit codes. Contracted so doctor and verify are usable unattended.
 EX_OK=0        # success, no findings
 EX_ERR=1       # usage error, unknown profile, unknown agent, missing dependency
@@ -691,6 +694,244 @@ cmd_doctor() {
     printf '%s finding(s).\n' "$DOCTOR_FINDINGS"
     return "$EX_FINDINGS"
 }
+# ---------------------------------------------------------------------------
+# verify
+#
+# Re-checks the behavioural assumptions the tool rests on, against this machine
+# and the agent version actually installed. The point is that the tool tells its
+# owner when its own assumptions have stopped holding, rather than silently
+# producing wrong answers. See docs/FACTS.md for the full record.
+# ---------------------------------------------------------------------------
+
+VERIFY_BROKEN=0
+VERIFY_UNCHECKED=0
+
+# verify_scan <state_base> <root>... — one pass, emits key=value counts.
+verify_scan() {
+    python3 - "$@" <<'PY'
+import json, os, sys
+
+state_base = sys.argv[1]
+roots = sys.argv[2:]
+
+state_files = with_account = 0
+transcripts = with_cwd = 0
+encoded_dirs = odd_dirs = 0
+state_inside = 0
+
+for root in roots:
+    path = os.path.join(root, state_base)
+    if os.path.isfile(path):
+        state_files += 1
+        state_inside += 1
+        try:
+            with open(path) as fh:
+                data = json.load(fh)
+            account = data.get("oauthAccount") or {}
+            if account.get("emailAddress"):
+                with_account += 1
+        except Exception:
+            pass
+
+    projects = os.path.join(root, "projects")
+    if not os.path.isdir(projects):
+        continue
+    for entry in os.listdir(projects):
+        if not os.path.isdir(os.path.join(projects, entry)):
+            continue
+        if entry.startswith("-"):
+            encoded_dirs += 1
+        else:
+            odd_dirs += 1
+
+    for dirpath, _dirnames, filenames in os.walk(projects):
+        for name in filenames:
+            if not name.endswith(".jsonl"):
+                continue
+            transcripts += 1
+            try:
+                with open(os.path.join(dirpath, name), errors="replace") as fh:
+                    for line in fh:
+                        if '"cwd"' not in line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        if record.get("cwd"):
+                            with_cwd += 1
+                            break
+            except OSError:
+                pass
+
+for key, value in [
+    ("state_files", state_files),
+    ("with_account", with_account),
+    ("transcripts", transcripts),
+    ("with_cwd", with_cwd),
+    ("encoded_dirs", encoded_dirs),
+    ("odd_dirs", odd_dirs),
+]:
+    print("%s=%d" % (key, value))
+PY
+}
+
+vok() {
+    printf '  ok        %s  %s\n' "$1" "$2"
+}
+
+vbroken() {
+    VERIFY_BROKEN=$((VERIFY_BROKEN + 1))
+    printf '  BROKEN    %s  %s\n' "$1" "$2"
+    shift 2
+    for _vb in "$@"; do printf '                 %s\n' "$_vb"; done
+}
+
+vunchecked() {
+    VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 1))
+    printf '  unchecked %s  %s\n' "$1" "$2"
+    shift 2
+    for _vu in "$@"; do printf '                 %s\n' "$_vu"; done
+}
+
+vnote() {
+    printf '  note      %s  %s\n' "$1" "$2"
+}
+
+cmd_verify() {
+    need python3
+    VERIFY_BROKEN=0
+    VERIFY_UNCHECKED=0
+
+    printf 'Checking the assumptions agent-profile rests on.\n'
+    printf 'Full record and evidence: docs/FACTS.md\n\n'
+
+    # ---- Agent version drift ----------------------------------------------
+    for _ver_agent in $KNOWN_AGENTS; do
+        _ver_bin=$(agent_def "$_ver_agent" binary)
+        if command -v "$_ver_bin" >/dev/null 2>&1; then
+            _ver_now=$("$_ver_bin" --version 2>/dev/null | head -1 | awk '{print $1}')
+        else
+            _ver_now=""
+        fi
+        if [ -z "$_ver_now" ]; then
+            vunchecked "----" "cannot read the installed $_ver_agent version" \
+                "The '$_ver_bin' command is not on PATH."
+        elif [ "$_ver_now" = "$AGENT_PROFILE_VERIFIED_AGAINST" ]; then
+            vok "----" "$_ver_agent $_ver_now matches the version these facts were checked against"
+        else
+            vnote "----" "$_ver_agent is $_ver_now; facts were checked against $AGENT_PROFILE_VERIFIED_AGAINST"
+            printf '                 A newer version can change any of the below. The checks still run.\n'
+        fi
+    done
+    printf '\n'
+
+    # ---- Facts that need a real root --------------------------------------
+    _ver_roots=()
+    for _ver_name in $(profile_names); do
+        _ver_root=$(reg_get "$_ver_name" root)
+        [ -d "$_ver_root" ] && _ver_roots[${#_ver_roots[@]}]="$_ver_root"
+    done
+
+    if [ ${#_ver_roots[@]} -eq 0 ]; then
+        vunchecked "F07" "no existing config root to inspect" \
+            "Create a profile and sign in, then run verify again."
+        vunchecked "F11" "no existing config root to inspect" \
+            "This is the check that doctor's D03 depends on."
+        vunchecked "F12" "no existing config root to inspect"
+    else
+        _ver_state=$(agent_def claude state_base)
+        eval "$(verify_scan "$_ver_state" "${_ver_roots[@]}")"
+
+        # F07: account identity key.
+        if [ "$state_files" -eq 0 ]; then
+            vunchecked "F07" "no root holds a state file yet" \
+                "Sign in to a profile, then run verify again."
+        elif [ "$with_account" -gt 0 ]; then
+            vok "F07" "oauthAccount.emailAddress present in $with_account of $state_files state file(s)"
+        else
+            vbroken "F07" "no state file holds oauthAccount.emailAddress" \
+                "$state_files state file(s) exist but none carry that key." \
+                "The account identity key has probably moved or been renamed." \
+                "list will report every profile as not signed in until this is fixed."
+        fi
+
+        # F11: transcripts record cwd. doctor's D03 is built on this, and if it
+        # ever stops holding, D03 passes silently instead of failing loudly.
+        if [ "$transcripts" -eq 0 ]; then
+            vunchecked "F11" "no transcripts stored yet in any root" \
+                "doctor's D03 cannot be exercised until a session has been recorded."
+        elif [ "$with_cwd" -eq "$transcripts" ]; then
+            vok "F11" "all $transcripts transcript(s) record their own cwd"
+        elif [ "$with_cwd" -eq 0 ]; then
+            vbroken "F11" "no transcript records a cwd, out of $transcripts" \
+                "doctor's D03 detects cross-root leakage by reading cwd from" \
+                "transcript metadata. It will now find nothing and pass quietly," \
+                "which is worse than failing. Do not trust doctor until this is fixed."
+        else
+            vbroken "F11" "only $with_cwd of $transcripts transcript(s) record a cwd" \
+                "doctor's D03 sees only part of the picture and may miss a leak."
+        fi
+
+        # F12: project directory naming.
+        if [ "$odd_dirs" -gt 0 ]; then
+            vnote "F12" "$odd_dirs project director(ies) are not encoded paths"
+            printf '                 CLAUDE_CODE_PROJECT_DIR_NAME was used. doctor reports these as D08.\n'
+        elif [ "$encoded_dirs" -gt 0 ]; then
+            vok "F12" "all $encoded_dirs project director(ies) look like encoded paths"
+        else
+            vunchecked "F12" "no project directories to inspect"
+        fi
+
+        # F10: does the state file live inside a pinned root?
+        if [ "$state_files" -gt 0 ]; then
+            vok "F10" "the state file does live inside a pinned root ($state_files found)"
+        else
+            vunchecked "F10" "no pinned root holds a state file yet" \
+                "Cannot confirm that setting the variable moves it inside the root."
+        fi
+    fi
+
+    printf '\n'
+
+    # ---- Facts that need macOS and the desktop app ------------------------
+    if [ "$(uname -s)" != "Darwin" ]; then
+        vunchecked "F01" "not running on macOS" "F02, F03, F04 and F05 need macOS too."
+        VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 4))
+    else
+        vunchecked "F01" "does the desktop app honour the config-dir variable?" \
+            "Run: bash tools/probe-claude-desktop.sh"
+        vunchecked "F02" "does the app's local environment editor set it early enough?" \
+            "Manual. Only matters if F01 is negative."
+        vunchecked "F03" "Keychain service and account naming for a non-default root" \
+            "Run: bash tools/probe-claude-desktop.sh" \
+            "Until this is known, doctor's D05 cannot check the Keychain."
+        vunchecked "F04" "what the Claude Code URL handler launches" \
+            "Run: bash tools/probe-claude-desktop.sh"
+        vunchecked "F05" "whether an app update relocated the Claude binary" \
+            "Run: bash tools/probe-claude-desktop.sh"
+    fi
+
+    vnote "F06" "a root cannot be relocated without losing its login"
+    printf '                 Reasoned from F09, not tested: confirming it costs a real login.\n'
+    printf '                 This is why there is no rename and no move command.\n'
+
+    # ---- Summary -----------------------------------------------------------
+    printf '\n'
+    if [ "$VERIFY_BROKEN" -gt 0 ]; then
+        printf '%s assumption(s) no longer hold, %s could not be checked.\n' \
+            "$VERIFY_BROKEN" "$VERIFY_UNCHECKED"
+        printf 'Fix the tool before trusting doctor.\n'
+        return "$EX_BROKEN"
+    fi
+    if [ "$VERIFY_UNCHECKED" -gt 0 ]; then
+        printf 'Nothing broken. %s assumption(s) could not be checked here.\n' "$VERIFY_UNCHECKED"
+        return "$EX_UNCHECKED"
+    fi
+    printf 'Every assumption still holds.\n'
+    return "$EX_OK"
+}
+
 # ---------------------------------------------------------------------------
 # explain
 #
