@@ -76,6 +76,7 @@ Command Line Tools only to read JSON. No Homebrew, no `jq`.
 ## Use
 
 ```sh
+agent-profile                     # ask which profile, and terminal or desktop
 agent-profile new bouvet          # create root, app data dir and registry entry
 agent-profile bouvet              # run Claude Code pinned to that profile
 agent-profile run bouvet          # the same thing, spelled out
@@ -91,6 +92,35 @@ claude bouvet                     # with the guard on, this pins and runs
 ```
 
 Adding a fourth account is one command and no edit to any file.
+
+### Just asking
+
+Run it with no arguments and it asks:
+
+```
+Which profile?
+  1) bouvet
+  2) highsoft
+  3) tide
+
+Profile [1-3, Return to cancel]: 2
+
+Where?
+  1) desktop app
+  2) terminal
+
+Open [1-2, Return to cancel]: 1
+```
+
+Five characters and two keystrokes, which beats `agpin desktop highsoft` when
+you open pinned apps all day.
+
+An empty answer cancels rather than defaulting to the first profile: silently
+picking one is how you end up in the wrong account without noticing.
+
+The prompt only appears on a terminal. Piped or scripted, the bare command
+still prints help and exits non-zero exactly as before, so nothing reading the
+output can hang waiting for an answer.
 
 ### Adopting a machine you set up by hand
 
@@ -415,7 +445,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 144 tests, no dependencies
+tests/run.sh              # 152 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
