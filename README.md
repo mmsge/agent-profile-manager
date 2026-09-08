@@ -889,6 +889,12 @@ account identity read by D02 and D05 is an email address and an organisation
 id, not a token, and it is the same identity `list` already shows on every
 run.
 
+`--json` and `--report` add two reads of their own, outside any rule. The
+document header runs the agent's own `--version`, which is the only time
+`doctor` starts another program, and the profile inventory reads each root's
+`oauthAccount` block, the same one D02 and D05 read and the same one `list`
+prints. Neither happens on a plain `doctor` run.
+
 This table is written by hand, not generated. Keeping it honest right now
 means updating it in the same change that changes what a rule reads, the way
 this pull request does for D12. A generator that reads a structured comment

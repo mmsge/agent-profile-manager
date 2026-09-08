@@ -94,6 +94,37 @@ non-alphanumeric character replaced by `-`, so `my_repo`, `my-repo` and
 its own `cwd` as an absolute path instead, and D03 reads that. A path appearing
 under two roots means one account has worked in the other's project.
 
+## One stream, two renderings
+
+`doctor`, `list` and `verify` each produce prose and a machine-readable
+document, and the obvious way to build that is a second set of print statements
+under an `if`. That way the two disagree within a release or two: someone adds a
+rule, prints a finding, and forgets the JSON half, and the document quietly
+reports a clean machine.
+
+So neither format is written directly. Every user-facing line goes through one
+function, `emit`, as a record: a level, a kind and that kind's fields. Prose is
+one renderer over that stream and the document is another. A rule that stops
+printing stops appearing in the JSON in the same edit, because there is only
+one edit to make.
+
+The level is the second half of the idea. It is ordered, `always`, `normal`,
+`detail`, with `data` for a record that is never prose and `prose` for a line
+that is never recorded. `data` is what lets `doctor`'s prose stay silent about
+healthy profiles while the document still lists every one of them, and `prose`
+is what keeps the line saying where a report was written out of the report.
+Only `normal` is reachable today; the ordering is there so a quieter or a more
+explanatory mode is a threshold and a flag rather than a rewrite.
+
+The one thing the document has that the prose does not is the rule ledger:
+every rule with a status, not only the ones that fired. That exists because a
+rule can fail to run. `D12` is opt-in behind `--keychain-scan`, `D11` and `D12`
+need a Keychain, `D13` and `D14` need `osadecompile`. Silence from a check that
+never ran looks exactly like silence from a check that passed, and a document
+handed to a customer's security officer is the worst possible place for that
+confusion. `not_run` and `limited` are statuses of their own, each carrying the
+reason. The full schema is in [AUDIT-SCHEMA.md](AUDIT-SCHEMA.md).
+
 ## Three things that are not what they look like
 
 **Pinning to the default root is not the same as not pinning.** Setting

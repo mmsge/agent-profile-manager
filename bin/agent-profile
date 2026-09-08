@@ -322,7 +322,7 @@ report_open() {
     need python3
     REPORT_FILE=$(mktemp "${TMPDIR:-/tmp}/agent-profile-report.XXXXXX") || \
         die "could not create a temporary file under ${TMPDIR:-/tmp}"
-    trap 'rm -f "$REPORT_FILE"' EXIT INT TERM
+    trap report_cleanup EXIT INT TERM
     emit data meta \
         command "$1" \
         generated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
@@ -339,6 +339,12 @@ report_open() {
     for _ro_agent in $KNOWN_AGENTS; do
         emit data agent "$_ro_agent" "$(installed_agent_version "$_ro_agent")"
     done
+}
+
+# report_cleanup: the record stream is scratch and must not outlive the run,
+# including the runs that end at a die() rather than at the bottom.
+report_cleanup() {
+    [ -z "$REPORT_FILE" ] || rm -f "$REPORT_FILE"
 }
 
 # report_finish: render the captured stream, then discard it.
@@ -365,7 +371,7 @@ report_finish() {
     if [ "$REPORT_FORMAT" = "json" ]; then
         report_render json "$REPORT_FILE"
     fi
-    rm -f "$REPORT_FILE"
+    report_cleanup
     REPORT_FILE=""
 }
 
@@ -535,7 +541,7 @@ for entry in agents:
     out.append("| Installed %s | %s |" % (
         cell(entry["agent"]), cell(entry["version"] or "not installed")))
 out.append("| Host | %s |" % cell(doc["hostname"]))
-out.append("| User | %s |" % cell(doc["user"]))
+out.append("| User | %s |" % cell(doc["user"] or "not recorded"))
 out.append("| Platform | %s |" % cell(doc["platform"]))
 out.append("| Registry | %s |" % cell(doc["registry"]))
 out.append("")
@@ -576,7 +582,7 @@ if command == "doctor":
         out.append("")
     out.append("## Rules")
     out.append("")
-    out.append("| Rule | Status | What it looks for |")
+    out.append("| Rule | Status | Finding it looks for |")
     out.append("| --- | --- | --- |")
     for entry in doc["rules"]:
         status = entry["status"]
