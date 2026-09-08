@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
 #
 # Installing, self-naming, the unpinned guard and the release channel.
@@ -479,12 +480,16 @@ case_version_check_downloads_and_installs_nothing() {
     return 0
 }
 
-case_version_without_check_still_prints_one_line() {
+# Bare version must not reach the network and must print none of what --check
+# adds. It prints the version and the licence identifier, and nothing else.
+case_version_without_check_prints_version_and_licence() {
     HOME=$(new_home); export HOME
     out=$("$AP" version 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_equals "1" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" || return
-    assert_contains "$out" "agent-profile $(script_version)"
+    assert_equals "2" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" || return
+    assert_contains "$out" "agent-profile $(script_version)" || return
+    assert_contains "$out" "GPL-3.0-or-later" || return
+    assert_not_contains "$out" "latest"
 }
 
 case_version_refuses_an_unknown_option() {
@@ -533,5 +538,5 @@ run_case "version --check exits 1 when behind"    case_version_check_exits_non_z
 run_case "version --check compares numerically"   case_version_check_compares_numerically
 run_case "version --check reads the field"        case_version_check_reads_the_field_not_the_prose
 run_case "version --check installs nothing"       case_version_check_downloads_and_installs_nothing
-run_case "version prints one line"                case_version_without_check_still_prints_one_line
+run_case "version prints version and licence"     case_version_without_check_prints_version_and_licence
 run_case "version refuses an unknown option"      case_version_refuses_an_unknown_option

@@ -11,11 +11,468 @@ one root gets pinned to the *default* root and quietly overloads it, and the
 desktop app never gets pinned at all. This tool removes the hand-maintained
 duplication rather than adding a layer on top of it.
 
+## Ten-minute start
+
+Five steps, on a Mac with Claude Code already installed.
+
+**1. Install it.**
+
+```sh
+tools/install.sh
+```
+
+```
+Installed /Users/alex/.local/bin/agpin -> /path/to/agent-profile/bin/agent-profile
+Installed /Users/alex/.local/bin/agent-profile -> /path/to/agent-profile/bin/agent-profile
+
+WARNING: /Users/alex/.local/bin is not on your PATH, so the command will not be found.
+Add this to your shell rc file:
+  export PATH="/Users/alex/.local/bin:$PATH"
+
+Next:
+  agpin help
+  agpin doctor
+
+Worth adding to your shell rc file:
+  eval "$(agpin guard)"      # refuse to run the agent unpinned
+  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+```
+
+If `~/.local/bin` is already on your `PATH`, the warning is replaced by a line
+saying so instead. See [Install](#install) for `--prefix` and `--name`.
+
+**2. Create one profile per account.**
+
+```sh
+agpin new bouvet
+```
+
+```
+Created profile bouvet
+  agent     claude
+  root      /Users/alex/.claude-bouvet
+  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+
+The root is empty, which is the point: nothing is shared between profiles.
+That also means it has no settings, no hooks and none of the guardrails your
+other profiles may have. Set those up here directly; do not copy them across.
+
+Next: agent-profile run bouvet   (it will ask you to log in)
+```
+
+Do that once per account, for example `agpin new highsoft`. Then sign in to
+each: `agpin run bouvet`, `agpin run highsoft`.
+
+**3. Add two lines to your shell rc file.**
+
+```sh
+eval "$(agpin guard)"
+PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+```
+
+The first refuses to run `claude` with nothing pinned. The second shows which
+profile a pinned shell is using, so a prompt can never claim the wrong account.
+Open a new shell, or `source` the rc file, before the next step.
+
+**4. Check the separation actually holds.**
+
+```sh
+agpin doctor
+```
+
+```
+No isolation problems found across 2 profile(s).
+```
+
+If it finds something instead, each finding names the rule and the offender
+and says how to fix it; see [Troubleshooting](#troubleshooting) if the fix
+itself is not obvious.
+
+**5. Pin the desktop app.**
+
+```sh
+agpin app bouvet
+```
+
+```
+Created /Users/alex/Applications/Claude-Bouvet.app
+  pins      CLAUDE_CONFIG_DIR=/Users/alex/.claude-bouvet
+  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+
+Confirm it actually pins, by starting a Code session in the app and running:
+  find "$HOME"/.claude* -name "*.jsonl" -mmin -3
+The path it prints is the root that is really in use.
+```
+
+Drag the generated `.app` into the Dock. Repeat per account, then run it again
+any time to confirm nothing has drifted; a second run on an already-correct
+applet says so rather than rebuilding it.
+
+That covers a clean machine. `agpin` with no arguments asks which profile and
+whether to open the terminal or the desktop app, which is worth doing instead
+of typing the full command every time; see [Just asking](#just-asking).
+
+## Moving a machine you already use
+
+Everything above assumes a fresh account. Most machines are not that: Claude
+Code has usually been running unpinned for a while already, with sessions
+piling up in the default root and the desktop app opening whatever account it
+last opened.
+
+**Register what already exists first.** `new` on a root that already exists
+and holds data adopts it rather than creating it. Nothing is copied, moved,
+seeded or removed; the only change is that the root and its app data directory
+become mode 700. Point it at what you already have:
+
+```sh
+agent-profile new tide --root ~/.claude-tide \
+    --app-data ~/Library/Application\ Support/Claude-Tide
+```
+
+It says which of the two it did, and reports the session count it found, so
+"adopted your live root" and "made you an empty one" can never be confused.
+Check with `agent-profile list` that each profile names the account you expect
+before trusting `doctor`.
+
+**What the first `doctor` run tells you.** Registering even one new profile is
+enough to make `doctor` start reporting the residue of the old, unpinned use,
+because it can now compare what it finds against a registry instead of finding
+nothing to compare against. On a machine that has run unpinned for months, a
+first run commonly looks like this, once one new account (`bouvet`) is
+registered:
+
+```
+D01  the default claude root holds 1 session(s)
+     /Users/alex/.claude
+     Something ran without a profile pinned and wrote here.
+     Note that pinning to the default root is not the same as not pinning:
+     the state file moves inside the root when the variable is set.
+
+D02  a stray claude state file sits outside every profile root
+     /Users/alex/.claude.json
+     account: alex@personal.example
+     This file is written when nothing is pinned. It holds an account,
+     per-project trust decisions and personal MCP servers for whichever
+     account last ran unpinned, which need not be any profile here.
+
+D06  a claude config root exists that no profile claims
+     /Users/alex/.claude-tide
+     Register it, or remove it if it is left over.
+     Unregistered roots are invisible to every other check here.
+
+D14  a desktop launcher for profile 'bouvet' is not registered
+     /Users/alex/Desktop/Claude Work.app
+     It pins /Users/alex/.claude-bouvet, which profile 'bouvet' owns, but no profile
+     names this applet, so the launcher audit has never read it.
+     An unregistered launcher is invisible to every other check here.
+     Fix with: agent-profile app bouvet --applet '/Users/alex/Desktop/Claude Work.app'
+
+D09  a claude-cli:// handler is installed and cannot be pinned
+     /Users/alex/Applications/Claude Code URL Handler.app
+     LaunchServices passes no environment, so a deep link opens against the
+     default root whatever this tool has configured. Treat links as a leak
+     path: open the project through a pinned shell instead of clicking them.
+
+5 finding(s).
+```
+
+Five different kinds of residue, and each is resolved differently:
+
+- **D06**, the leftover `~/.claude-tide` root, is resolved exactly as in the
+  first step above: `agent-profile new tide --root ~/.claude-tide` adopts it.
+  Once a profile claims it, D06 stops reporting it.
+
+- **D14**, the launcher already sitting on the Desktop from before this tool
+  existed, is resolved by pointing the profile at it instead of building a
+  second one: `agent-profile app bouvet --applet '~/Desktop/Claude Work.app'`.
+  `app` finds this launcher on its own the next time it runs without
+  `--applet`, since it searches `~/Desktop` as well as `~/Applications` for
+  exactly this reason; see [D14](#the-audit).
+
+- **D01 and D02** both trace back to the same account: whoever has been using
+  Claude Code unpinned on this machine. There are two ways to resolve D01, and
+  they are not equivalent. If that unpinned use is genuinely stray and nobody's
+  account, stop running unpinned (the guard from step 3 above prevents new
+  instances) and leave the old data alone or clean it up by hand. If it is
+  actually one of your accounts, running unpinned because nobody had pinned it
+  yet, register it at the default root:
+
+  ```sh
+  agent-profile new main --root ~/.claude
+  ```
+
+  An account living in the **default** root is a supported case: register it
+  with `--root ~/.claude` and `doctor` will stop reporting that root as an
+  unpinned leak, because a profile now claims it. It is still a different
+  login from running unpinned, and D11 still says so.
+
+  It costs you D01 permanently, though, and `new` says so when you do it. An
+  unpinned run writes to that same root in the same layout, so on disk it is
+  indistinguishable from that profile's own work. D02 and D03 become the only
+  rules still watching unpinned use, and moving the root to recover D01 is not
+  an option because that invalidates the login. The real guard is never
+  running the agent unpinned at all. Here is that note, verbatim:
+
+  ```
+  NOTE: this profile owns the default root.
+
+  Anything that runs with nothing pinned writes to that same root, in the same
+  layout, so from now on doctor cannot tell an unpinned run apart from this
+  profile's own. D01 goes quiet for good. It is not a bug and there is no
+  setting for it: on disk the two are identical.
+
+  What still watches unpinned use:
+    D02  the state file beside the root, which names whichever account last
+         ran unpinned and need not be any profile here
+    D03  the same project appearing under two roots
+
+  This cannot be undone by moving the root: credentials are keyed to the root
+  path, so relocating it invalidates this login (docs/FACTS.md F06). The real
+  guard is never running the agent unpinned in the first place.
+  ```
+
+  D02 itself has no command that resolves it: the stray state file just says
+  which account last ran unpinned, and once every account is pinned and the
+  guard is in your rc file, nothing new writes there. Removing the old file by
+  hand is safe, but this tool never does it for you, the same way it never
+  touches any other credential or state file.
+
+- **D09** has no fix from this tool at all: it is a standing fact about the
+  `claude-cli://` handler, not something adopting a root or a launcher changes.
+  See [What this does not protect against](#what-this-does-not-protect-against).
+
+After resolving what can be resolved, a second `doctor` run on the same
+machine settles into the two findings that are permanent, plus whatever your
+own accounts still need to sign in:
+
+```
+D02  a stray claude state file sits outside every profile root
+     /Users/alex/.claude.json
+     account: alex@personal.example
+     This file is written when nothing is pinned. It holds an account,
+     per-project trust decisions and personal MCP servers for whichever
+     account last ran unpinned, which need not be any profile here.
+
+D09  a claude-cli:// handler is installed and cannot be pinned
+     /Users/alex/Applications/Claude Code URL Handler.app
+     LaunchServices passes no environment, so a deep link opens against the
+     default root whatever this tool has configured. Treat links as a leak
+     path: open the project through a pinned shell instead of clicking them.
+
+2 finding(s).
+```
+
+That is not a bug in the tool; it is the honest state of a machine that has
+run unpinned before and still has a URL handler installed. Nothing left in
+that list is silently wrong, which is the entire point of running `doctor` in
+the first place.
+
+## What this does not protect against
+
+This tool closes the gaps a hand-maintained setup accumulates on its own. It
+does not close every way a shell or a desktop can end up running `claude`
+unpinned. Know what is still open, one honest sentence each:
+
+- **The `claude-cli://` URL handler.** LaunchServices launches it with no
+  environment at all, so a clicked link always opens against the default root
+  regardless of what is pinned; `doctor`'s D09 flags that the handler is
+  installed, and the only mitigation is to open the project from a pinned
+  shell instead of clicking the link.
+- **IDE extensions that spawn the CLI from the IDE process.** An extension
+  that execs `claude` directly, rather than through your shell, never passes
+  through the `guard` function, so it runs with whatever `CLAUDE_CONFIG_DIR`
+  the IDE's own process happens to have, usually none; check the extension's
+  own environment settings if it needs to be pinned.
+- **Direct launches of the desktop app from Spotlight, Launchpad, the Dock or
+  login items.** Only the generated applet's `open --env` line injects a
+  config root, so launching `Claude.app` itself by any other route starts it
+  unpinned; put the applet, not the app, in the Dock and in login items.
+- **`command claude`, which is the guard's own escape hatch.** It is
+  documented and deliberate, on the theory that an escape hatch you can see
+  beats one people find by deleting the guard from their rc file, but it also
+  means the guard is not a hard lock: anyone who knows this can bypass it at
+  will.
+- **Scripts and cron jobs that call `claude`.** They do not source your
+  interactive rc file, so the `guard` function was never defined in that
+  process; a script that needs isolation has to export `CLAUDE_CONFIG_DIR`
+  itself.
+- **MCP servers or other tools that spawn the CLI.** The same mechanism as the
+  two points above: anything that execs the `claude` binary directly, rather
+  than going through a pinned shell, bypasses the guard and pins nothing on
+  its own.
+- **Roots outside `~/.claude-*` that D06 cannot see.** D06 looks for the
+  conventional prefix plus the default root; a root created at an
+  unconventional `--root` path is only audited once a profile claims it, so an
+  unclaimed root at an unconventional path stays invisible until then.
+- **Per-command pins, which the prompt label cannot show.** `CLAUDE_CONFIG_DIR=…
+  claude` pins that one invocation without ever touching the shell's own
+  environment, so `which --label` and the rc-file prompt keep showing whatever
+  the shell was already pinned to, or nothing; run `agent-profile which` for
+  the true state of the invocation you are about to make, not the prompt.
+- **Windows.** The tool is a bash script written for macOS paths and macOS
+  mechanisms (Keychain, `open`, AppleScript applets); none of it runs on
+  Windows, so a machine used from both platforms gets no isolation from this
+  tool at all on the Windows side.
+
+## Troubleshooting
+
+Every message below is quoted from the tool, with the cause and the fix.
+
+**"Refusing to run claude unpinned."**
+
+```
+Refusing to run claude unpinned.
+Nothing is pinned, so this would write to the default root,
+under whichever account last logged in there.
+
+Name one to use it, for example: claude <profile> [args...]
+
+Profiles on this machine:
+  bouvet
+
+Or pin the shell: eval "$(agpin env <profile>)"
+Override:         command claude [args...]
+```
+
+Cause: nothing is pinned in this shell, and the `guard` function from
+`eval "$(agpin guard)"` caught it before `claude` ran unpinned.
+
+Fix: name a profile (`claude bouvet`), pin the shell first
+(`eval "$(agpin env bouvet)"`), or use `command claude` if you genuinely mean
+to run unpinned once.
+
+**"no such profile '\<name\>' (try: agent-profile list)"**
+
+```
+agent-profile: no such profile 'boouvet' (try: agent-profile list)
+```
+
+Cause: a typo, or the profile was never created.
+
+Fix: `agent-profile list` to see the exact names, then
+`agent-profile new <name>` if it really does not exist yet.
+
+**"the 'claude' command is not on your PATH"**
+
+```
+agent-profile: the 'claude' command is not on your PATH
+```
+
+Cause: `run`, `shell` and the guard all check for the agent's binary before
+pinning it, and Claude Code is not installed or not on `PATH` in this shell.
+
+Fix: install Claude Code, or fix `PATH`.
+
+**"profile '\<name\>' is already registered with root '...'. Refusing to
+repoint it..."**
+
+```
+agent-profile: profile 'bouvet' is already registered with root '/Users/alex/.claude-bouvet'.
+Refusing to repoint it: credentials are keyed to the root path, so changing it
+would invalidate that profile's login. Remove /Users/alex/.config/agent-profiles/bouvet.conf by hand
+if you really mean to start over.
+```
+
+Cause: `new` was run again for an existing profile name with a different
+`--root`. Credentials are keyed to the root path (docs/FACTS.md F09), so
+repointing would invalidate that profile's login.
+
+Fix: pick a new name for the other root, or remove the registry entry named in
+the message by hand if you really do mean to start over.
+
+**"--root must be an absolute path..."**
+
+```
+agent-profile: --root must be an absolute path, because the credential is keyed
+on the literal path string. Got: relative/path
+```
+
+Cause: `--root` was given a relative path.
+
+Fix: pass an absolute path.
+
+**"the desktop app is not installed at /Applications/Claude.app"**
+
+```
+agent-profile: the desktop app is not installed at /Applications/Claude.app
+```
+
+Cause: `desktop` and `app` need Claude Desktop at the conventional path before
+they can pin it.
+
+Fix: install Claude Desktop, or if it genuinely lives elsewhere set
+`AGENT_PROFILE_APP_BUNDLE=/path/to/Claude.app` before running the command.
+
+**"this open(1) does not support --env..."**
+
+```
+agent-profile: this open(1) does not support --env, so the app cannot be pinned.
+Launching it anyway would start an unpinned session writing to the default
+root, which is the leak this tool exists to prevent, so nothing was launched.
+See docs/FACTS.md F13.
+```
+
+Cause: macOS `open` no longer supports `--env` (docs/FACTS.md F13), and
+without it nothing can pin the desktop app.
+
+Fix: none from this tool. Run `agent-profile verify` to confirm; see
+[What to do after a Claude Code update](#what-to-do-after-a-claude-code-update).
+
+**"N launchers already pin profile '\<name\>': ..."**
+
+```
+agent-profile: 2 launchers already pin profile 'bouvet':
+
+  /Users/alex/Applications/Claude-Bouvet.app
+  /Users/alex/Desktop/Bouvet2.app
+
+Refusing to guess which one is canonical, because repairing the wrong one
+rewrites a file you did not name. Say which with --applet, and remove or
+re-point the other so doctor stops reporting it as D14.
+```
+
+Cause: `app` found more than one existing launcher that already pins this
+profile's root, and refuses to guess which is canonical.
+
+Fix: pass `--applet PATH` to say which one, and remove or repoint the other so
+`doctor`'s D14 stops reporting it.
+
+**"... exists but is not an AppleScript applet: no compiled script inside
+it."**
+
+```
+agent-profile: /Users/alex/NotAnApplet.app exists but is not an AppleScript applet: no compiled script inside it.
+Refusing to overwrite it. Remove it, or pass --applet with another path.
+```
+
+Cause: the path at `--applet`, or the conventional default path, exists but is
+not a bundle `app` can repair, so it refuses to overwrite something it does
+not understand.
+
+Fix: remove it, or pass `--applet` with a different path.
+
+**"... contains a character the launch line cannot carry safely: ..."**
+
+```
+agent-profile: the app data directory contains a character the launch line cannot carry safely: /Users/alex/Library/Application Support/Weird$Name
+The applet nests a shell command inside an AppleScript string, so a quote,
+backslash, dollar or backtick in this path would need to survive two layers of
+quoting. Choose a path without them.
+```
+
+Cause: the config root or app data path contains a quote, backslash, dollar
+sign or backtick. The applet nests a shell command inside an AppleScript
+string literal, so a character like that would need to survive two layers of
+quoting.
+
+Fix: choose a root or app data path without that character; `new --root` and
+`--app-data` accept any other path you like.
+
+## What a profile is
+
 It is named for agents rather than for Claude because the same problem will
 arrive with ollama, codex and whatever comes next. Claude is the only agent
 implemented today.
-
-## What a profile is
 
 One profile is one account, and it owns two directories:
 
@@ -27,19 +484,9 @@ One profile is one account, and it owns two directories:
 The config root holds everything the agent stores: settings, session
 transcripts, auto memory, commands, skills, agents, plugins, plans, backups, the
 credential and the state file. Two profiles therefore share no file at all.
-
-## Why nothing is shared
-
-**No exceptions.** No symlinks, no shared parent directory, no copying common
-commands into every root, no seeding a new root from an existing one, no
-template of default settings. `new` creates an empty root.
-
-The cost is real and worth stating: a fresh root has no settings, no hooks and
-none of the guardrails your other profiles have. Set those up in the new root
-directly. Do not copy them across, because a copied file is a file that drifts.
-
-The tool also never touches credentials beyond checking that one exists, never
-edits the agent's own state files, and never migrates data between roots.
+Nothing is ever shared between two config roots, on purpose and without
+exception; the reasoning is in
+[Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared).
 
 ## Install
 
@@ -246,35 +693,6 @@ The prompt only appears on a terminal. Piped or scripted, the bare command
 still prints help and exits non-zero exactly as before, so nothing reading the
 output can hang waiting for an answer.
 
-### Adopting a machine you set up by hand
-
-`new` on a root that already exists and holds data adopts it rather than
-creating it. Nothing is copied, moved, seeded or removed; the only change is
-that the root and its app data directory become mode 700. Point it at what you
-already have:
-
-```sh
-agent-profile new tide --root ~/.claude-tide \
-    --app-data ~/Library/Application\ Support/Claude-Tide
-```
-
-It says which of the two it did, and reports the session count it found, so
-"adopted your live root" and "made you an empty one" can never be confused.
-Check with `agent-profile list` that each profile names the account you expect
-before trusting `doctor`.
-
-An account living in the **default** root is a supported case: register it with
-`--root ~/.claude` and `doctor` will stop reporting that root as an unpinned
-leak, because a profile now claims it. It is still a different login from
-running unpinned, and D11 still says so.
-
-It costs you D01 permanently, though, and `new` says so when you do it. An
-unpinned run writes to that same root in the same layout, so on disk it is
-indistinguishable from that profile's own work. D02 and D03 become the only
-rules still watching unpinned use, and moving the root to recover D01 is not an
-option because that invalidates the login. The real guard is never running the
-agent unpinned at all.
-
 ### Refusing to run unpinned
 
 ```sh
@@ -310,37 +728,9 @@ profile name would break it.
 
 It is printed rather than installed, and re-derived on every shell start, for
 the same reason the prompt label is: a copy in a dotfile drifts from the tool,
-and this one would drift silently.
-
-### A prompt that cannot lie
-
-`agent-profile which --label` prints the label and nothing else, derived from
-the pinned root every time it is called. It is stored nowhere, so it cannot
-drift away from the root it names. It exits non-zero when the shell is pinned to
-nothing, so an unpinned shell shows no label rather than a stale one.
-
-```sh
-# ~/.zshrc
-agent_label() { agent-profile which --label 2>/dev/null; }
-setopt PROMPT_SUBST
-PROMPT='$(agent_label) %~ %# '
-```
-
-One root is an exception, and has to be. A profile living in the **default**
-root has a basename of `.claude`, which names no account, and it cannot be
-moved somewhere better because relocating a root invalidates its login. For
-that root alone the registered name is used, so renaming that one registry
-entry does move its label. Every other root keeps the guarantee.
-
-This works in a shell that is actually pinned, which means `agent-profile
-shell` or `eval "$(agent-profile env …)"`. It cannot work for a per-command
-pin like `CLAUDE_CONFIG_DIR=… claude`, because the variable never enters the
-shell and the prompt only redraws once the command has exited.
-
-The same caveat applies one level up: an indicator like this covers the
-terminal only. The desktop app renders no status line of its own, so there is
-nothing inside it that says which root it is using. For the desktop, the
-launcher is the guarantee and `doctor`'s D13 is the check.
+and this one would drift silently. That prompt label, and the one root where
+it has to work differently, are explained in
+[A prompt that cannot lie](docs/DESIGN.md#a-prompt-that-cannot-lie).
 
 ## The desktop
 
@@ -386,14 +776,9 @@ header, so macOS cannot determine its architecture and the Dock icon bounces
 forever. And it will not run the app binary from your shell: Electron inherits
 the terminal's stdin, and the app dies with the shell.
 
-### Two identities, and they can disagree
-
-A profile has two. `--user-data-dir` selects the app's own login, the account
-name you see in the app. `CLAUDE_CONFIG_DIR` selects where its embedded Claude
-Code writes. They are independent, and they have been seen disagreeing: the app
-showed the right account for weeks while its sessions were writing into another
-account's root. The app naming an account is not evidence that anything is
-pinned. `explain` prints both.
+A profile has two identities that can disagree with each other, the app's own
+login and the config root its embedded Claude Code writes to; see
+[Two identities, and they can disagree](docs/DESIGN.md#two-identities-and-they-can-disagree).
 
 ## The audit
 
@@ -418,40 +803,10 @@ offender, so it works from a cron entry or a shell hook.
 | D14 | A desktop launcher exists that no profile claims |
 | D15 | More than one profile is registered at the same root |
 
-D05 is exact rather than a guess: the Keychain service name is
-`Claude Code-credentials-<first 8 hex of sha256 of the config root path>`, with
-the account set to `$USER`. Existence is checked with `find-generic-password`
-and its output discarded, never with `-g`, so no secret is read.
-
-Two things follow from that naming, and each has its own rule. The hash covers
-the **literal path string**, so `~/.claude-work` and `~/.claude-work/` are two
-different logins (D10, and `new` normalizes to prevent it). And the suffix is
-present whenever the variable is **set at all**, so pinning to the default root
-is a different login from not pinning, which D11 reports.
-
-D13 is the desktop's only tell. The app renders no status line, and its own
-login can be right while its sessions write elsewhere, so the launch line
-inside the applet is the thing to read. It shares one definition of "correct"
-with `agent-profile app`, so the audit and the repair cannot disagree. It
-reports an applet that pins nothing, pins the wrong root, selects the wrong app
-data directory, or puts `--env` after `--args`. It stays quiet about a
-hand-tuned line that still pins the right root: that is nobody's business but
-its owner's, and a rule that fires on a working setup gets ignored.
-
-D14 exists because assuming launchers live in `~/Applications` is wrong on a
-real machine. Two working ones were found sitting on a Desktop, entirely
-outside the audit, while `doctor` reported a clean desktop. It searches
-`~/Applications`, `~/Desktop` and `/Applications` for bundles whose launch line
-mentions the config-dir variable, and reports any that no profile names, saying
-which profile owns the root it pins. Set `AGENT_PROFILE_APPLET_DIRS` to search
-elsewhere; it is colon-separated like `PATH`.
-
-D03 is the one that catches real leakage, and it needs no configuration. Claude
-Code names a project directory after the working directory with every
-non-alphanumeric character replaced by `-`, so `my_repo`, `my-repo` and
-`my.repo` all collide and the name cannot be decoded. Each transcript records
-its own `cwd` as an absolute path instead, and D03 reads that. A path appearing
-under two roots means one account has worked in the other's project.
+The reasoning behind the trickier rules, D05's exact Keychain check, D13 and
+D14 on the desktop side, and D03's use of each transcript's own working
+directory, is in
+[The audit, rule by rule](docs/DESIGN.md#the-audit-rule-by-rule).
 
 ## Exit codes
 
@@ -511,22 +866,38 @@ one profile while holding for the rest.
 `agent-profile explain` states the scheme in plain language and shows where this
 machine's data currently lives, for when you come back to this in six months.
 
+### Windows
+
+Nothing in this tool has been run on Windows. What a port would rest on is
+written down all the same, as W01 to W06 in [`docs/FACTS.md`](docs/FACTS.md),
+with the same statuses the macOS facts carry and an honest one for each. Every
+entry there was read out of the documentation or argued from it. None was
+observed on a Windows machine, so none is `VERIFIED`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\probe-claude-windows.ps1
+```
+
+The probe works in a throwaway config root and app data directory under
+`$env:TEMP`, never touches a real root, never reads the content of a credential
+file, and removes what it made. Run it in Windows PowerShell 5.1 or PowerShell
+7 and paste the output into the Windows section of `docs/FACTS.md`. That
+settles five of the six. W05 needs a person as well: pin the launcher the probe
+leaves behind, launch from the pin, and say which root the session landed in.
+
+W04 is the one that decides the shape of a port. It asks whether the desktop
+app's embedded Claude Code reads the config root from the app's process
+environment, which is F01 asked again for Windows. Until somebody answers it,
+no Windows launcher should ship, because a launcher that pins nothing looks
+exactly like one that works.
+
 ## Three things that are not what they look like
 
-**Pinning to the default root is not the same as not pinning.** Setting
-`CLAUDE_CONFIG_DIR=~/.claude` produces a different layout from leaving it unset,
-because the state file moves inside the root. `doctor` never treats the two as
-equivalent.
-
-**A config root cannot be moved or renamed.** Credentials are keyed to the root
-path, so a root at a new path reads a different Keychain entry and a different
-`.credentials.json`. That is why there is no `rename` and no `move`, and why
-`new` refuses to repoint an existing profile. Create a new profile instead.
-
-**The app naming an account is not evidence that anything is pinned.** The
-app's own login and the config root its embedded Claude Code writes to are two
-independent identities, and they have been seen disagreeing for weeks. Read
-both, which is what `explain` prints and what D13 checks.
+Pinning to the default root is not the same as not pinning, a config root can
+never be moved or renamed once it has a login, and the desktop app naming an
+account is not evidence that anything is pinned. Each of those is worth
+reading in full, because each one has cost someone real time:
+[Three things that are not what they look like](docs/DESIGN.md#three-things-that-are-not-what-they-look-like).
 
 ## Status
 
@@ -539,20 +910,12 @@ real machine during two account migrations and confirmed twice, once per
 account. The Keychain naming, the URL handler and the state-file questions are
 answered too. The record is [`docs/FACTS.md`](docs/FACTS.md).
 
-Not built, and deliberately:
-
-- **`statusline install`.** A per-root status line is the right terminal
-  indicator, and it is tamper-proof by construction: a script that lives inside
-  one config root can only run while that root is in use, so its label cannot
-  name the wrong account. Installing one means writing inside a root, which
-  this tool does not do yet, and doing it safely means merging a single key
-  into `settings.json` while preserving every key it does not understand. Real
-  roots carry hooks, permission blocks and a dozen other settings that a
-  rewritten file would destroy.
-- **`doctor --recent`**, the leak test below as a command.
-- **Settings-content validation.** An invalid model id and permission rules
-  written as English sentences both sit quietly in a live root today and pass
-  every check that only looks at directory layout.
+Three things are deliberately not built yet: a per-root status line installer
+(tamper-proof by construction, but it means writing inside a root, which this
+tool does not do), `doctor --recent` as a standing command rather than the
+manual leak test below, and validation of what a root's settings actually
+contain rather than just its layout. The reasoning for each is in
+[Not built, and deliberately](docs/DESIGN.md#not-built-and-deliberately).
 
 ### The leak test
 
@@ -613,3 +976,12 @@ Then update `packaging/homebrew/agpin.rb` and the tap, which
 [`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers. The
 formula cannot be updated before the release, because until it exists there is
 no sum to pin.
+
+## Licence
+
+`agent-profile` is licensed under the GNU General Public License version 3 or
+later (GPL-3.0-or-later). See `LICENSE` for the full text.
+
+Use it on any machine, for any customer, for any purpose, free of charge. The
+one condition is on redistribution: if you hand out a modified copy, or a
+repackaged one, you must publish those modifications under the same licence.

@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
 # The invariant the whole tool exists to protect: no file is ever shared,
 # symlinked or copied between two roots.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2016  # the patterns below are literals, not expressions
 #
 # lint-bash32.sh: refuse constructs that bash 3.2 does not support.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # agent-profile: Agent Profile Manager
 #
@@ -11,6 +12,7 @@
 set -u
 
 AGENT_PROFILE_VERSION="0.7.1"
+AGENT_PROFILE_LICENSE="GPL-3.0-or-later"
 
 # The name this was invoked as. Every message names the command the reader
 # actually typed, so an install under a short name never tells them to run
@@ -2321,6 +2323,7 @@ cmd_version() {
 
     if [ -z "$_ver_check" ]; then
         printf '%s %s\n' "$SELF" "$AGENT_PROFILE_VERSION"
+        printf '%s\n' "$AGENT_PROFILE_LICENSE"
         return "$EX_OK"
     fi
 

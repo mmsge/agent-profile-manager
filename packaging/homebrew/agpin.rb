@@ -21,8 +21,9 @@ class Agpin < Formula
   # still carries it fails loudly rather than installing something unchecked.
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  # No license line yet: the repository ships no LICENSE file. Add one here
-  # once it does, because Homebrew audits for it.
+  # Homebrew audits for this, and it must match the LICENSE file at the
+  # repository root.
+  license "GPL-3.0-or-later"
 
   # macOS only, deliberately. The tool pins the desktop app through open(1)
   # --env and reads the macOS Keychain, and neither exists elsewhere.

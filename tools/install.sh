@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # install.sh: put agent-profile on your PATH.
 #
