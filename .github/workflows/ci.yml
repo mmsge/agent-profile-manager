@@ -10,20 +10,27 @@ on:
 
 jobs:
   test:
-    # macOS is the only supported platform, and it is the only runner that has
-    # the real bash 3.2 to test against.
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           # /bin/bash on macOS is 3.2, which is what the tool must run under on
-          # a machine with nothing installed.
+          # a machine with nothing installed. macOS is the only runner that
+          # has the real thing, so this leg stays there.
           - name: system bash 3.2
+            os: macos-latest
             bash: /bin/bash
           # Homebrew's bash, so a modern-bash regression is caught too.
           - name: latest bash
+            os: macos-latest
             bash: brew
+          # Linux is where most automation, and any future Go port, runs
+          # first. Nothing exercised it before, so a GNU-versus-BSD drift in
+          # stat, sed or find would have shipped unnoticed.
+          - name: system bash, Linux
+            os: ubuntu-latest
+            bash: /bin/bash
 
     name: test (${{ matrix.name }})
     steps:
@@ -46,8 +53,10 @@ jobs:
         run: |
           "${{ steps.sh.outputs.path }}" --version | head -1
 
+      # Only the macOS system-bash leg is claiming to run the real 3.2; the
+      # Linux system bash is a modern one and must not be held to that.
       - name: Fail if the 3.2 job is not actually running 3.2
-        if: matrix.bash != 'brew'
+        if: matrix.os == 'macos-latest' && matrix.bash != 'brew'
         run: |
           v=$(/bin/bash -c 'echo "$BASH_VERSION"')
           case "$v" in
@@ -61,17 +70,44 @@ jobs:
             "${{ steps.sh.outputs.path }}" -n "$f"
           done
 
+      # The suite's own "<n> test(s), <n> failure(s)" line and the count in
+      # README.md's Development section must agree, or the two have drifted
+      # and one of them is lying. Parsed at runtime on both sides: a number
+      # hard-coded here would itself become the next thing to drift.
       - name: Run the suite
         run: |
-          "${{ steps.sh.outputs.path }}" tests/run.sh
+          set -o pipefail
+          "${{ steps.sh.outputs.path }}" tests/run.sh | tee /tmp/test-output.txt
+
+          # sed, not grep: sed exits 0 whether or not a line matches, so a
+          # missing or reworded line falls through to the checks below
+          # instead of failing the step with no explanation.
+          reported=$(sed -n 's/^\([0-9][0-9]*\) test(s), .*/\1/p' /tmp/test-output.txt | tail -1)
+          documented=$(sed -n 's/^tests\/run\.sh[[:space:]][[:space:]]*# \([0-9][0-9]*\) tests.*/\1/p' README.md | tail -1)
+
+          if [ -z "$reported" ]; then
+            echo "could not find the '<n> test(s), <n> failure(s)' summary line in tests/run.sh's output" >&2
+            exit 1
+          fi
+          if [ -z "$documented" ]; then
+            echo "could not find the test count in README.md's Development section" >&2
+            exit 1
+          fi
+          if [ "$reported" != "$documented" ]; then
+            echo "tests/run.sh reports $reported tests but README.md's Development section says $documented; update README.md" >&2
+            exit 1
+          fi
+          echo "test count agrees with README.md: $reported"
 
   lint:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install shellcheck
-        run: brew install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
 
       - name: shellcheck
         run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
