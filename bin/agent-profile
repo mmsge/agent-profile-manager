@@ -148,6 +148,486 @@ need() {
 }
 
 # ---------------------------------------------------------------------------
+# Output routing
+#
+# Every user-facing line that list, doctor and verify produce goes through
+# emit(). Prose and the machine-readable document are two renderings of one
+# record stream, so they cannot drift apart: there is no second place where
+# either of them is written, and a rule that stops printing stops appearing in
+# the JSON in the same change.
+#
+# A record is a level, a kind, and the fields that kind takes. The kind decides
+# what a renderer does with it. The level decides who sees it:
+#
+#   always   reaches the reader even when they asked for less
+#   normal   the default
+#   detail   reaches the reader only when they asked for more
+#   data     never prose; the structured renderings alone
+#   prose    never recorded; the terminal alone, for a line about the run
+#            itself rather than about the machine being audited
+#
+# REPORT_LEVEL is the threshold, and only "normal" is reachable today. The
+# ordering is here so that a quieter or a more explanatory mode is a change to
+# one comparison and a flag, rather than to every call site.
+#
+# The record stream is captured only when a structured document was asked for,
+# so an ordinary run pays nothing for this. Fields are separated by NUL,
+# because a path may hold any byte except NUL and a line-based format would
+# lose a root whose name contains a newline.
+# ---------------------------------------------------------------------------
+
+REPORT_FORMAT=text    # text or json
+REPORT_LEVEL=normal   # always, normal or detail
+REPORT_FILE=""        # the captured record stream, empty when not capturing
+REPORT_PATH=""        # base path for --report, empty when writing no files
+
+# report_rank <level>: levels as numbers, so they can be compared.
+report_rank() {
+    case "$1" in
+        always|prose) printf '0\n' ;;
+        normal)       printf '1\n' ;;
+        detail)       printf '2\n' ;;
+        data)         printf '9\n' ;;
+        *)            die "internal: unknown output level '$1'" ;;
+    esac
+}
+
+# report_shows <level>: does a record at this level reach the reader as prose?
+report_shows() {
+    [ "$REPORT_FORMAT" = "text" ] || return 1
+    [ "$1" != "data" ] || return 1
+    [ "$(report_rank "$1")" -le "$(report_rank "$REPORT_LEVEL")" ]
+}
+
+# emit <level> <kind> [field...]
+#
+# The one door. Nothing that a reader or a report consumer is meant to see is
+# printed anywhere else.
+emit() {
+    _em_level="$1"
+    case "$_em_level" in
+        prose) ;;
+        *) [ -z "$REPORT_FILE" ] || report_record "$@" ;;
+    esac
+    if report_shows "$_em_level"; then
+        shift
+        report_prose "$@"
+    fi
+}
+
+# report_record <level> <kind> [field...]: append one record to the stream.
+report_record() {
+    {
+        printf '%s\0%s\0%s\0' "$1" "$2" "$(($# - 2))"
+        shift 2
+        for _rr_field in "$@"; do
+            printf '%s\0' "$_rr_field"
+        done
+    } >> "$REPORT_FILE"
+}
+
+# report_prose <kind> [field...]: the human rendering of one record.
+#
+# The layout each kind produces is the layout this tool has always produced.
+# Changing a line here changes it everywhere it appears, which is the point.
+report_prose() {
+    _rp_kind="$1"; shift
+    case "$_rp_kind" in
+        text)
+            for _rp_line in "$@"; do
+                printf '%s\n' "$_rp_line"
+            done
+            ;;
+        profile)
+            # name agent root root_exists app_data account org sessions
+            printf '%s\n' "$1"
+            printf '  agent     %s\n' "$2"
+            printf '  root      %s' "$3"
+            [ "$4" = "yes" ] || printf '   MISSING'
+            printf '\n'
+            # An account this tool could not read is named as such by the
+            # prose. The record keeps it empty, so a consumer gets null rather
+            # than a sentence it would have to parse.
+            if [ -n "$6" ]; then
+                printf '  account   %s\n' "$6"
+            else
+                printf '  account   (not signed in)\n'
+            fi
+            [ -z "$7" ] || printf '  org       %s\n' "$7"
+            printf '  sessions  %s\n' "$8"
+            printf '\n'
+            ;;
+        finding)
+            # rule summary subject detail...
+            printf '%s  %s\n' "$1" "$2"
+            [ -z "$3" ] || printf '     %s\n' "$3"
+            shift 3
+            for _rp_line in "$@"; do
+                printf '     %s\n' "$_rp_line"
+            done
+            printf '\n'
+            ;;
+        rule_status)
+            # rule status reason prose-line...
+            shift 3
+            [ $# -gt 0 ] || return 0
+            for _rp_line in "$@"; do
+                printf '%s\n' "$_rp_line"
+            done
+            printf '\n'
+            ;;
+        check)
+            # status fact summary detail...
+            case "$1" in
+                ok)        _rp_label="ok" ;;
+                broken)    _rp_label="BROKEN" ;;
+                unchecked) _rp_label="unchecked" ;;
+                note)      _rp_label="note" ;;
+                *)         _rp_label="$1" ;;
+            esac
+            printf '  %-10s%s  %s\n' "$_rp_label" "$2" "$3"
+            shift 3
+            for _rp_line in "$@"; do
+                printf '                 %s\n' "$_rp_line"
+            done
+            ;;
+        summary)
+            # <pairs> <key> <value> ... then the prose lines
+            _rp_pairs="$1"; shift
+            while [ "$_rp_pairs" -gt 0 ]; do
+                shift 2
+                _rp_pairs=$((_rp_pairs - 1))
+            done
+            for _rp_line in "$@"; do
+                printf '%s\n' "$_rp_line"
+            done
+            ;;
+        meta|agent|rule_catalog) ;;
+        *) die "internal: unknown record kind '$_rp_kind'" ;;
+    esac
+}
+
+# installed_agent_version <agent>: the version on PATH, empty when absent.
+installed_agent_version() {
+    _iav_bin=$(agent_def "$1" binary)
+    command -v "$_iav_bin" >/dev/null 2>&1 || return 0
+    "$_iav_bin" --version 2>/dev/null | head -1 | awk '{print $1}'
+}
+
+# report_open <command>: start capturing, and record the document header.
+#
+# The header is what makes the document evidence rather than a listing: when it
+# was produced, by which version of this tool, against which agent version, on
+# which machine and as which user.
+report_open() {
+    need python3
+    REPORT_FILE=$(mktemp "${TMPDIR:-/tmp}/agent-profile-report.XXXXXX") || \
+        die "could not create a temporary file under ${TMPDIR:-/tmp}"
+    trap report_cleanup EXIT INT TERM
+    emit data meta \
+        command "$1" \
+        generated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        tool "$SELF" \
+        tool_version "$AGENT_PROFILE_VERSION" \
+        verified_against "$AGENT_PROFILE_VERIFIED_AGAINST" \
+        hostname "$(uname -n)" \
+        user "${USER:-}" \
+        platform "$AGENT_PROFILE_PLATFORM" \
+        registry "$AGENT_PROFILE_REGISTRY"
+    # One entry per agent this tool knows, so the seam stays a seam. Reading a
+    # version means running the agent's own binary, which is why it happens
+    # here and not on every run.
+    for _ro_agent in $KNOWN_AGENTS; do
+        emit data agent "$_ro_agent" "$(installed_agent_version "$_ro_agent")"
+    done
+}
+
+# report_cleanup: the record stream is scratch and must not outlive the run,
+# including the runs that end at a die() rather than at the bottom.
+report_cleanup() {
+    [ -z "$REPORT_FILE" ] || rm -f "$REPORT_FILE"
+}
+
+# report_finish: render the captured stream, then discard it.
+#
+# The files and the document on stdout are rendered from the same stream after
+# the same records, so handing someone the file and piping the output give the
+# identical document.
+report_finish() {
+    [ -n "$REPORT_FILE" ] || return 0
+    if [ -n "$REPORT_PATH" ]; then
+        # Create both files before announcing them, so a report that cannot be
+        # written fails here rather than after a line claiming it was.
+        : > "$REPORT_PATH.json" || die "could not write $REPORT_PATH.json"
+        : > "$REPORT_PATH.md" || die "could not write $REPORT_PATH.md"
+        # Where the files went is a fact about this run, not about the machine
+        # being audited, so it is said to the terminal and left out of the
+        # documents themselves.
+        emit prose text "Wrote $REPORT_PATH.json" "Wrote $REPORT_PATH.md"
+        report_render json "$REPORT_FILE" > "$REPORT_PATH.json" || \
+            die "could not write $REPORT_PATH.json"
+        report_render markdown "$REPORT_FILE" > "$REPORT_PATH.md" || \
+            die "could not write $REPORT_PATH.md"
+    fi
+    if [ "$REPORT_FORMAT" = "json" ]; then
+        report_render json "$REPORT_FILE"
+    fi
+    report_cleanup
+    REPORT_FILE=""
+}
+
+# report_render <json|markdown> <record-file>
+#
+# The only place a structured document is produced. python3 does the quoting:
+# hand-rolling JSON escaping in shell is how a report ends up unparseable on
+# the one machine whose paths contain a quote or a backslash.
+#
+# No field here can carry a credential. The records hold paths, account emails,
+# organisation ids and rule text; the tool never reads a credential value in
+# the first place, so there is none to leak into a document.
+report_render() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+
+fmt, path = sys.argv[1], sys.argv[2]
+
+with open(path, "rb") as fh:
+    raw = fh.read()
+parts = raw.split(b"\0")
+if parts and parts[-1] == b"":
+    parts.pop()
+fields = [p.decode("utf-8", "replace") for p in parts]
+
+records = []
+i = 0
+while i + 2 < len(fields):
+    level, kind = fields[i], fields[i + 1]
+    count = int(fields[i + 2])
+    records.append((level, kind, fields[i + 3:i + 3 + count]))
+    i += 3 + count
+
+meta = {}
+agents = []
+profiles = []
+findings = []
+checks = []
+catalog = []
+statuses = {}
+notes = []
+summary = {}
+summary_lines = []
+
+for _level, kind, args in records:
+    if kind == "meta":
+        for key, value in zip(args[0::2], args[1::2]):
+            meta[key] = value
+    elif kind == "agent":
+        agents.append({"agent": args[0], "version": args[1] or None})
+    elif kind == "profile":
+        profiles.append({
+            "name": args[0],
+            "agent": args[1],
+            "root": args[2],
+            "root_exists": args[3] == "yes",
+            "app_data": args[4] or None,
+            "account": args[5] or None,
+            "organization": args[6] or None,
+            "sessions": int(args[7]),
+        })
+    elif kind == "finding":
+        findings.append({
+            "rule": args[0],
+            "summary": args[1],
+            "subject": args[2] or None,
+            "detail": list(args[3:]),
+        })
+    elif kind == "check":
+        checks.append({
+            "status": args[0],
+            "fact": args[1],
+            "summary": args[2],
+            "detail": list(args[3:]),
+        })
+    elif kind == "rule_catalog":
+        catalog.append((args[0], args[1]))
+    elif kind == "rule_status":
+        statuses[args[0]] = (args[1], args[2])
+    elif kind == "text":
+        text = "\n".join(args).strip("\n")
+        if text.strip():
+            notes.append(text)
+    elif kind == "summary":
+        pairs = int(args[0])
+        for key, value in zip(args[1:1 + 2 * pairs:2], args[2:2 + 2 * pairs:2]):
+            summary[key] = int(value) if value.lstrip("-").isdigit() else value
+        summary_lines = list(args[1 + 2 * pairs:])
+
+command = meta.get("command", "report")
+
+doc = {
+    "schema": "agent-profile/" + command,
+    "schema_version": 1,
+    "command": command,
+    "generated_at": meta.get("generated_at"),
+    "tool": meta.get("tool"),
+    "tool_version": meta.get("tool_version"),
+    "verified_against": meta.get("verified_against"),
+    "agents": agents,
+    "hostname": meta.get("hostname"),
+    "user": meta.get("user"),
+    "platform": meta.get("platform"),
+    "registry": meta.get("registry"),
+}
+
+if command in ("doctor", "list"):
+    doc["profiles"] = profiles
+
+if command == "doctor":
+    rules = []
+    for rule, title in catalog:
+        hits = [f for f in findings if f["rule"] == rule]
+        recorded, reason = statuses.get(rule, ("", ""))
+        # A rule that did not run is never reported as passing. "limited" is a
+        # rule that ran in a weaker form than it would on a machine that had
+        # what it wanted.
+        if hits:
+            state = "fail"
+        elif recorded:
+            state = recorded
+        else:
+            state = "pass"
+        rules.append({
+            "rule": rule,
+            "title": title,
+            "status": state,
+            "findings": len(hits),
+            "reason": reason or None,
+        })
+    doc["rules"] = rules
+    doc["findings"] = findings
+
+if command == "verify":
+    doc["checks"] = checks
+
+doc["notes"] = notes
+doc["summary"] = summary
+
+if fmt == "json":
+    sys.stdout.write(json.dumps(doc, indent=2) + "\n")
+    sys.exit(0)
+
+
+def cell(text):
+    return str(text).replace("|", "\\|")
+
+
+titles = {
+    "doctor": "Isolation audit",
+    "list": "Profile inventory",
+    "verify": "Assumption check",
+}
+out = []
+out.append("# %s" % titles.get(command, "Report"))
+out.append("")
+out.append("Produced by `%s` %s on %s at %s, as user `%s`." % (
+    doc["tool"], doc["tool_version"], doc["hostname"],
+    doc["generated_at"], doc["user"] or "not recorded"))
+out.append("")
+out.append("| Field | Value |")
+out.append("| --- | --- |")
+out.append("| Generated at | %s |" % cell(doc["generated_at"]))
+out.append("| Tool version | %s |" % cell(doc["tool_version"]))
+out.append("| Facts verified against | %s |" % cell(doc["verified_against"]))
+for entry in agents:
+    out.append("| Installed %s | %s |" % (
+        cell(entry["agent"]), cell(entry["version"] or "not installed")))
+out.append("| Host | %s |" % cell(doc["hostname"]))
+out.append("| User | %s |" % cell(doc["user"] or "not recorded"))
+out.append("| Platform | %s |" % cell(doc["platform"]))
+out.append("| Registry | %s |" % cell(doc["registry"]))
+out.append("")
+
+if command in ("doctor", "list"):
+    out.append("## Profiles")
+    out.append("")
+    if profiles:
+        out.append("| Profile | Agent | Root | App data | Account | Organisation | Sessions |")
+        out.append("| --- | --- | --- | --- | --- | --- | --- |")
+        for entry in profiles:
+            out.append("| %s | %s | %s | %s | %s | %s | %d |" % (
+                cell(entry["name"]), cell(entry["agent"]),
+                cell(entry["root"]) + ("" if entry["root_exists"] else " (missing)"),
+                cell(entry["app_data"] or ""),
+                cell(entry["account"] or "not signed in"),
+                cell(entry["organization"] or ""),
+                entry["sessions"]))
+    else:
+        out.append("No profiles are registered.")
+    out.append("")
+
+if command == "doctor":
+    out.append("## Findings")
+    out.append("")
+    if findings:
+        for entry in findings:
+            out.append("### %s %s" % (entry["rule"], entry["summary"]))
+            out.append("")
+            if entry["subject"]:
+                out.append("`%s`" % entry["subject"])
+                out.append("")
+            for line in entry["detail"]:
+                out.append(line)
+            out.append("")
+    else:
+        out.append("No isolation problems were found.")
+        out.append("")
+    out.append("## Rules")
+    out.append("")
+    out.append("| Rule | Status | Finding it looks for |")
+    out.append("| --- | --- | --- |")
+    for entry in doc["rules"]:
+        status = entry["status"]
+        if entry["reason"]:
+            status = "%s (%s)" % (status, entry["reason"])
+        out.append("| %s | %s | %s |" % (
+            cell(entry["rule"]), cell(status), cell(entry["title"])))
+    out.append("")
+
+if command == "verify":
+    out.append("## Checks")
+    out.append("")
+    out.append("| Fact | Status | Result |")
+    out.append("| --- | --- | --- |")
+    for entry in checks:
+        out.append("| %s | %s | %s |" % (
+            cell(entry["fact"]), cell(entry["status"]), cell(entry["summary"])))
+    out.append("")
+
+if notes:
+    out.append("## Notes")
+    out.append("")
+    for note in notes:
+        for line in note.split("\n"):
+            out.append(line)
+        out.append("")
+
+out.append("## Summary")
+out.append("")
+for line in summary_lines:
+    out.append(line)
+    out.append("")
+for key in sorted(summary):
+    out.append("- %s: %s" % (key, summary[key]))
+out.append("")
+out.append("No rule reads a credential value, so none appears above. The audit")
+out.append("reads paths, file modes, account identity and Keychain attributes only.")
+out.append("")
+
+sys.stdout.write("\n".join(out))
+PY
+}
+
+# ---------------------------------------------------------------------------
 # Registry
 #
 # One file per profile at $AGENT_PROFILE_REGISTRY/<name>.conf, plain key=value.
@@ -613,50 +1093,85 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# The profile inventory
+#
+# One record per registered profile. list renders them as prose; doctor records
+# them without printing them, because its own prose says nothing about a
+# healthy profile and must not start, while a document that names findings
+# without naming the machine they were found on is evidence of nothing.
+# ---------------------------------------------------------------------------
+
+# emit_profiles <level>
+emit_profiles() {
+    _ep_level="$1"
+    _ep_names=$(profile_names)
+    [ -n "$_ep_names" ] || return 0
+
+    # Group roots by agent so read_accounts runs once per agent, not once per
+    # profile. Roots can contain spaces, so they go through an array.
+    for _ep_agent in $KNOWN_AGENTS; do
+        _ep_roots=()
+        for _ep_name in $_ep_names; do
+            [ "$(reg_get "$_ep_name" agent)" = "$_ep_agent" ] || continue
+            _ep_roots[${#_ep_roots[@]}]=$(reg_get "$_ep_name" root)
+        done
+        [ ${#_ep_roots[@]} -gt 0 ] || continue
+
+        _ep_state=$(agent_def "$_ep_agent" state_base)
+        _ep_accounts=$(read_accounts "$_ep_state" "${_ep_roots[@]}")
+
+        for _ep_name in $_ep_names; do
+            [ "$(reg_get "$_ep_name" agent)" = "$_ep_agent" ] || continue
+            _ep_root=$(reg_get "$_ep_name" root)
+            _ep_line=$(printf '%s\n' "$_ep_accounts" | awk -F'\t' -v r="$_ep_root" '$1==r {print; exit}')
+            _ep_exists=no
+            [ -d "$_ep_root" ] && _ep_exists=yes
+            emit "$_ep_level" profile \
+                "$_ep_name" \
+                "$_ep_agent" \
+                "$_ep_root" \
+                "$_ep_exists" \
+                "$(reg_get "$_ep_name" app_data)" \
+                "$(printf '%s' "$_ep_line" | cut -f2)" \
+                "$(printf '%s' "$_ep_line" | cut -f3)" \
+                "$(session_count "$_ep_root")"
+        done
+    done
+}
+
+# ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
 
 cmd_list() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) REPORT_FORMAT=json ;;
+            *) die "list: unknown option '$1' (try: $SELF list --json)" ;;
+        esac
+        shift
+    done
+
     need python3
+    [ "$REPORT_FORMAT" = "text" ] || report_open list
+
     _list_names=$(profile_names)
     if [ -z "$_list_names" ]; then
-        printf 'No profiles registered.\n\n'
-        printf 'Create one:  %s new <name>\n' "$SELF"
-        return 0
+        emit normal text \
+            "No profiles registered." \
+            "" \
+            "Create one:  $SELF new <name>"
+        emit data summary 2 profiles 0 exit_code "$EX_OK"
+        report_finish
+        return "$EX_OK"
     fi
 
-    # Group roots by agent so read_accounts runs once per agent, not once per
-    # profile. Roots can contain spaces, so they go through an array.
-    for _list_agent in $KNOWN_AGENTS; do
-        _list_roots=()
-        for _list_name in $_list_names; do
-            [ "$(reg_get "$_list_name" agent)" = "$_list_agent" ] || continue
-            _list_roots[${#_list_roots[@]}]=$(reg_get "$_list_name" root)
-        done
-        [ ${#_list_roots[@]} -gt 0 ] || continue
-
-        _list_state=$(agent_def "$_list_agent" state_base)
-        _list_accounts=$(read_accounts "$_list_state" "${_list_roots[@]}")
-
-        for _list_name in $_list_names; do
-            [ "$(reg_get "$_list_name" agent)" = "$_list_agent" ] || continue
-            _list_root=$(reg_get "$_list_name" root)
-            _list_line=$(printf '%s\n' "$_list_accounts" | awk -F'\t' -v r="$_list_root" '$1==r {print; exit}')
-            _list_email=$(printf '%s' "$_list_line" | cut -f2)
-            _list_org=$(printf '%s' "$_list_line" | cut -f3)
-            [ -n "$_list_email" ] || _list_email="(not signed in)"
-
-            printf '%s\n' "$_list_name"
-            printf '  agent     %s\n' "$_list_agent"
-            printf '  root      %s' "$_list_root"
-            [ -d "$_list_root" ] || printf '   MISSING'
-            printf '\n'
-            printf '  account   %s\n' "$_list_email"
-            [ -n "$_list_org" ] && printf '  org       %s\n' "$_list_org"
-            printf '  sessions  %s\n' "$(session_count "$_list_root")"
-            printf '\n'
-        done
-    done
+    emit_profiles normal
+    emit data summary 2 \
+        profiles "$(printf '%s\n' "$_list_names" | wc -l | tr -d ' ')" \
+        exit_code "$EX_OK"
+    report_finish
+    return "$EX_OK"
 }
 
 # ---------------------------------------------------------------------------
@@ -1638,29 +2153,88 @@ dir_mode() {
 
 DOCTOR_FINDINGS=0
 
+# finding <rule> <summary> <subject> [detail...]
+#
+# The subject is the offender itself, the path or the service name a reader
+# has to look at. It is kept apart from the detail lines because a consumer of
+# the JSON document needs to act on it, while the prose renders the two the
+# same way it always has.
 finding() {
     DOCTOR_FINDINGS=$((DOCTOR_FINDINGS + 1))
-    printf '%s  %s\n' "$1" "$2"
-    shift 2
-    for _f_line in "$@"; do
-        printf '     %s\n' "$_f_line"
-    done
-    printf '\n'
+    _f_rule="$1"; _f_summary="$2"; shift 2
+    if [ $# -gt 0 ]; then
+        _f_subject="$1"; shift
+    else
+        _f_subject=""
+    fi
+    emit normal finding "$_f_rule" "$_f_summary" "$_f_subject" "$@"
+}
+
+# doctor_rule_catalog: every rule this audit can report, and what it looks for.
+#
+# The document lists all of them with a status each, so a report says what was
+# checked rather than only what failed, and a rule that could not run says so
+# instead of passing quietly. Fields are separated by a tab.
+doctor_rule_catalog() {
+    printf '%s\n' \
+        "D01	The default root holds sessions, so something ran unpinned" \
+        "D02	A stray state file sits outside every profile root" \
+        "D03	The same project has sessions under more than one root" \
+        "D04	A registered root does not exist" \
+        "D05	A root has no credential and no signed-in account" \
+        "D06	A config root exists that no profile claims" \
+        "D07	A root or app data directory is not mode 700" \
+        "D08	A project directory is not an encoded path" \
+        "D09	A deep-link handler is installed and cannot be pinned" \
+        "D10	A stored root is not in the form its credential is keyed on" \
+        "D11	A credential exists for the default root, so something ran pinned to it" \
+        "D12	Keychain credential entries belong to no known root" \
+        "D13	A desktop launcher does not pin its profile" \
+        "D14	A desktop launcher exists that no profile claims" \
+        "D15	More than one profile is registered at the same root"
 }
 
 cmd_doctor() {
     _doc_keychain_scan=""
+    _doc_report=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --keychain-scan) _doc_keychain_scan=1 ;;
-            *) die "doctor: unknown option '$1' (try: $SELF doctor --keychain-scan)" ;;
+            --json) REPORT_FORMAT=json ;;
+            --report)
+                shift
+                [ $# -gt 0 ] || die "--report needs a file"
+                _doc_report="$1"
+                ;;
+            *) die "doctor: unknown option '$1'
+Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         esac
         shift
     done
 
+    # The two files are written side by side, so the argument names the pair
+    # rather than one of them. Accepting either extension and dropping it stops
+    # --report audit.json producing audit.json.json.
+    if [ -n "$_doc_report" ]; then
+        case "$_doc_report" in
+            *.json) _doc_report=${_doc_report%.json} ;;
+            *.md)   _doc_report=${_doc_report%.md} ;;
+        esac
+        REPORT_PATH="$_doc_report"
+    fi
+
     need python3
     DOCTOR_FINDINGS=0
     _doc_names=$(profile_names)
+
+    if [ "$REPORT_FORMAT" != "text" ] || [ -n "$REPORT_PATH" ]; then
+        report_open doctor
+        doctor_rule_catalog | while IFS="$(printf '\t')" read -r _doc_rule _doc_title; do
+            [ -n "$_doc_rule" ] || continue
+            emit data rule_catalog "$_doc_rule" "$_doc_title"
+        done
+        emit_profiles data
+    fi
 
     # ---- D04, D05, D07, D08: per registered profile -----------------------
     _doc_roots=()
@@ -2017,8 +2591,28 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
                 fi
             done
         else
-            printf 'Orphaned Keychain entries were not checked (D12). Run "%s doctor --keychain-scan" to check them.\n\n' "$SELF"
+            emit normal rule_status D12 not_run \
+                "the Keychain was not scanned, because --keychain-scan was not given" \
+                "Orphaned Keychain entries were not checked (D12). Run \"$SELF doctor --keychain-scan\" to check them."
         fi
+    else
+        # Without a Keychain there is nothing for D11 or D12 to read, and D05
+        # falls back to a weaker question. A document that reported any of the
+        # three as passing here would be claiming a check that never ran.
+        emit data rule_status D05 limited \
+            "there is no Keychain on this system, so D05 asks only whether an account is on record"
+        emit data rule_status D11 not_run "there is no Keychain on this system"
+        emit data rule_status D12 not_run "there is no Keychain on this system"
+    fi
+
+    # The desktop rules read an applet by decompiling it, so without
+    # osadecompile neither of them sees anything at all. That silence is
+    # exactly what must not be reported as a pass.
+    if ! command -v osadecompile >/dev/null 2>&1; then
+        emit data rule_status D13 not_run \
+            "osadecompile is not available, so no applet launch line could be read"
+        emit data rule_status D14 not_run \
+            "osadecompile is not available, so no applet could be scanned"
     fi
 
     # ---- D03: the same project under two roots ----------------------------
@@ -2048,18 +2642,26 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     fi
 
     # ---- Summary -----------------------------------------------------------
-    if [ "$DOCTOR_FINDINGS" -eq 0 ]; then
-        if [ -z "$_doc_names" ]; then
-            printf 'No profiles registered, so there is nothing to audit.\n'
-            printf 'Create one:  %s new <name>\n' "$SELF"
-            return "$EX_OK"
-        fi
-        printf 'No isolation problems found across %s profile(s).\n' "$(printf '%s\n' "$_doc_names" | wc -l | tr -d ' ')"
-        return "$EX_OK"
+    #
+    # The exit code is part of the document as well as of the process, so a
+    # report handed to someone else says what the run concluded.
+    _doc_exit="$EX_OK"
+    [ "$DOCTOR_FINDINGS" -eq 0 ] || _doc_exit="$EX_FINDINGS"
+
+    if [ "$DOCTOR_FINDINGS" -eq 0 ] && [ -z "$_doc_names" ]; then
+        emit always summary 2 findings 0 exit_code "$_doc_exit" \
+            "No profiles registered, so there is nothing to audit." \
+            "Create one:  $SELF new <name>"
+    elif [ "$DOCTOR_FINDINGS" -eq 0 ]; then
+        emit always summary 2 findings 0 exit_code "$_doc_exit" \
+            "No isolation problems found across $(printf '%s\n' "$_doc_names" | wc -l | tr -d ' ') profile(s)."
+    else
+        emit always summary 2 findings "$DOCTOR_FINDINGS" exit_code "$_doc_exit" \
+            "$DOCTOR_FINDINGS finding(s)."
     fi
 
-    printf '%s finding(s).\n' "$DOCTOR_FINDINGS"
-    return "$EX_FINDINGS"
+    report_finish
+    return "$_doc_exit"
 }
 # ---------------------------------------------------------------------------
 # verify
@@ -2143,55 +2745,64 @@ for key, value in [
 PY
 }
 
+# The four verdicts a fact can get. Each is one record, so the document lists
+# what was checked and how it went in the order a reader sees it.
 vok() {
-    printf '  ok        %s  %s\n' "$1" "$2"
+    _vk_fact="$1"; _vk_sum="$2"; shift 2
+    emit normal check ok "$_vk_fact" "$_vk_sum" "$@"
 }
 
 vbroken() {
     VERIFY_BROKEN=$((VERIFY_BROKEN + 1))
-    printf '  BROKEN    %s  %s\n' "$1" "$2"
-    shift 2
-    for _vb in "$@"; do printf '                 %s\n' "$_vb"; done
+    _vb_fact="$1"; _vb_sum="$2"; shift 2
+    emit normal check broken "$_vb_fact" "$_vb_sum" "$@"
 }
 
 vunchecked() {
     VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 1))
-    printf '  unchecked %s  %s\n' "$1" "$2"
-    shift 2
-    for _vu in "$@"; do printf '                 %s\n' "$_vu"; done
+    _vu_fact="$1"; _vu_sum="$2"; shift 2
+    emit normal check unchecked "$_vu_fact" "$_vu_sum" "$@"
 }
 
 vnote() {
-    printf '  note      %s  %s\n' "$1" "$2"
+    _vn_fact="$1"; _vn_sum="$2"; shift 2
+    emit normal check note "$_vn_fact" "$_vn_sum" "$@"
 }
 
 cmd_verify() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) REPORT_FORMAT=json ;;
+            *) die "verify: unknown option '$1' (try: $SELF verify --json)" ;;
+        esac
+        shift
+    done
+
     need python3
     VERIFY_BROKEN=0
     VERIFY_UNCHECKED=0
+    [ "$REPORT_FORMAT" = "text" ] || report_open verify
 
-    printf 'Checking the assumptions %s rests on.\n' "$SELF"
-    printf 'Full record and evidence: docs/FACTS.md\n\n'
+    emit normal text \
+        "Checking the assumptions $SELF rests on." \
+        "Full record and evidence: docs/FACTS.md" \
+        ""
 
     # ---- Agent version drift ----------------------------------------------
     for _ver_agent in $KNOWN_AGENTS; do
         _ver_bin=$(agent_def "$_ver_agent" binary)
-        if command -v "$_ver_bin" >/dev/null 2>&1; then
-            _ver_now=$("$_ver_bin" --version 2>/dev/null | head -1 | awk '{print $1}')
-        else
-            _ver_now=""
-        fi
+        _ver_now=$(installed_agent_version "$_ver_agent")
         if [ -z "$_ver_now" ]; then
             vunchecked "----" "cannot read the installed $_ver_agent version" \
                 "The '$_ver_bin' command is not on PATH."
         elif [ "$_ver_now" = "$AGENT_PROFILE_VERIFIED_AGAINST" ]; then
             vok "----" "$_ver_agent $_ver_now matches the version these facts were checked against"
         else
-            vnote "----" "$_ver_agent is $_ver_now; facts were checked against $AGENT_PROFILE_VERIFIED_AGAINST"
-            printf '                 A newer version can change any of the below. The checks still run.\n'
+            vnote "----" "$_ver_agent is $_ver_now; facts were checked against $AGENT_PROFILE_VERIFIED_AGAINST" \
+                "A newer version can change any of the below. The checks still run."
         fi
     done
-    printf '\n'
+    emit normal text ""
 
     # ---- Facts that need a real root --------------------------------------
     _ver_roots=()
@@ -2258,8 +2869,8 @@ cmd_verify() {
 
         # F12: project directory naming.
         if [ "$odd_dirs" -gt 0 ]; then
-            vnote "F12" "$odd_dirs project director(ies) are not encoded paths"
-            printf '                 CLAUDE_CODE_PROJECT_DIR_NAME was used. doctor reports these as D08.\n'
+            vnote "F12" "$odd_dirs project director(ies) are not encoded paths" \
+                "CLAUDE_CODE_PROJECT_DIR_NAME was used. doctor reports these as D08."
         elif [ "$encoded_dirs" -gt 0 ]; then
             vok "F12" "all $encoded_dirs project director(ies) look like encoded paths"
         else
@@ -2275,7 +2886,7 @@ cmd_verify() {
         fi
     fi
 
-    printf '\n'
+    emit normal text ""
 
     # ---- Facts that need macOS and the desktop app ------------------------
     if [ "$AGENT_PROFILE_PLATFORM" != "Darwin" ]; then
@@ -2284,11 +2895,11 @@ cmd_verify() {
         # F01 is answered and is not automatically checkable: settling it needs
         # a real app launch and a real Code session. It is a recorded fact, so
         # verify says how to re-confirm it rather than pretending to.
-        vnote "F01" "the desktop app does honour the config-dir variable from its environment"
-        printf '                 Not checkable from here: it needs a real app launch.\n'
-        printf '                 Re-confirm with: %s desktop <name>, start a Code\n' "$SELF"
         # shellcheck disable=SC2016  # literal help text; the user types this
-        printf '                 session, then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3\n'
+        vnote "F01" "the desktop app does honour the config-dir variable from its environment" \
+            "Not checkable from here: it needs a real app launch." \
+            "Re-confirm with: $SELF desktop <name>, start a Code" \
+            'session, then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3'
 
         # F13. The mechanism the whole desktop half rests on. If --env is gone,
         # desktop, app and D13 are all invalid at once, so this is broken
@@ -2371,23 +2982,30 @@ cmd_verify() {
 
     vnote "F02" "moot: the app's environment editor only mattered if F01 was negative"
 
-    vnote "F06" "a root cannot be relocated without losing its login"
-    printf '                 Reasoned from F09, not tested: confirming it costs a real login.\n'
-    printf '                 This is why there is no rename and no move command.\n'
+    vnote "F06" "a root cannot be relocated without losing its login" \
+        "Reasoned from F09, not tested: confirming it costs a real login." \
+        "This is why there is no rename and no move command."
 
     # ---- Summary -----------------------------------------------------------
-    printf '\n'
+    emit normal text ""
     if [ "$VERIFY_BROKEN" -gt 0 ]; then
-        printf '%s assumption(s) no longer hold, %s could not be checked.\n' \
-            "$VERIFY_BROKEN" "$VERIFY_UNCHECKED"
-        printf 'Fix the tool before trusting doctor.\n'
+        emit always summary 3 \
+            broken "$VERIFY_BROKEN" unchecked "$VERIFY_UNCHECKED" exit_code "$EX_BROKEN" \
+            "$VERIFY_BROKEN assumption(s) no longer hold, $VERIFY_UNCHECKED could not be checked." \
+            "Fix the tool before trusting doctor."
+        report_finish
         return "$EX_BROKEN"
     fi
     if [ "$VERIFY_UNCHECKED" -gt 0 ]; then
-        printf 'Nothing broken. %s assumption(s) could not be checked here.\n' "$VERIFY_UNCHECKED"
+        emit always summary 3 \
+            broken 0 unchecked "$VERIFY_UNCHECKED" exit_code "$EX_UNCHECKED" \
+            "Nothing broken. $VERIFY_UNCHECKED assumption(s) could not be checked here."
+        report_finish
         return "$EX_UNCHECKED"
     fi
-    printf 'Every assumption still holds.\n'
+    emit always summary 3 broken 0 unchecked 0 exit_code "$EX_OK" \
+        "Every assumption still holds."
+    report_finish
     return "$EX_OK"
 }
 
@@ -3042,7 +3660,7 @@ PROFILES
   new <name> [--agent NAME] [--root PATH] [--app-data PATH]
                           Create an empty config root, an app data dir and a
                           registry entry. Safe to run twice.
-  list                    Every profile with its root, account and session count.
+  list [--json]           Every profile with its root, account and session count.
   remove <name> [--purge] Retire a profile. It removes the registry entry and
                           prints everything else the profile still has on this
                           machine, with the command that deletes each one.
@@ -3089,13 +3707,18 @@ SHELL
                             @SELF@ completion fish | source     # fish
 
 AUDIT
-  doctor [--keychain-scan]
+  doctor [--json] [--report FILE] [--keychain-scan]
                           Check that the profiles are actually isolated.
                           --keychain-scan also enumerates the whole login
                           Keychain for orphaned entries (D12), which reads
                           every item's attributes and is slow on a large
                           Keychain, so it is off by default.
-  verify                  Re-check the behavioural assumptions this tool rests on.
+                          --json prints the audit as one JSON document.
+                          --report writes FILE.json and FILE.md, a dated
+                          audit of this machine to hand to someone else.
+                          The exit code is the same either way.
+                          Schema: docs/AUDIT-SCHEMA.md
+  verify [--json]         Re-check the behavioural assumptions this tool rests on.
   explain                 Explain the scheme and where each profile's data lives.
 
 OTHER

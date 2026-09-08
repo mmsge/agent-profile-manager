@@ -677,6 +677,8 @@ eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
 agent-profile list                # every profile, its account and session count
 agent-profile doctor              # is the separation actually holding?
+agent-profile doctor --json       # the same audit, as one JSON document
+agent-profile doctor --report audit  # audit.json and audit.md, dated, to hand over
 agent-profile version --check     # am I running the newest release?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
@@ -866,6 +868,54 @@ D14 on the desktop side, and D03's use of each transcript's own working
 directory, is in
 [The audit, rule by rule](docs/DESIGN.md#the-audit-rule-by-rule).
 
+### A document, not a screenshot
+
+`doctor`, `list` and `verify` take `--json` and print one JSON document
+instead of prose. The exit code is the same either way, so a cron entry or a
+CI step can read the document and still branch on the status.
+
+```sh
+agpin doctor --json | python3 -m json.tool
+```
+
+The document opens with a header saying when it was produced, in UTC, by which
+version of this tool, against which agent version, on which host and as which
+user. Then the registered profiles with their roots, app data directories,
+accounts and organisation ids, then every rule with a status, then the findings
+themselves. The full schema is in [docs/AUDIT-SCHEMA.md](docs/AUDIT-SCHEMA.md).
+
+The rules array is the part worth knowing about. It lists all fifteen rules,
+not only the ones that fired, and a rule that did not run says so rather than
+appearing to pass:
+
+```json
+{
+  "rule": "D12",
+  "title": "Keychain credential entries belong to no known root",
+  "status": "not_run",
+  "findings": 0,
+  "reason": "the Keychain was not scanned, because --keychain-scan was not given"
+}
+```
+
+`not_run` is also what `D11` and `D12` get where there is no Keychain to ask,
+and `D13` and `D14` where `osadecompile` is missing so no launcher can be read.
+`D05` without a Keychain is `limited`, because it falls back to a weaker
+question. A clean `doctor` on a Linux box is a much smaller claim than a clean
+`doctor` on a Mac, and the document is where that shows.
+
+Prose and JSON cannot drift apart, because they are two renderings of one
+record stream: every line these three commands produce goes through a single
+function, and neither format is written anywhere else.
+
+`doctor --report FILE` writes both `FILE.json` and `FILE.md` side by side, the
+same document twice, one for a machine and one for a person. Either extension
+on the argument is dropped, so `--report audit.json` writes `audit.json` and
+`audit.md` rather than `audit.json.json`.
+
+No credential value is in any of it. There is none to leak: the tool never
+reads one.
+
 ## What doctor reads
 
 Every rule reads only what it needs to answer one yes or no question, and
@@ -896,6 +946,12 @@ is ever called with `-g` or `-w`, which is what would print a secret. The
 account identity read by D02 and D05 is an email address and an organisation
 id, not a token, and it is the same identity `list` already shows on every
 run.
+
+`--json` and `--report` add two reads of their own, outside any rule. The
+document header runs the agent's own `--version`, which is the only time
+`doctor` starts another program, and the profile inventory reads each root's
+`oauthAccount` block, the same one D02 and D05 read and the same one `list`
+prints. Neither happens on a plain `doctor` run.
 
 This table is written by hand, not generated. Keeping it honest right now
 means updating it in the same change that changes what a rule reads, the way
@@ -990,6 +1046,20 @@ one-way hash, so nothing can trace it back to a path or delete it for you;
 run the printed `security` command and D12 goes quiet on the next run.
 Leaving it is harmless, and it is also a credential for an account you no
 longer work for, sitting in your Keychain.
+
+Then, if the customer wants it in writing:
+
+```sh
+agpin doctor --report ~/audits/bouvet-2026-09-08
+```
+
+That writes a dated audit of the machine twice, `bouvet-2026-09-08.json` and
+`bouvet-2026-09-08.md`, from one run. The Markdown is the one to send: it names
+the host, the user, the tool version, the agent version and the time, lists
+every profile still on the machine, and gives all fifteen rules with a status
+each, including the ones that did not run and why. It is the answer to a
+security officer asking whether their data was kept apart on a consultant's
+laptop, which until now could only be a screenshot of prose.
 
 ## Exit codes
 
@@ -1116,7 +1186,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 244 tests, no dependencies
+tests/run.sh              # 268 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
@@ -1131,8 +1201,10 @@ Versioning is semantic. `Z` for fixes, `Y` for backwards-compatible features,
 
 ### Cutting a release
 
-Bump `AGENT_PROFILE_VERSION` in `bin/agent-profile`, merge that, then tag the
-merge commit:
+Bump `AGENT_PROFILE_VERSION` in `bin/agent-profile` and merge that first. Then
+there are two ways to cut the release, and they end in the same place.
+
+**By tag, from a checkout.** This is the one to prefer.
 
 ```sh
 git checkout hovud && git pull
@@ -1145,10 +1217,36 @@ git push origin v0.8.0
 the release, and the Sigstore bundle records what the workflow then built from
 it. Those answer different questions, so do both.
 
-`.github/workflows/release.yml` takes it from there: it runs the same test
-matrix `ci.yml` runs, calling that workflow rather than copying it, refuses the
-tag if it disagrees with `AGENT_PROFILE_VERSION`, builds the tarball, writes
-`SHA256SUMS`, signs both with keyless Sigstore and publishes the release.
+**By hand, from the Actions tab.** Run the Release workflow on `hovud` and give
+it the version without the leading `v`, for example `0.8.0`. It creates the tag
+itself and carries on. This exists because pushing a tag needs git write access
+to this repository, and whoever is cutting the release does not always have it
+from where they are: a borrowed machine, a phone, an agent working through an
+API that is scoped to branches.
+
+What you give up by using it is the signed tag. The runner has no signing key,
+and the fix for that would be a release key sitting in repository secrets,
+which is a worse thing to own than an unsigned tag. So a manually cut tag is
+annotated, created by `github-actions[bot]`, and says only that this workflow
+made it. What the artifacts are is still established the same way, by the
+Sigstore certificate naming the workflow, the repository and the tag. What is
+missing is the separate record of which person decided to publish, and the
+Actions run log is where that lives instead.
+
+The manual path refuses to do three things. It will not run from any branch but
+the default one, because a release built from an unmerged branch would carry
+code that was never reviewed. It will not move a tag that already exists, since
+whatever that tag points at has already been downloaded and checksummed by
+somebody. And it will not accept a version that disagrees with
+`AGENT_PROFILE_VERSION`, which is the same check the tag path makes.
+
+From either entry point `.github/workflows/release.yml` does the same work: it
+runs the same test matrix `ci.yml` runs, calling that workflow rather than
+copying it, refuses the tag if it disagrees with `AGENT_PROFILE_VERSION`,
+builds the tarball, writes `SHA256SUMS`, signs both with keyless Sigstore and
+publishes the release. On the manual path the tag is created last, after the
+build and the signatures have both succeeded, so a run that fails partway
+leaves the repository as it was rather than burning a version number.
 
 The tarball is built with fixed ownership, fixed order and the tagged commit's
 own timestamp, so anyone can check the tag out, rebuild it and get the same
