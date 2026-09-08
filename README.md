@@ -35,6 +35,7 @@ Next:
 
 Worth adding to your shell rc file:
   eval "$(agpin guard)"      # refuse to run the agent unpinned
+  eval "$(agpin completion bash)"  # tab-complete commands and profile names
   PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
 ```
 
@@ -63,16 +64,22 @@ Next: agent-profile run bouvet   (it will ask you to log in)
 Do that once per account, for example `agpin new highsoft`. Then sign in to
 each: `agpin run bouvet`, `agpin run highsoft`.
 
-**3. Add two lines to your shell rc file.**
+**3. Add these to your shell rc file.**
 
 ```sh
 eval "$(agpin guard)"
+eval "$(agpin completion bash)"   # or: completion zsh
 PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
 ```
 
-The first refuses to run `claude` with nothing pinned. The second shows which
-profile a pinned shell is using, so a prompt can never claim the wrong account.
-Open a new shell, or `source` the rc file, before the next step.
+The first refuses to run `claude` with nothing pinned. The second tab-completes
+subcommands, flags and profile names. The third shows which profile a pinned
+shell is using, so a prompt can never claim the wrong account. Open a new
+shell, or `source` the rc file, before the next step.
+
+fish uses `| source` rather than `eval "$(...)"`; see
+[Completions](#completions) and [Refusing to run unpinned](#refusing-to-run-unpinned)
+for the fish forms of both.
 
 **4. Check the separation actually holds.**
 
@@ -511,12 +518,27 @@ every message, error and suggested fix says `agpin`. That matters because a
 finding telling you to run a command not on your `PATH` is worse than no
 suggestion at all.
 
-Two lines worth adding to your shell rc file:
+Worth adding to your shell rc file. In bash or zsh:
 
 ```sh
 eval "$(agpin guard)"
+eval "$(agpin completion bash)"   # or: agpin completion zsh
 PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
 ```
+
+In fish, in `~/.config/fish/config.fish`:
+
+```fish
+agpin guard --shell fish | source
+agpin completion fish | source
+function fish_prompt
+    set -l p (agpin which --label 2>/dev/null)
+    echo -n "$p "(prompt_pwd)'> '
+end
+```
+
+See [Refusing to run unpinned](#refusing-to-run-unpinned) and
+[Completions](#completions) for what each line does.
 
 No dependencies beyond a stock macOS. It is one bash script, written to bash
 3.2 because that is what `/bin/bash` is on macOS, and it uses `python3` from the
@@ -660,6 +682,7 @@ agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
 eval "$(agent-profile guard)"     # refuse to run the agent unpinned
 claude bouvet                     # with the guard on, this pins and runs
+eval "$(agent-profile completion bash)"  # tab-complete commands and profiles
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -679,12 +702,15 @@ Profile [1-3, Return to cancel]: 2
 Where?
   1) desktop app
   2) terminal
+  3) subshell
 
-Open [1-2, Return to cancel]: 1
+Open [1-3, Return to cancel]: 1
 ```
 
 Five characters and two keystrokes, which beats `agpin desktop highsoft` when
-you open pinned apps all day.
+you open pinned apps all day. "subshell" is the third surface: a pinned
+interactive shell, the same one `agpin shell highsoft` opens, for when you
+want more than one command against that profile without leaving the terminal.
 
 An empty answer cancels rather than defaulting to the first profile: silently
 picking one is how you end up in the wrong account without noticing.
@@ -731,6 +757,38 @@ the same reason the prompt label is: a copy in a dotfile drifts from the tool,
 and this one would drift silently. That prompt label, and the one root where
 it has to work differently, are explained in
 [A prompt that cannot lie](docs/DESIGN.md#a-prompt-that-cannot-lie).
+
+**fish gets its own form**, because fish functions are not bash or zsh
+functions:
+
+```fish
+agpin guard --shell fish | source
+```
+
+Same refusal, same leading-profile-name shortcut, same `command claude`
+escape hatch, spelled in fish: `$argv` rather than `"$@"`, `$status` rather
+than `"$?"`. With no `--shell`, `guard` reads `$SHELL` and chooses the bash and
+zsh form unless it ends in `fish`, so `eval "$(agpin guard)"` and
+`agpin guard --shell fish | source` both do the right thing without you having
+to say which shell you are in.
+
+## Completions
+
+```sh
+eval "$(agpin completion bash)"     # bash
+eval "$(agpin completion zsh)"      # zsh
+agpin completion fish | source      # fish
+```
+
+Tab-completes every subcommand, its flags, and profile names, whichever name
+you invoke it as. Profile names are looked up by calling back into `agpin` at
+completion time rather than being written into the script, so a profile
+created after you last sourced it still completes; nothing needs re-sourcing
+except when a new release adds a subcommand.
+
+Printed rather than installed, for the same reason `guard` is: this tool never
+writes to a completion directory or your rc file. Add the line above to it
+yourself, once.
 
 ## The desktop
 
@@ -1058,7 +1116,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 206 tests, no dependencies
+tests/run.sh              # 244 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

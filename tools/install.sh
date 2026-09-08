@@ -378,4 +378,6 @@ printf 'Worth adding to your shell rc file:\n'
 # shellcheck disable=SC2016  # literal rc-file text; the user pastes this
 printf '  eval "$(%s guard)"      # refuse to run the agent unpinned\n' "$SHORT_NAME"
 # shellcheck disable=SC2016  # literal rc-file text; the user pastes this
+printf '  eval "$(%s completion bash)"  # tab-complete commands and profile names\n' "$SHORT_NAME"
+# shellcheck disable=SC2016  # literal rc-file text; the user pastes this
 printf '  PROMPT='"'"'$(%s which --label 2>/dev/null) %%~ %%# '"'"'\n' "$SHORT_NAME"
