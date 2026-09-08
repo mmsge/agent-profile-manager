@@ -3351,7 +3351,7 @@ PROFILES
   new <name> [--agent NAME] [--root PATH] [--app-data PATH]
                           Create an empty config root, an app data dir and a
                           registry entry. Safe to run twice.
-  list                    Every profile with its root, account and session count.
+  list [--json]           Every profile with its root, account and session count.
   remove <name> [--purge] Retire a profile. It removes the registry entry and
                           prints everything else the profile still has on this
                           machine, with the command that deletes each one.
@@ -3386,13 +3386,18 @@ SHELL
                             eval "$(@SELF@ guard)"
 
 AUDIT
-  doctor [--keychain-scan]
+  doctor [--json] [--report FILE] [--keychain-scan]
                           Check that the profiles are actually isolated.
                           --keychain-scan also enumerates the whole login
                           Keychain for orphaned entries (D12), which reads
                           every item's attributes and is slow on a large
                           Keychain, so it is off by default.
-  verify                  Re-check the behavioural assumptions this tool rests on.
+                          --json prints the audit as one JSON document.
+                          --report writes FILE.json and FILE.md, a dated
+                          audit of this machine to hand to someone else.
+                          The exit code is the same either way.
+                          Schema: docs/AUDIT-SCHEMA.md
+  verify [--json]         Re-check the behavioural assumptions this tool rests on.
   explain                 Explain the scheme and where each profile's data lives.
 
 OTHER

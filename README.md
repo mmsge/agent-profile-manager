@@ -655,6 +655,8 @@ eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
 agent-profile list                # every profile, its account and session count
 agent-profile doctor              # is the separation actually holding?
+agent-profile doctor --json       # the same audit, as one JSON document
+agent-profile doctor --report audit  # audit.json and audit.md, dated, to hand over
 agent-profile version --check     # am I running the newest release?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
@@ -808,6 +810,54 @@ D14 on the desktop side, and D03's use of each transcript's own working
 directory, is in
 [The audit, rule by rule](docs/DESIGN.md#the-audit-rule-by-rule).
 
+### A document, not a screenshot
+
+`doctor`, `list` and `verify` take `--json` and print one JSON document
+instead of prose. The exit code is the same either way, so a cron entry or a
+CI step can read the document and still branch on the status.
+
+```sh
+agpin doctor --json | python3 -m json.tool
+```
+
+The document opens with a header saying when it was produced, in UTC, by which
+version of this tool, against which agent version, on which host and as which
+user. Then the registered profiles with their roots, app data directories,
+accounts and organisation ids, then every rule with a status, then the findings
+themselves. The full schema is in [docs/AUDIT-SCHEMA.md](docs/AUDIT-SCHEMA.md).
+
+The rules array is the part worth knowing about. It lists all fifteen rules,
+not only the ones that fired, and a rule that did not run says so rather than
+appearing to pass:
+
+```json
+{
+  "rule": "D12",
+  "title": "Keychain credential entries belong to no known root",
+  "status": "not_run",
+  "findings": 0,
+  "reason": "the Keychain was not scanned, because --keychain-scan was not given"
+}
+```
+
+`not_run` is also what `D11` and `D12` get where there is no Keychain to ask,
+and `D13` and `D14` where `osadecompile` is missing so no launcher can be read.
+`D05` without a Keychain is `limited`, because it falls back to a weaker
+question. A clean `doctor` on a Linux box is a much smaller claim than a clean
+`doctor` on a Mac, and the document is where that shows.
+
+Prose and JSON cannot drift apart, because they are two renderings of one
+record stream: every line these three commands produce goes through a single
+function, and neither format is written anywhere else.
+
+`doctor --report FILE` writes both `FILE.json` and `FILE.md` side by side, the
+same document twice, one for a machine and one for a person. Either extension
+on the argument is dropped, so `--report audit.json` writes `audit.json` and
+`audit.md` rather than `audit.json.json`.
+
+No credential value is in any of it. There is none to leak: the tool never
+reads one.
+
 ## What doctor reads
 
 Every rule reads only what it needs to answer one yes or no question, and
@@ -932,6 +982,20 @@ one-way hash, so nothing can trace it back to a path or delete it for you;
 run the printed `security` command and D12 goes quiet on the next run.
 Leaving it is harmless, and it is also a credential for an account you no
 longer work for, sitting in your Keychain.
+
+Then, if the customer wants it in writing:
+
+```sh
+agpin doctor --report ~/audits/bouvet-2026-09-08
+```
+
+That writes a dated audit of the machine twice, `bouvet-2026-09-08.json` and
+`bouvet-2026-09-08.md`, from one run. The Markdown is the one to send: it names
+the host, the user, the tool version, the agent version and the time, lists
+every profile still on the machine, and gives all fifteen rules with a status
+each, including the ones that did not run and why. It is the answer to a
+security officer asking whether their data was kept apart on a consultant's
+laptop, which until now could only be a screenshot of prose.
 
 ## Exit codes
 
@@ -1058,7 +1122,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 206 tests, no dependencies
+tests/run.sh              # 229 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

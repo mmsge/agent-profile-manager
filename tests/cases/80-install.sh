@@ -47,6 +47,17 @@ case_findings_use_the_name_it_was_invoked_as() {
     assert_not_contains "$out" "agent-profile "
 }
 
+case_the_document_names_the_tool_it_was_invoked_as() {
+    # An audit handed to someone else has to name the command they would type,
+    # which is the name this copy was installed under.
+    HOME=$(new_home); export HOME
+    as_name agpin new bouvet >/dev/null 2>&1
+    out=$(as_name agpin doctor --json 2>/dev/null)
+    assert_equals "agpin" "$(printf '%s\n' "$out" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["tool"])')"
+}
+
 case_an_odd_argv0_falls_back_to_the_long_name() {
     HOME=$(new_home); export HOME
     out=$(as_name "we ird" help 2>&1)
@@ -502,6 +513,7 @@ case_version_refuses_an_unknown_option() {
 run_case "messages use the invoked name"          case_messages_use_the_name_it_was_invoked_as
 run_case "errors use the invoked name"            case_errors_use_the_name_it_was_invoked_as
 run_case "findings use the invoked name"          case_findings_use_the_name_it_was_invoked_as
+run_case "the document names the invoked tool"    case_the_document_names_the_tool_it_was_invoked_as
 run_case "an odd argv0 falls back"                case_an_odd_argv0_falls_back_to_the_long_name
 run_case "guard refuses an unpinned run"          case_guard_refuses_an_unpinned_run
 run_case "guard lists the profiles it knows"      case_guard_lists_the_profiles_it_knows

@@ -87,6 +87,24 @@ case_no_command_writes_to_the_agents_state_file() {
     assert_equals "$before" "$after"
 }
 
+case_no_document_carries_a_credential() {
+    # The machine-readable audit is handed to other people, so the invariant
+    # that the tool never reads a credential has to hold in the rendering as
+    # well as in the source. A credential file is put where a root really
+    # keeps one, and no document may reproduce a byte of it.
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
+    printf '{"claudeAiOauth":{"accessToken":"sk-ant-oat-NOTATOKEN-CANARY"}}\n' \
+        > "$HOME/.claude-bouvet/.credentials.json"
+    assert_not_contains "$("$AP" doctor --json 2>&1)" "CANARY" || return
+    assert_not_contains "$("$AP" list --json 2>&1)" "CANARY" || return
+    assert_not_contains "$("$AP" verify --json 2>&1)" "CANARY" || return
+    "$AP" doctor --report "$HOME/audit" >/dev/null 2>&1
+    assert_not_contains "$(cat "$HOME/audit.json")" "CANARY" || return
+    assert_not_contains "$(cat "$HOME/audit.md")" "CANARY"
+}
+
 case_explain_states_the_scheme() {
     HOME=$(new_home); export HOME
     "$AP" new bouvet >/dev/null 2>&1
@@ -113,5 +131,6 @@ run_case "the source never copies between roots"      case_source_never_copies_o
 run_case "the source never reads credentials"         case_source_never_reads_credential_content
 run_case "the source uses no predictable temp names"  case_source_never_uses_predictable_temp_names
 run_case "no command writes the agent state file"     case_no_command_writes_to_the_agents_state_file
+run_case "no document carries a credential"           case_no_document_carries_a_credential
 run_case "explain states the scheme"                  case_explain_states_the_scheme
 run_case "help, version and an unknown command"       case_help_and_version
