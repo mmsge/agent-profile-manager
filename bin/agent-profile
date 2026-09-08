@@ -3117,6 +3117,22 @@ PROSE
     printf '  update independently of each other and of the CLI.\n'
 }
 
+# resolved_self: the command a generated script should call back into.
+#
+# Guard and completion both print scripts that call back into this tool from
+# the user's shell, so both need a name that will still resolve there. Prefer
+# the short name when it is on PATH; fall back to this script's absolute path
+# when it is not, so a printed script is useful before the installer has been
+# run.
+resolved_self() {
+    _rs_self="$SELF"
+    if ! command -v "$SELF" >/dev/null 2>&1; then
+        _rs_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+        [ -n "$_rs_dir" ] && _rs_self="$_rs_dir/${0##*/}"
+    fi
+    printf '%s\n' "$_rs_self"
+}
+
 # ---------------------------------------------------------------------------
 # guard
 #
@@ -3128,52 +3144,337 @@ PROSE
 # It is printed rather than installed, and derived on every shell start rather
 # than stored, for the same reason `which --label` is: a copy in a dotfile
 # drifts from the tool, and this one would drift silently.
+#
+# bash and zsh share one function syntax, so one form covers both. fish does
+# not, so --shell fish (or a $SHELL that ends in "fish", when --shell is not
+# given) selects a second form written in fish syntax. Nothing else changes:
+# same refusal, same leading-profile-name shortcut, same escape hatch.
 # ---------------------------------------------------------------------------
 
 cmd_guard() {
-    # The generated function calls back into this tool, so it needs a name that
-    # will still resolve from the user's shell. Prefer the short name when it
-    # is on PATH; fall back to this script's absolute path when it is not, so
-    # the guard is useful before the installer has been run.
-    _g_self="$SELF"
-    if ! command -v "$SELF" >/dev/null 2>&1; then
-        _g_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
-        [ -n "$_g_dir" ] && _g_self="$_g_dir/${0##*/}"
+    _g_shell=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --shell) shift; [ $# -gt 0 ] || die "--shell needs a value"; _g_shell="$1" ;;
+            *)       die "guard: unknown option '$1' (try: $SELF guard --shell bash|zsh|fish)" ;;
+        esac
+        shift
+    done
+
+    if [ -z "$_g_shell" ]; then
+        case "${SHELL##*/}" in
+            fish) _g_shell="fish" ;;
+            *)    _g_shell="bash" ;;
+        esac
     fi
 
-    for _g_agent in $KNOWN_AGENTS; do
-        _g_bin=$(agent_def "$_g_agent" binary)
-        _g_var=$(agent_def "$_g_agent" envvar)
+    _g_self=$(resolved_self)
+
+    case "$_g_shell" in
+        fish)     guard_fish "$_g_self" ;;
+        bash|zsh) guard_posix "$_g_self" ;;
+        *)        die "guard: unknown shell '$_g_shell' (known: bash, zsh, fish)" ;;
+    esac
+}
+
+# guard_posix <self>: the bash-and-zsh form, unchanged from before --shell
+# existed. Kept byte-for-byte so the existing test suite still pins it.
+guard_posix() {
+    _gp_self="$1"
+    for _gp_agent in $KNOWN_AGENTS; do
+        _gp_bin=$(agent_def "$_gp_agent" binary)
+        _gp_var=$(agent_def "$_gp_agent" envvar)
         cat <<GUARD
-$_g_bin() {
-    if [ -z "\${$_g_var:-}" ]; then
+$_gp_bin() {
+    if [ -z "\${$_gp_var:-}" ]; then
         # A first argument naming a profile means "use that one". This is safe
         # only here, with nothing pinned, because the alternative on this path
         # is a refusal: there is no working invocation to shadow. Once pinned,
-        # the argument is left alone, since $_g_bin takes a prompt there and
+        # the argument is left alone, since $_gp_bin takes a prompt there and
         # stealing a word that happens to match a profile name would break it.
-        if [ \$# -gt 0 ] && $_g_self path "\$1" >/dev/null 2>&1; then
+        if [ \$# -gt 0 ] && $_gp_self path "\$1" >/dev/null 2>&1; then
             printf '%s\\n' "Pinning to \$1." >&2
-            $_g_self run "\$@"
+            $_gp_self run "\$@"
             return \$?
         fi
-        printf '%s\\n' "Refusing to run $_g_bin unpinned." >&2
+        printf '%s\\n' "Refusing to run $_gp_bin unpinned." >&2
         printf '%s\\n' "Nothing is pinned, so this would write to the default root," >&2
         printf '%s\\n' "under whichever account last logged in there." >&2
         printf '%s\\n' "" >&2
-        printf '%s\\n' "Name one to use it, for example: $_g_bin <profile> [args...]" >&2
+        printf '%s\\n' "Name one to use it, for example: $_gp_bin <profile> [args...]" >&2
         printf '%s\\n' "" >&2
         printf '%s\\n' "Profiles on this machine:" >&2
-        $_g_self list 2>/dev/null | sed -n 's/^\\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\\)\$/  \\1/p' >&2
+        $_gp_self list 2>/dev/null | sed -n 's/^\\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\\)\$/  \\1/p' >&2
         printf '%s\\n' "" >&2
-        printf '%s\\n' "Or pin the shell: eval \\"\\\$($_g_self env <profile>)\\"" >&2
-        printf '%s\\n' "Override:         command $_g_bin [args...]" >&2
+        printf '%s\\n' "Or pin the shell: eval \\"\\\$($_gp_self env <profile>)\\"" >&2
+        printf '%s\\n' "Override:         command $_gp_bin [args...]" >&2
         return 1
     fi
-    command $_g_bin "\$@"
+    command $_gp_bin "\$@"
 }
 GUARD
     done
+}
+
+# guard_fish <self>: same refusal, same shortcut, fish syntax. fish has no
+# "$@"; the equivalent is $argv, and no exit-status variable named "$?"; the
+# equivalent is $status. `set -q VAR` is fish's "is this variable set", the
+# fish counterpart of bash's `[ -z "${VAR:-}" ]`.
+guard_fish() {
+    _gf_self="$1"
+    for _gf_agent in $KNOWN_AGENTS; do
+        _gf_bin=$(agent_def "$_gf_agent" binary)
+        _gf_var=$(agent_def "$_gf_agent" envvar)
+        cat <<GUARDFISH
+function $_gf_bin
+    if not set -q $_gf_var
+        if test (count \$argv) -gt 0
+            and $_gf_self path \$argv[1] >/dev/null 2>&1
+            echo "Pinning to \$argv[1]." >&2
+            $_gf_self run \$argv
+            return \$status
+        end
+        echo "Refusing to run $_gf_bin unpinned." >&2
+        echo "Nothing is pinned, so this would write to the default root," >&2
+        echo "under whichever account last logged in there." >&2
+        echo "" >&2
+        echo "Name one to use it, for example: $_gf_bin <profile> [args...]" >&2
+        echo "" >&2
+        echo "Profiles on this machine:" >&2
+        $_gf_self list 2>/dev/null | sed -n 's/^\\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\\)\$/  \\1/p' >&2
+        echo "" >&2
+        echo "Or pin the shell: eval ($_gf_self env <profile> | string collect)" >&2
+        echo "Override:         command $_gf_bin \$argv" >&2
+        return 1
+    end
+    command $_gf_bin \$argv
+end
+GUARDFISH
+    done
+}
+
+# ---------------------------------------------------------------------------
+# completion
+#
+# Prints a completion script for bash, zsh or fish, covering every subcommand,
+# its flags, and profile names. Printed rather than installed, for the same
+# reason guard is: this tool never writes to a completion directory or an rc
+# file, and a copy in one would drift from the tool as commands are added.
+#
+# Profile names are never baked into the printed script. Instead the script
+# calls back into $SELF (resolved the same way guard resolves it) at
+# completion time, the same trick guard already uses to list profiles when it
+# refuses a run, so a profile added after the script was sourced still
+# completes without re-sourcing anything.
+# ---------------------------------------------------------------------------
+
+cmd_completion() {
+    [ $# -eq 1 ] || die "usage: $SELF completion bash|zsh|fish"
+    _co_self=$(resolved_self)
+    case "$1" in
+        bash) completion_bash "$_co_self" ;;
+        zsh)  completion_zsh "$_co_self" ;;
+        fish) completion_fish "$_co_self" ;;
+        *)    die "completion: unknown shell '$1' (known: bash, zsh, fish)" ;;
+    esac
+}
+
+completion_bash() {
+    cat <<'BASHCOMP' | sed "s/@SELF@/$SELF/g; s|@AP@|$1|g"
+# @SELF@ bash completion.
+# Add to your shell rc file:
+#   eval "$(@SELF@ completion bash)"
+
+__@SELF@_profiles() {
+    @AP@ list 2>/dev/null | sed -n 's/^\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\)$/\1/p'
+}
+
+_@SELF@_complete() {
+    local cur prev cmds
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmds="new list ls remove run shell env path which guard desktop app doctor verify explain completion version help"
+
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
+        return 0
+    fi
+
+    case "${COMP_WORDS[1]}" in
+        new)
+            case "$prev" in
+                --agent)           COMPREPLY=( $(compgen -W "claude" -- "$cur") ); return 0 ;;
+                --root|--app-data) return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "--agent --root --app-data" -- "$cur") )
+            ;;
+        remove)
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --purge" -- "$cur") )
+            ;;
+        run|shell|env|path|desktop)
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles)" -- "$cur") )
+            ;;
+        app)
+            case "$prev" in
+                --applet|--icon) return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --applet --icon" -- "$cur") )
+            ;;
+        which)
+            COMPREPLY=( $(compgen -W "--label" -- "$cur") )
+            ;;
+        guard)
+            case "$prev" in
+                --shell) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "--shell" -- "$cur") )
+            ;;
+        doctor)
+            COMPREPLY=( $(compgen -W "--keychain-scan" -- "$cur") )
+            ;;
+        version)
+            COMPREPLY=( $(compgen -W "--check" -- "$cur") )
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+            ;;
+    esac
+}
+complete -F _@SELF@_complete @SELF@
+BASHCOMP
+}
+
+completion_zsh() {
+    cat <<'ZSHCOMP' | sed "s/@SELF@/$SELF/g; s|@AP@|$1|g"
+#compdef @SELF@
+# @SELF@ zsh completion.
+# Add to your shell rc file:
+#   eval "$(@SELF@ completion zsh)"
+
+__@SELF@_profiles() {
+    @AP@ list 2>/dev/null | sed -n 's/^\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\)$/\1/p'
+}
+
+_@SELF@() {
+    local -a cmds profiles
+    cmds=(
+        'new:create a profile'
+        'list:list every profile'
+        'ls:list every profile'
+        'remove:retire a profile'
+        'run:run the agent pinned to a profile'
+        'shell:open a subshell pinned to a profile'
+        'env:print exports, for eval'
+        'path:print the config root of a profile'
+        'which:which profile this shell is pinned to'
+        'guard:print the unpinned-run guard'
+        'desktop:launch the desktop app pinned to a profile'
+        'app:build the Dock launcher'
+        'doctor:audit that the isolation holds'
+        'verify:re-check the assumptions this tool rests on'
+        'explain:explain the scheme'
+        'completion:print a shell completion script'
+        'version:print the version'
+        'help:show help'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'command' cmds
+        profiles=(${(f)"$(__@SELF@_profiles)"})
+        _describe -t profiles 'profile' profiles
+        return
+    fi
+
+    case ${words[2]} in
+        new)
+            _arguments '--agent[agent]:agent:(claude)' \
+                '--root[config root path]:path:_files -/' \
+                '--app-data[app data dir path]:path:_files -/'
+            ;;
+        remove)
+            profiles=(${(f)"$(__@SELF@_profiles)"})
+            _describe -t profiles 'profile' profiles
+            _arguments '--purge[delete everything, after a typed confirmation]'
+            ;;
+        run|shell|env|path|desktop)
+            profiles=(${(f)"$(__@SELF@_profiles)"})
+            _describe -t profiles 'profile' profiles
+            ;;
+        app)
+            profiles=(${(f)"$(__@SELF@_profiles)"})
+            _describe -t profiles 'profile' profiles
+            _arguments '--applet[applet path]:path:_files' \
+                '--icon[1024px PNG]:png:_files -g \*.png'
+            ;;
+        which)
+            _arguments '--label[print the bare label only]'
+            ;;
+        guard)
+            _arguments '--shell[shell to target]:shell:(bash zsh fish)'
+            ;;
+        doctor)
+            _arguments '--keychain-scan[also scan the whole login Keychain]'
+            ;;
+        version)
+            _arguments '--check[compare against the newest release]'
+            ;;
+        completion)
+            _values 'shell' bash zsh fish
+            ;;
+    esac
+}
+
+compdef _@SELF@ @SELF@
+ZSHCOMP
+}
+
+completion_fish() {
+    cat <<'FISHCOMP' | sed "s/@SELF@/$SELF/g; s|@AP@|$1|g"
+# @SELF@ fish completion.
+# Add to your shell config (~/.config/fish/config.fish):
+#   @SELF@ completion fish | source
+
+function __@SELF@_profiles
+    @AP@ list 2>/dev/null | string match -r '^[a-zA-Z0-9_-]+$'
+end
+
+complete -c @SELF@ -f
+
+complete -c @SELF@ -n '__fish_use_subcommand' -a new -d 'Create a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a list -d 'List every profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a ls -d 'List every profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a remove -d 'Retire a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a run -d 'Run the agent pinned to a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a shell -d 'Open a subshell pinned to a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a env -d 'Print exports, for eval'
+complete -c @SELF@ -n '__fish_use_subcommand' -a path -d 'Print the config root of a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a which -d 'Which profile this shell is pinned to'
+complete -c @SELF@ -n '__fish_use_subcommand' -a guard -d 'Print the unpinned-run guard'
+complete -c @SELF@ -n '__fish_use_subcommand' -a desktop -d 'Launch the desktop app pinned to a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a app -d 'Build the Dock launcher'
+complete -c @SELF@ -n '__fish_use_subcommand' -a doctor -d 'Audit that the isolation holds'
+complete -c @SELF@ -n '__fish_use_subcommand' -a verify -d 'Re-check the assumptions this tool rests on'
+complete -c @SELF@ -n '__fish_use_subcommand' -a explain -d 'Explain the scheme'
+complete -c @SELF@ -n '__fish_use_subcommand' -a completion -d 'Print a shell completion script'
+complete -c @SELF@ -n '__fish_use_subcommand' -a version -d 'Print the version'
+complete -c @SELF@ -n '__fish_use_subcommand' -a help -d 'Show help'
+complete -c @SELF@ -n '__fish_use_subcommand' -a '(__@SELF@_profiles)' -d Profile
+
+complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app' -a '(__@SELF@_profiles)' -d Profile
+
+complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l agent -d Agent -a claude
+complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l root -d 'Config root path'
+complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l app-data -d 'App data dir path'
+complete -c @SELF@ -n '__fish_seen_subcommand_from remove' -l purge -d 'Delete everything, after a typed confirmation'
+complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l applet -d 'Applet path'
+complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l icon -d '1024px PNG'
+complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l label -d 'Print the bare label only'
+complete -c @SELF@ -n '__fish_seen_subcommand_from guard' -l shell -d 'Shell to target' -a 'bash zsh fish'
+complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l keychain-scan -d 'Also scan the whole login Keychain'
+complete -c @SELF@ -n '__fish_seen_subcommand_from version' -l check -d 'Compare against the newest release'
+complete -c @SELF@ -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
+FISHCOMP
 }
 
 # ---------------------------------------------------------------------------
@@ -3242,7 +3543,7 @@ cmd_pick() {
     }
 
     printf '\nWhere?\n' >&2
-    _pk_where=$(ask_choice "Open" "desktop app" "terminal") || {
+    _pk_where=$(ask_choice "Open" "desktop app" "terminal" "subshell") || {
         printf 'Nothing chosen.\n' >&2
         return "$EX_ERR"
     }
@@ -3250,6 +3551,7 @@ cmd_pick() {
     printf '\n' >&2
     case "$_pk_where" in
         "desktop app") cmd_desktop "$_pk_name" ;;
+        subshell)      cmd_shell "$_pk_name" ;;
         *)             cmd_run "$_pk_name" ;;
     esac
 }
@@ -3387,10 +3689,22 @@ DESKTOP
                           distinct colour per account are legible.
 
 SHELL
-  guard                   Print a shell function that refuses to run the agent
+  guard [--shell bash|zsh|fish]
+                          Print a shell function that refuses to run the agent
                           unpinned, and turns a leading profile name into a
-                          pinned run. Add to your rc file:
+                          pinned run. bash and zsh share one form; fish gets
+                          its own, chosen by --shell or by reading $SHELL when
+                          --shell is not given. Add to your rc file:
                             eval "$(@SELF@ guard)"
+  completion bash|zsh|fish
+                          Print a completion script covering every subcommand,
+                          its flags, and profile names. Profile names are
+                          looked up when the shell asks, not baked into the
+                          script, so a new profile completes without
+                          re-sourcing anything. Add to your rc file:
+                            eval "$(@SELF@ completion bash)"    # bash
+                            eval "$(@SELF@ completion zsh)"     # zsh
+                            @SELF@ completion fish | source     # fish
 
 AUDIT
   doctor [--json] [--report FILE] [--keychain-scan]
@@ -3452,6 +3766,7 @@ main() {
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
         guard)    cmd_guard "$@" ;;
+        completion) cmd_completion "$@" ;;
         desktop)  cmd_desktop "$@" ;;
         app)      cmd_app "$@" ;;
         doctor)   cmd_doctor "$@" ;;

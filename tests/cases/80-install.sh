@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
+# shellcheck disable=SC2016  # the fish guard assertions check literal $-text
 #
 # Installing, self-naming, the unpinned guard and the release channel.
 
@@ -151,6 +152,123 @@ case_guard_suggests_the_shortcut_when_it_refuses() {
     "$AP" new bouvet >/dev/null 2>&1
     out=$(with_guard 'claude')
     assert_contains "$out" "claude <profile> [args...]"
+}
+
+# ---------------------------------------------------------------------------
+# guard --shell, and the fish guard
+#
+# There is no fish interpreter in this suite's dependency-free harness, so the
+# fish guard cannot be sourced and run the way with_guard runs the bash and
+# zsh one. What is pinned instead: the shell selector picks the right form
+# (--shell, then $SHELL, defaulting to the bash/zsh form), and the fish form
+# itself contains fish's actual syntax for every piece the bash and zsh form
+# has, in the same order a hand-written fish function would.
+# ---------------------------------------------------------------------------
+
+case_guard_defaults_to_the_posix_form() {
+    HOME=$(new_home); export HOME
+    out=$(env -u SHELL "$AP" guard 2>&1)
+    assert_contains "$out" 'claude() {' || return
+    assert_not_contains "$out" "function claude"
+}
+
+case_guard_reads_shell_from_the_environment() {
+    HOME=$(new_home); export HOME
+    out=$(SHELL=/usr/local/bin/fish "$AP" guard 2>&1)
+    assert_contains "$out" "function claude" || return
+    assert_not_contains "$out" 'claude() {'
+}
+
+# --shell wins even when $SHELL disagrees, the same way an explicit flag beats
+# an inferred default everywhere else in this tool.
+case_guard_shell_flag_overrides_the_environment() {
+    HOME=$(new_home); export HOME
+    out=$(SHELL=/bin/zsh "$AP" guard --shell fish 2>&1)
+    assert_contains "$out" "function claude"
+}
+
+case_guard_shell_bash_and_zsh_produce_the_same_form() {
+    HOME=$(new_home); export HOME
+    bash_out=$("$AP" guard --shell bash 2>&1)
+    zsh_out=$("$AP" guard --shell zsh 2>&1)
+    assert_equals "$bash_out" "$zsh_out"
+}
+
+case_guard_refuses_an_unknown_shell() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" guard --shell tcsh 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "unknown shell 'tcsh'"
+}
+
+case_guard_shell_needs_a_value() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" guard --shell 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "--shell needs a value"
+}
+
+fish_guard() {
+    "$AP" guard --shell fish 2>&1
+}
+
+case_fish_guard_defines_a_function_per_agent() {
+    HOME=$(new_home); export HOME
+    out=$(fish_guard)
+    assert_contains "$out" "function claude" || return
+    assert_contains "$out" "end"
+}
+
+case_fish_guard_checks_the_env_var_is_unset() {
+    HOME=$(new_home); export HOME
+    out=$(fish_guard)
+    assert_contains "$out" "if not set -q CLAUDE_CONFIG_DIR"
+}
+
+case_fish_guard_refuses_unpinned_and_names_the_binary() {
+    HOME=$(new_home); export HOME
+    out=$(fish_guard)
+    assert_contains "$out" "Refusing to run claude unpinned." || return
+    assert_contains "$out" "claude <profile> [args...]"
+}
+
+# The leading-profile-name shortcut, spelled in fish: $argv rather than "$@",
+# and $status rather than "$?".
+case_fish_guard_forwards_a_leading_profile_name() {
+    HOME=$(new_home); export HOME
+    out=$(fish_guard)
+    assert_contains "$out" 'path $argv[1]' || return
+    assert_contains "$out" 'Pinning to $argv[1].' || return
+    assert_contains "$out" 'run $argv' || return
+    assert_contains "$out" 'return $status' || return
+    # Every callback must be the resolved command, never the generator's own
+    # internal shell variable leaking into the printed script.
+    assert_not_contains "$out" '$_gf_self'
+}
+
+case_fish_guard_has_the_command_escape_hatch() {
+    HOME=$(new_home); export HOME
+    out=$(fish_guard)
+    assert_contains "$out" 'command claude $argv'
+}
+
+# The profile list reuses the exact sed pattern the bash/zsh form uses; sed
+# does not care which shell called it. What matters here is that it is really
+# there, unmangled by the heredoc that printed it.
+case_fish_guard_lists_profiles_it_knows_when_it_refuses() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new tide >/dev/null 2>&1
+    out=$(fish_guard)
+    assert_contains "$out" "agent-profile list 2>/dev/null" || return
+    assert_contains "$out" 'sed -n '"'"'s/^\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\)$/  \1/p'"'"''
+}
+
+case_fish_guard_uses_the_invoked_name() {
+    HOME=$(new_home); export HOME
+    out=$(as_name agpin guard --shell fish 2>&1)
+    assert_contains "$out" "Refusing to run claude unpinned" || return
+    assert_not_contains "$out" "agent-profile "
 }
 
 # ---------------------------------------------------------------------------
@@ -531,6 +649,19 @@ run_case "guard forwards remaining arguments"     case_guard_forwards_the_remain
 run_case "guard refuses a non-profile first arg"  case_guard_still_refuses_a_first_argument_that_is_not_a_profile
 run_case "guard leaves the arg alone when pinned" case_guard_leaves_the_argument_alone_when_already_pinned
 run_case "guard suggests the shortcut"            case_guard_suggests_the_shortcut_when_it_refuses
+run_case "guard defaults to the posix form"       case_guard_defaults_to_the_posix_form
+run_case "guard reads the shell from the env"     case_guard_reads_shell_from_the_environment
+run_case "guard --shell overrides the env"        case_guard_shell_flag_overrides_the_environment
+run_case "guard --shell bash and zsh match"       case_guard_shell_bash_and_zsh_produce_the_same_form
+run_case "guard refuses an unknown shell"         case_guard_refuses_an_unknown_shell
+run_case "guard --shell needs a value"            case_guard_shell_needs_a_value
+run_case "fish guard defines a function per agent" case_fish_guard_defines_a_function_per_agent
+run_case "fish guard checks the env var is unset" case_fish_guard_checks_the_env_var_is_unset
+run_case "fish guard refuses unpinned"            case_fish_guard_refuses_unpinned_and_names_the_binary
+run_case "fish guard forwards a profile name"     case_fish_guard_forwards_a_leading_profile_name
+run_case "fish guard has the command escape hatch" case_fish_guard_has_the_command_escape_hatch
+run_case "fish guard lists profiles it knows"     case_fish_guard_lists_profiles_it_knows_when_it_refuses
+run_case "fish guard uses the invoked name"       case_fish_guard_uses_the_invoked_name
 run_case "release install verifies and installs"  case_release_install_verifies_and_installs
 run_case "release install refuses a bad checksum" case_release_install_refuses_a_bad_checksum
 run_case "release install warns without cosign"   case_release_install_warns_when_cosign_is_missing
