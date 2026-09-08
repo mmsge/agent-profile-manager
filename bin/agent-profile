@@ -660,6 +660,343 @@ cmd_list() {
 }
 
 # ---------------------------------------------------------------------------
+# remove
+#
+# Retiring a profile when an engagement ends. The machinery that keeps an
+# account separate is exactly what makes it hard to leave: a config root, an
+# app data directory, a Dock launcher and a Keychain entry, in four different
+# places, none of them named after the customer. Finding all four by hand, on
+# the day the work stops, is how customer data gets left on a laptop.
+#
+# Plain remove deletes the registry entry and prints every remaining piece
+# with the command that deletes it, so the destructive part stays in the
+# reader's hands. --purge does the deleting itself, but only for the paths
+# this profile's own registry entry names, only after the name is typed back,
+# and only from a terminal.
+#
+# The credential is never touched either way. The command that deletes it is
+# printed and never run: this tool does not read, write or delete a
+# credential, and the command that ends an engagement is the last place to
+# start.
+# ---------------------------------------------------------------------------
+
+# path_claimed_by_other <profile> <path>: another profile whose registry entry
+# names this same path, or empty.
+#
+# Deleting a directory two entries name would take a second account's data
+# with it, which is the one mistake this command must never make. Doctor
+# reports the root case as D15; this refuses to act on it at all.
+path_claimed_by_other() {
+    for _pcb_name in $(profile_names); do
+        [ "$_pcb_name" = "$1" ] && continue
+        for _pcb_key in root app_data applet; do
+            if [ "$(reg_get "$_pcb_name" "$_pcb_key")" = "$2" ]; then
+                printf '%s\n' "$_pcb_name"
+                return 0
+            fi
+        done
+    done
+}
+
+# remove_blocker <profile> <path>: empty when --purge may delete this path,
+# otherwise the reason it must not. Whatever a blocker names is reported and
+# left exactly as it is.
+#
+# One rule sits behind every check: delete only what a registry entry names,
+# only as it names it, and never a path that could stand for somewhere else. A
+# symlink is refused rather than followed, because what it points at was never
+# this profile's. A path that is not in canonical form is refused because its
+# spelling no longer says where it is, and "$HOME/.." is a real directory that
+# is not this one.
+remove_blocker() {
+    case "$2" in
+        /*) ;;
+        *)  printf 'it is not an absolute path\n'; return 0 ;;
+    esac
+
+    if [ "$2" != "$(canonical_path "$2")" ]; then
+        printf 'the registry spells it in a form that is not canonical, so what it names is not clear\n'
+        return 0
+    fi
+
+    if [ "$2" = "/" ] || [ "$2" = "$HOME" ]; then
+        printf 'it is your home directory, or the root of the filesystem\n'
+        return 0
+    fi
+
+    case "$HOME/" in
+        "$2"/*) printf 'your home directory is inside it\n'; return 0 ;;
+    esac
+
+    if [ -L "$2" ]; then
+        printf 'it is a symlink, and what it points at is not this profile\n'
+        return 0
+    fi
+
+    if [ ! -d "$2" ]; then
+        printf 'it is not a directory\n'
+        return 0
+    fi
+
+    _rb_other=$(path_claimed_by_other "$1" "$2")
+    if [ -n "$_rb_other" ]; then
+        printf 'profile %s names it too, so it holds more than this account\n' "$_rb_other"
+        return 0
+    fi
+}
+
+# purge_path <path>: delete one item, all or nothing at the path it lives on.
+#
+# The rename does the work. Moving the item into a scratch directory beside it
+# is one atomic operation on the same filesystem, so from the moment it
+# returns the item is gone from the path the registry named, whatever becomes
+# of the recursive delete afterwards. Deleting in place would leave a
+# half-emptied root sitting where a full one was, which reads as success and
+# is not.
+#
+# Returns 0 when it is gone, 1 when nothing was touched, and 2 when it is gone
+# from its own path but the scratch copy beside it survived. In that last case
+# the scratch path is left in $_pp_tmp, because the closing report has to name
+# everything that is still on the disk.
+purge_path() {
+    _pp_parent=${1%/*}
+    [ -n "$_pp_parent" ] || _pp_parent="/"
+    _pp_tmp=$(mktemp -d "$_pp_parent/.agent-profile-removing.XXXXXX" 2>/dev/null) || return 1
+    if ! mv "$1" "$_pp_tmp/" 2>/dev/null; then
+        rmdir "$_pp_tmp" 2>/dev/null
+        return 1
+    fi
+    rm -rf "$_pp_tmp" 2>/dev/null || return 2
+    return 0
+}
+
+# remove_delete <path>: delete one item and say what happened.
+#
+# Which of purge_path's three answers this was is read back off the disk
+# rather than taken on trust, because the disk is what the closing report has
+# to describe. A scratch copy that outlived its delete is appended to
+# $_rm_stranded so that report can name it.
+remove_delete() {
+    if purge_path "$1"; then
+        printf 'Deleted %s\n' "$1"
+        return 0
+    fi
+
+    if [ -e "$1" ]; then
+        warn "could not delete $1"
+        return 1
+    fi
+
+    printf 'Deleted %s\n' "$1"
+    _rm_stranded="$_rm_stranded$_pp_tmp
+"
+}
+
+# remove_left <label> <path> <note>: one entry of the closing list, with the
+# command that deletes it. The note says why it is still there, or is empty.
+remove_left() {
+    printf '  %-12s %s\n' "$1" "$2"
+    [ -n "${3:-}" ] && printf '  %-12s %s\n' "" "$3"
+    printf '  %-12s rm -rf %s\n' "" "$(shell_quote "$2")"
+    printf '\n'
+}
+
+cmd_remove() {
+    need python3
+    _rm_name=""
+    _rm_purge=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --purge) _rm_purge=1 ;;
+            -*)      die "unknown option '$1'" ;;
+            *)       [ -z "$_rm_name" ] || die "unexpected argument '$1'"; _rm_name="$1" ;;
+        esac
+        shift
+    done
+
+    [ -n "$_rm_name" ] || die "usage: $SELF remove <profile> [--purge]"
+    require_profile "$_rm_name"
+
+    _rm_agent=$(profile_agent "$_rm_name")
+    _rm_root=$(profile_root "$_rm_name")
+    _rm_sessions=$(session_count "$_rm_root")
+    _rm_service="$(agent_def "$_rm_agent" cred_service)-$(cred_info "$_rm_root" | cut -f2)"
+
+    # A path the registry does not name is derived here for the report and
+    # never for the deleting. Where an app data directory or a launcher would
+    # conventionally be is a guess, and a guess is not something to delete.
+    _rm_data=$(reg_get "$_rm_name" app_data)
+    _rm_data_note=""
+    if [ -z "$_rm_data" ]; then
+        _rm_data="$(agent_def "$_rm_agent" app_support)/$(agent_def "$_rm_agent" app_prefix)$(capitalize "$_rm_name")"
+        _rm_data_note="the registry entry did not name it, so this is the conventional path"
+    fi
+    _rm_applet=$(reg_get "$_rm_name" applet)
+    _rm_applet_note=""
+    if [ -z "$_rm_applet" ]; then
+        _rm_applet=$(applet_default_path "$_rm_agent" "$_rm_name")
+        _rm_applet_note="the registry entry did not name it, so this is the conventional path"
+    fi
+
+    _rm_root_block=""
+    _rm_data_block=""
+    _rm_applet_block=""
+    _rm_stranded=""
+
+    if [ -n "$_rm_purge" ]; then
+        # No script may ever purge. The typed confirmation is the whole safety
+        # mechanism here, and a prompt nobody can answer is not one.
+        is_tty || die "--purge needs a terminal, and stdin here is not one.
+It asks you to type the profile name back before it deletes anything, so there
+was nobody to ask and nothing was removed. Run '$SELF remove $_rm_name'
+without --purge to get the list of paths, and delete them yourself."
+
+        # Work out what may be deleted before saying anything, so the list
+        # that gets confirmed is the list that gets acted on. A path that is
+        # not there blocks nothing: there is nothing to refuse to delete.
+        if [ -e "$_rm_root" ]; then
+            _rm_root_block=$(remove_blocker "$_rm_name" "$_rm_root")
+        fi
+        if [ -e "$_rm_data" ]; then
+            if [ -n "$_rm_data_note" ]; then
+                _rm_data_block="the registry entry does not name it"
+            else
+                _rm_data_block=$(remove_blocker "$_rm_name" "$_rm_data")
+            fi
+        fi
+        if [ -e "$_rm_applet" ]; then
+            if [ -n "$_rm_applet_note" ]; then
+                _rm_applet_block="the registry entry does not name it"
+            else
+                _rm_applet_block=$(remove_blocker "$_rm_name" "$_rm_applet")
+            fi
+        fi
+
+        printf 'Purging profile %s. This permanently deletes:\n\n' "$_rm_name"
+        if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
+            printf '  %-12s %s\n' "config root" "$_rm_root"
+            printf '  %-12s %s session(s)\n' "" "$_rm_sessions"
+        fi
+        if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
+            printf '  %-12s %s\n' "app data" "$_rm_data"
+        fi
+        if [ -e "$_rm_applet" ] && [ -z "$_rm_applet_block" ]; then
+            printf '  %-12s %s\n' "launcher" "$_rm_applet"
+        fi
+        printf '  %-12s %s\n' "registry" "$(reg_file "$_rm_name")"
+        printf '\n'
+
+        # What will be left has to be said before the question, not after the
+        # answer.
+        if [ -n "$_rm_root_block$_rm_data_block$_rm_applet_block" ]; then
+            printf 'Not deleted, and left exactly as it is:\n\n'
+            if [ -n "$_rm_root_block" ]; then
+                printf '  %-12s %s\n  %-12s %s\n' "config root" "$_rm_root" "" "$_rm_root_block"
+            fi
+            if [ -n "$_rm_data_block" ]; then
+                printf '  %-12s %s\n  %-12s %s\n' "app data" "$_rm_data" "" "$_rm_data_block"
+            fi
+            if [ -n "$_rm_applet_block" ]; then
+                printf '  %-12s %s\n  %-12s %s\n' "launcher" "$_rm_applet" "" "$_rm_applet_block"
+            fi
+            printf '\n'
+        fi
+
+        printf 'The credential is not listed above, and never will be: this tool never\n'
+        printf 'touches credentials. The command that deletes it is printed at the end.\n'
+        printf '\n'
+        printf 'This cannot be undone. Type the profile name to confirm: '
+        _rm_typed=""
+        read -r _rm_typed || true
+        # Exactly the name, or nothing happens at all. A prompt that takes "y"
+        # is answered by anyone typing ahead without reading it.
+        if [ "$_rm_typed" != "$_rm_name" ]; then
+            printf '\n'
+            printf 'Aborted. Nothing was deleted, and %s is still registered.\n' "$_rm_name"
+            return "$EX_ERR"
+        fi
+        printf '\n'
+
+        if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
+            remove_delete "$_rm_root"
+        fi
+        if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
+            remove_delete "$_rm_data"
+        fi
+        if [ -e "$_rm_applet" ] && [ -z "$_rm_applet_block" ]; then
+            remove_delete "$_rm_applet"
+        fi
+        printf '\n'
+    fi
+
+    # The registry entry goes last, so a delete that fails leaves the record
+    # of what belonged to whom standing until the data it describes is gone.
+    _rm_file=$(reg_file "$_rm_name")
+    rm -f "$_rm_file" || die "could not remove $_rm_file"
+    printf 'Unregistered %s\n' "$_rm_name"
+    printf '\n'
+
+    # What is still here is tested, never assumed. A delete that failed part
+    # way must not be able to leave this list saying the data is gone.
+    printf 'Left on this machine:\n\n'
+    _rm_left=""
+    if [ -e "$_rm_root" ]; then
+        _rm_note="$_rm_sessions session(s)"
+        [ -n "$_rm_root_block" ] && _rm_note="$_rm_note, not deleted: $_rm_root_block"
+        remove_left "config root" "$_rm_root" "$_rm_note"
+        _rm_left=1
+    fi
+    if [ -e "$_rm_data" ]; then
+        _rm_note="$_rm_data_note"
+        [ -n "$_rm_data_block" ] && _rm_note="not deleted: $_rm_data_block"
+        remove_left "app data" "$_rm_data" "$_rm_note"
+        _rm_left=1
+    fi
+    if [ -e "$_rm_applet" ]; then
+        _rm_note="$_rm_applet_note"
+        [ -n "$_rm_applet_block" ] && _rm_note="not deleted: $_rm_applet_block"
+        remove_left "launcher" "$_rm_applet" "$_rm_note"
+        _rm_left=1
+    fi
+    if [ -n "$_rm_stranded" ]; then
+        printf '%s' "$_rm_stranded" | while IFS= read -r _rm_strand; do
+            [ -n "$_rm_strand" ] || continue
+            remove_left "leftover" "$_rm_strand" "moved out of the way, then could not be deleted"
+        done
+        _rm_left=1
+    fi
+
+    printf '  %-12s %s\n' "credential" "$_rm_service"
+    printf '  %-12s %s\n' "" "This tool never touches credentials, so this one is yours to delete."
+    printf '  %-12s %s\n' "" "Until it is gone, doctor counts it as a D12 orphan."
+    if [ -n "${USER:-}" ]; then
+        printf '  %-12s security delete-generic-password -s %s -a %s\n' \
+            "" "$(shell_quote "$_rm_service")" "$(shell_quote "$USER")"
+    else
+        # shellcheck disable=SC2016  # literal help text; the reader's shell expands it
+        printf '  %-12s security delete-generic-password -s %s -a "$USER"\n' \
+            "" "$(shell_quote "$_rm_service")"
+    fi
+    printf '\n'
+    if [ -z "$_rm_purge" ]; then
+        # Said plainly, because the entry that named these paths is the thing
+        # this command just deleted. There is no second chance to ask it.
+        printf 'The registry entry is gone, so this command cannot look those paths up again.\n'
+        printf 'The list above is the whole record of them.\n'
+        printf '\n'
+    fi
+    printf 'Then run: %s doctor\n' "$SELF"
+    printf 'A root no profile claims is D06 and a launcher no profile claims is D14, so\n'
+    printf 'both go quiet once those paths are gone.\n'
+
+    if [ -n "$_rm_purge" ] && [ -n "$_rm_left" ]; then
+        return "$EX_ERR"
+    fi
+    return "$EX_OK"
+}
+
+# ---------------------------------------------------------------------------
 # run, shell, env, path
 # ---------------------------------------------------------------------------
 
@@ -2368,6 +2705,13 @@ PROFILES
                           Create an empty config root, an app data dir and a
                           registry entry. Safe to run twice.
   list                    Every profile with its root, account and session count.
+  remove <name> [--purge] Retire a profile. It removes the registry entry and
+                          prints everything else the profile still has on this
+                          machine, with the command that deletes each one.
+                          --purge deletes the root, the app data dir and the
+                          launcher too, after you type the name back at a
+                          prompt, and only from a terminal. It never touches
+                          the credential, in either form.
 
 PINNED EXECUTION
   <name> [args...]        Run the agent's CLI pinned to that profile. A bare
@@ -2407,8 +2751,9 @@ OTHER
 
 EXIT CODES
   0  success, nothing to report
-  1  usage error, unknown profile or agent, missing dependency, or
-     version --check found a newer release
+  1  usage error, unknown profile or agent, missing dependency,
+     version --check found a newer release, or remove was aborted or
+     could not delete everything it was asked to
   2  doctor found an isolation problem
   3  verify found an assumption that no longer holds
   4  verify could not check something it wanted to check
@@ -2436,6 +2781,7 @@ main() {
     case "$_main_cmd" in
         new)      cmd_new "$@" ;;
         list|ls)  cmd_list "$@" ;;
+        remove)   cmd_remove "$@" ;;
         run)      cmd_run "$@" ;;
         shell)    cmd_shell "$@" ;;
         env)      cmd_env "$@" ;;
