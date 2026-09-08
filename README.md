@@ -1073,8 +1073,10 @@ Versioning is semantic. `Z` for fixes, `Y` for backwards-compatible features,
 
 ### Cutting a release
 
-Bump `AGENT_PROFILE_VERSION` in `bin/agent-profile`, merge that, then tag the
-merge commit:
+Bump `AGENT_PROFILE_VERSION` in `bin/agent-profile` and merge that first. Then
+there are two ways to cut the release, and they end in the same place.
+
+**By tag, from a checkout.** This is the one to prefer.
 
 ```sh
 git checkout hovud && git pull
@@ -1087,10 +1089,36 @@ git push origin v0.8.0
 the release, and the Sigstore bundle records what the workflow then built from
 it. Those answer different questions, so do both.
 
-`.github/workflows/release.yml` takes it from there: it runs the same test
-matrix `ci.yml` runs, calling that workflow rather than copying it, refuses the
-tag if it disagrees with `AGENT_PROFILE_VERSION`, builds the tarball, writes
-`SHA256SUMS`, signs both with keyless Sigstore and publishes the release.
+**By hand, from the Actions tab.** Run the Release workflow on `hovud` and give
+it the version without the leading `v`, for example `0.8.0`. It creates the tag
+itself and carries on. This exists because pushing a tag needs git write access
+to this repository, and whoever is cutting the release does not always have it
+from where they are: a borrowed machine, a phone, an agent working through an
+API that is scoped to branches.
+
+What you give up by using it is the signed tag. The runner has no signing key,
+and the fix for that would be a release key sitting in repository secrets,
+which is a worse thing to own than an unsigned tag. So a manually cut tag is
+annotated, created by `github-actions[bot]`, and says only that this workflow
+made it. What the artifacts are is still established the same way, by the
+Sigstore certificate naming the workflow, the repository and the tag. What is
+missing is the separate record of which person decided to publish, and the
+Actions run log is where that lives instead.
+
+The manual path refuses to do three things. It will not run from any branch but
+the default one, because a release built from an unmerged branch would carry
+code that was never reviewed. It will not move a tag that already exists, since
+whatever that tag points at has already been downloaded and checksummed by
+somebody. And it will not accept a version that disagrees with
+`AGENT_PROFILE_VERSION`, which is the same check the tag path makes.
+
+From either entry point `.github/workflows/release.yml` does the same work: it
+runs the same test matrix `ci.yml` runs, calling that workflow rather than
+copying it, refuses the tag if it disagrees with `AGENT_PROFILE_VERSION`,
+builds the tarball, writes `SHA256SUMS`, signs both with keyless Sigstore and
+publishes the release. On the manual path the tag is created last, after the
+build and the signatures have both succeeded, so a run that fails partway
+leaves the repository as it was rather than burning a version number.
 
 The tarball is built with fixed ownership, fixed order and the tagged commit's
 own timestamp, so anyone can check the tag out, rebuild it and get the same
