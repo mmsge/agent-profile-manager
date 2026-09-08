@@ -491,18 +491,20 @@ exception; the reasoning is in
 ## Install
 
 ```sh
-tools/install.sh
+curl -fsSL https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh | bash
 ```
 
-Links both `agpin` and `agent-profile` into the first writable of
-`~/.local/bin` or `/usr/local/bin`. `--prefix DIR` chooses somewhere else,
-`--name NAME` a different short name, `--uninstall` removes only the links it
-made. It symlinks rather than copies, so `git pull` updates the installed
-command and there is never a second copy to drift.
+That downloads the newest tagged release, checks it against the `SHA256SUMS`
+published beside it, checks the Sigstore signature if you have `cosign`,
+unpacks it into `~/.local/share/agent-profile/<version>/` and links both
+`agpin` and `agent-profile` at that copy. What runs in your shell then changes
+only when you run the installer again.
 
-It is idempotent and says which of "installed" and "already installed"
-happened, and it warns when the prefix is not on your `PATH` rather than
-leaving you with a command nothing can find.
+Install `cosign` first if you want the signature checked, and you do:
+
+```sh
+brew install cosign
+```
 
 **The tool names itself by whichever name you invoke.** Run it as `agpin` and
 every message, error and suggested fix says `agpin`. That matters because a
@@ -520,6 +522,127 @@ No dependencies beyond a stock macOS. It is one bash script, written to bash
 3.2 because that is what `/bin/bash` is on macOS, and it uses `python3` from the
 Command Line Tools only to read JSON. No Homebrew, no `jq`.
 
+Installing adds nothing to that: `curl`, `shasum` and `tar` are on every Mac,
+and neither `tools/install.sh` nor `agpin version --check` calls `python3`,
+because on a fresh Mac that opens the Command Line Tools dialog and an
+installer is the worst place to meet it. `cosign` is the one optional piece,
+and the only thing that goes unchecked without it is the signature.
+
+### What you are trusting, step by step
+
+The one-liner runs whatever `tools/install.sh` holds on `hovud` at the moment
+you run it, so that one file is trusted on GitHub's word alone. Read it first
+if you would rather not:
+
+```sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh
+less install.sh
+bash install.sh
+```
+
+Everything after that first file is checked rather than trusted.
+
+**The tarball comes from a tag, not a branch.** A release is built by
+`.github/workflows/release.yml`, which runs the same tests a branch runs,
+refuses to publish when the tag and the version in `bin/agent-profile`
+disagree, and attaches the tarball, its `SHA256SUMS` and a Sigstore bundle for
+each.
+
+**The checksum is verified before anything is unpacked.** A mismatch stops the
+install and leaves nothing behind, so a truncated download or an altered
+tarball cannot become a half-installed command.
+
+**The signature is verified when `cosign` is installed.** The Sigstore
+certificate names the workflow, the repository and the tag that produced the
+file, so a release swapped by somebody who can push to this repository fails
+the check rather than installing quietly. Keyless: there is no public key to
+fetch and no private key anyone can steal.
+
+**Without `cosign` the installer says so, loudly, and names what went
+unchecked.** A checksum on its own proves the download is intact and nothing
+more: whoever served `SHA256SUMS` served the tarball too, so changing both
+passes. That warning is the difference between a verified install and one that
+looks like one.
+
+Verifying by hand, if you want to see it work:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+cosign verify-blob \
+    --bundle agent-profile-0.7.1.tar.gz.sigstore \
+    --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    agent-profile-0.7.1.tar.gz
+```
+
+### Homebrew
+
+```sh
+brew tap mmsge/agpin
+brew install agpin
+```
+
+The formula pins one tarball's `sha256`, so Homebrew refuses anything that does
+not match it. That moves the trust from a branch to the tap repository, which
+is an improvement and not the end of it: whoever can push to the tap can change
+the URL and the sum together. The Sigstore check is the one that survives that.
+See [`packaging/homebrew/README.md`](packaging/homebrew/README.md).
+
+### Options
+
+```sh
+tools/install.sh --version v0.7.1   # a named release rather than the newest
+tools/install.sh --prefix ~/bin     # where the two links go
+tools/install.sh --name apx         # a different short command name
+tools/install.sh --uninstall        # remove the links, and nothing else
+tools/install.sh --dev              # link a git checkout instead
+```
+
+`--version` never asks the API which release is newest, so it is what you want
+in anything scripted: pin the version and the machine stays on it.
+
+`--uninstall` removes links that point at a release copy or at a checkout, and
+leaves anything else of the same name alone. It does not delete the unpacked
+releases, and it says where they are so you can.
+
+It is idempotent and says which of "installed" and "already installed"
+happened, and it warns when the prefix is not on your `PATH` rather than
+leaving you with a command nothing can find.
+
+### Am I current?
+
+```sh
+agpin version --check
+```
+
+Prints the version you are running and the newest release, and exits non-zero
+when you are behind, so it works from a cron entry or a shell hook. It compares
+the numbers field by field, because `0.10.0` is newer than `0.9.9` and a string
+comparison says the opposite.
+
+It downloads that one answer and nothing else, and it installs nothing at all.
+A tool that updates itself is a tool that can be made to run new code without
+anybody deciding to, which is the thing this whole release process exists to
+prevent.
+
+### The development install
+
+```sh
+tools/install.sh --dev
+```
+
+This is the old behaviour, and it is still the right one when you are working
+on the tool: it symlinks `~/.local/bin/agpin` straight at `bin/agent-profile`
+in your checkout, so an edit takes effect with no install step.
+
+**The installed command then runs whatever is in that checkout.** A `git pull`
+changes it, and so does anyone who can push to this repository, and
+`eval "$(agpin guard)"` in an rc file means that code runs at every shell
+start. On a machine that holds customer data that is not a trade-off worth
+making. The installer says as much when you use it, and refuses to combine
+`--dev` with `--version`, because a development install has no version to pin.
+
+
 ## Use
 
 ```sh
@@ -532,6 +655,7 @@ eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
 agent-profile list                # every profile, its account and session count
 agent-profile doctor              # is the separation actually holding?
+agent-profile version --check     # am I running the newest release?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
 eval "$(agent-profile guard)"     # refuse to run the agent unpinned
@@ -689,7 +813,7 @@ directory, is in
 | Code | Meaning |
 | --- | --- |
 | 0 | Success, nothing to report |
-| 1 | Usage error, unknown profile or agent, missing dependency |
+| 1 | Usage error, unknown profile or agent, missing dependency, or `version --check` found a newer release |
 | 2 | `doctor` found an isolation problem |
 | 3 | `verify` found an assumption that no longer holds |
 | 4 | `verify` could not check something it wanted to check |
@@ -809,7 +933,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 156 tests, no dependencies
+tests/run.sh              # 177 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
@@ -821,6 +945,37 @@ redirects all of them into a throwaway tree.
 
 Versioning is semantic. `Z` for fixes, `Y` for backwards-compatible features,
 `X` for breaking changes.
+
+### Cutting a release
+
+Bump `AGENT_PROFILE_VERSION` in `bin/agent-profile`, merge that, then tag the
+merge commit:
+
+```sh
+git checkout hovud && git pull
+git tag -s v0.7.1 -m "agent-profile 0.7.1"
+git push origin v0.7.1
+```
+
+`-s` makes it a signed annotated tag, which needs a signing key configured;
+`-a` makes an annotated one without a signature. A signed tag records who cut
+the release, and the Sigstore bundle records what the workflow then built from
+it. Those answer different questions, so do both.
+
+`.github/workflows/release.yml` takes it from there: it runs the same test
+matrix `ci.yml` runs, calling that workflow rather than copying it, refuses the
+tag if it disagrees with `AGENT_PROFILE_VERSION`, builds the tarball, writes
+`SHA256SUMS`, signs both with keyless Sigstore and publishes the release.
+
+The tarball is built with fixed ownership, fixed order and the tagged commit's
+own timestamp, so anyone can check the tag out, rebuild it and get the same
+`sha256`. A checksum nobody can reproduce only says the file did not change in
+transit.
+
+Then update `packaging/homebrew/agpin.rb` and the tap, which
+[`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers. The
+formula cannot be updated before the release, because until it exists there is
+no sum to pin.
 
 ## Licence
 

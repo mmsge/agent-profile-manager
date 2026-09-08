@@ -58,6 +58,11 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 # least reliable on the platform this tool targets.
 : "${AGENT_PROFILE_ASSUME_TTY:=}"
 
+# Where 'version --check' asks what the newest release is. Overridable so the
+# suite can answer with a fixture instead of the network, and so a fork can be
+# followed without editing this file.
+: "${AGENT_PROFILE_RELEASE_API_URL:=https://api.github.com/repos/mmsge/agent-profile-manager/releases/latest}"
+
 # Resolved once so the test suite can exercise the macOS-only audit rules on
 # another platform rather than shipping them unrun.
 : "${AGENT_PROFILE_PLATFORM:=$(uname -s)}"
@@ -2262,9 +2267,87 @@ cmd_pick() {
 # version, help
 # ---------------------------------------------------------------------------
 
+# latest_release_tag: the newest release's tag, from the GitHub API.
+#
+# Read with sed rather than python3 on purpose. Everything else here already
+# needs python3, but this is the one command someone runs on a machine that has
+# just been handed to them, and python3 on a fresh Mac opens the Command Line
+# Tools dialog. tag_name is a plain string, and the API emits it well before
+# the release body, so the first match is the field rather than something
+# quoted inside prose.
+latest_release_tag() {
+    _lrt_json=$(curl -fsSL "$AGENT_PROFILE_RELEASE_API_URL" 2>/dev/null) || return 1
+    _lrt_tag=$(printf '%s\n' "$_lrt_json" \
+        | tr ',' '\n' \
+        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -1)
+    [ -n "$_lrt_tag" ] || return 1
+    printf '%s\n' "$_lrt_tag"
+}
+
+# version_lt <a> <b>: true when version a is older than version b.
+#
+# Field by field and numerically, because 0.10.0 is newer than 0.9.9 and a
+# string comparison says the opposite. Anything after a hyphen is dropped: this
+# project publishes no pre-releases, and treating one as newer than the release
+# it precedes would be worse than ignoring it.
+version_lt() {
+    _vl_a=${1%%-*}
+    _vl_b=${2%%-*}
+    _vl_i=1
+    while [ "$_vl_i" -le 3 ]; do
+        _vl_x=$(printf '%s' "$_vl_a" | cut -d. -f"$_vl_i")
+        _vl_y=$(printf '%s' "$_vl_b" | cut -d. -f"$_vl_i")
+        case "$_vl_x" in ''|*[!0-9]*) _vl_x=0 ;; esac
+        case "$_vl_y" in ''|*[!0-9]*) _vl_y=0 ;; esac
+        [ "$_vl_x" -lt "$_vl_y" ] && return 0
+        [ "$_vl_x" -gt "$_vl_y" ] && return 1
+        _vl_i=$((_vl_i + 1))
+    done
+    return 1
+}
+
+# --check compares the running version against the newest release and says
+# which. It downloads nothing but that one answer and installs nothing at all:
+# a tool that updates itself is a tool that can be made to run new code without
+# anybody deciding to, which is the whole thing this release process is for.
 cmd_version() {
-    printf '%s %s\n' "$SELF" "$AGENT_PROFILE_VERSION"
-    printf '%s\n' "$AGENT_PROFILE_LICENSE"
+    _ver_check=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --check) _ver_check=1 ;;
+            *) die "version: unknown option '$1' (try: $SELF version --check)" ;;
+        esac
+        shift
+    done
+
+    if [ -z "$_ver_check" ]; then
+        printf '%s %s\n' "$SELF" "$AGENT_PROFILE_VERSION"
+        printf '%s\n' "$AGENT_PROFILE_LICENSE"
+        return "$EX_OK"
+    fi
+
+    need curl
+    _ver_tag=$(latest_release_tag) || die "could not ask $AGENT_PROFILE_RELEASE_API_URL what the newest release is.
+Check your network. Nothing was downloaded and nothing was changed."
+    _ver_latest="${_ver_tag#v}"
+
+    printf 'installed  %s\n' "$AGENT_PROFILE_VERSION"
+    printf 'latest     %s\n' "$_ver_latest"
+    printf '\n'
+
+    if version_lt "$AGENT_PROFILE_VERSION" "$_ver_latest"; then
+        printf '%s is behind, and installs nothing on its own. Update with:\n' "$SELF"
+        printf '  curl -fsSL https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh | bash\n'
+        return "$EX_ERR"
+    fi
+
+    if [ "$AGENT_PROFILE_VERSION" = "$_ver_latest" ]; then
+        printf '%s is up to date.\n' "$SELF"
+    else
+        printf '%s is newer than the newest release, so this is a build of your own.\n' "$SELF"
+    fi
+    return "$EX_OK"
 }
 
 cmd_help() {
@@ -2317,11 +2400,15 @@ AUDIT
   explain                 Explain the scheme and where each profile's data lives.
 
 OTHER
-  version, help
+  version [--check]       Print the version. --check compares it against the
+                          newest release and exits non-zero when this one is
+                          behind. It downloads nothing and installs nothing.
+  help
 
 EXIT CODES
   0  success, nothing to report
-  1  usage error, unknown profile or agent, missing dependency
+  1  usage error, unknown profile or agent, missing dependency, or
+     version --check found a newer release
   2  doctor found an isolation problem
   3  verify found an assumption that no longer holds
   4  verify could not check something it wanted to check
@@ -2360,7 +2447,7 @@ main() {
         doctor)   cmd_doctor "$@" ;;
         verify)   cmd_verify "$@" ;;
         explain)  cmd_explain "$@" ;;
-        version|--version|-V) cmd_version ;;
+        version|--version|-V) cmd_version "$@" ;;
         help|--help|-h)       cmd_help ;;
         # A bare profile name runs it. Every subcommand is matched above, so
         # a subcommand always wins and a profile can never shadow one: the

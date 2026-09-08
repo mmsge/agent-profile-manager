@@ -4,6 +4,9 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Called by release.yml, so a tag runs exactly the checks a branch runs and
+  # the two cannot drift apart.
+  workflow_call:
 
 jobs:
   test:
