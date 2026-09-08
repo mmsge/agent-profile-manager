@@ -157,6 +157,22 @@ case_picker_runs_the_cli_when_that_is_chosen() {
     assert_not_contains "$out" "open -n -a"
 }
 
+# The third choice covers what neither "desktop app" nor "terminal" does: a
+# pinned interactive subshell, the same thing `shell <profile>` opens.
+case_picker_opens_a_subshell_when_that_is_chosen() {
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    out=$(pick '1
+3
+')
+    assert_contains "$out" "Pinned to bouvet. Type exit to leave." || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_not_contains "$out" "open -n -a" || return
+    # The dry-run line names the shell to pin, not the agent binary: cmd_run
+    # would print "... claude", cmd_shell prints "... $SHELL" instead.
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet claude"
+}
+
 # A stray Return must cancel, not select. Defaulting to the first profile is
 # how someone opens the wrong account without noticing.
 case_picker_cancels_on_an_empty_answer() {
@@ -221,6 +237,7 @@ run_case "D15 quiet when every root is distinct"     case_d15_quiet_when_every_r
 run_case "bare command unchanged without a tty"   case_bare_command_is_unchanged_without_a_terminal
 run_case "picker opens the chosen desktop app"    case_picker_opens_the_chosen_profile_on_the_desktop
 run_case "picker runs the cli when chosen"        case_picker_runs_the_cli_when_that_is_chosen
+run_case "picker opens a subshell when chosen"     case_picker_opens_a_subshell_when_that_is_chosen
 run_case "picker cancels on an empty answer"      case_picker_cancels_on_an_empty_answer
 run_case "picker rejects an out-of-range number"  case_picker_rejects_a_number_out_of_range
 run_case "picker rejects a non-numeric answer"    case_picker_rejects_a_non_numeric_answer
