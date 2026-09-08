@@ -133,8 +133,11 @@ case_remove_lists_everything_left_in_order() {
     retiring_profile bouvet
     register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
     out=$(plain bouvet)
-    got=$(printf '%s\n' "$out" | \
-        sed -n 's/^  \(config root\|app data\|launcher\|credential\) .*/\1/p' | tr '\n' ' ')
+    # grep -E for the alternation and cut for the label column, because BSD sed
+    # has no \| and would quietly match nothing on the platform this targets.
+    got=$(printf '%s\n' "$out" \
+        | grep -E '^  (config root|app data|launcher|credential) ' \
+        | cut -c3-14 | sed 's/  *$//' | tr '\n' ' ')
     assert_equals "config root app data launcher credential " "$got"
 }
 
