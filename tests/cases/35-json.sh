@@ -215,14 +215,39 @@ case_doctor_json_marks_the_keychain_rules_unrun_without_one() {
         "no Keychain"
 }
 
-case_doctor_json_marks_the_desktop_rules_unrun_without_osadecompile() {
+case_doctor_json_is_honest_about_the_desktop_rules() {
+    # D13 and D14 read an applet by decompiling it, so what they can see
+    # depends on osadecompile, which ships with macOS and exists on no Linux
+    # box. Both answers are asserted here rather than one of them skipped: on a
+    # machine that has it the rules must not claim they did not run, and on a
+    # machine that does not they must not claim they passed.
     HOME=$(new_home); export HOME
     json_two_profiles
     out=$("$AP" doctor --json 2>/dev/null)
     assert_json "$out" || return
-    assert_equals "not_run" "$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D13"][0]["status"]')" || return
+    d13=$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D13"][0]["status"]')
+    d14=$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D14"][0]["status"]')
+    if command -v osadecompile >/dev/null 2>&1; then
+        [ "$d13" = "not_run" ] && fail "D13 says not_run though osadecompile is here"
+        [ "$d14" = "not_run" ] && fail "D14 says not_run though osadecompile is here"
+        return
+    fi
+    assert_equals "not_run" "$d13" || return
+    assert_equals "not_run" "$d14" || return
     assert_contains "$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D14"][0]["reason"]')" \
         "osadecompile"
+}
+
+case_doctor_json_runs_the_desktop_rules_when_it_can() {
+    # The other half, made to hold everywhere: with a stand-in osadecompile on
+    # PATH the rules can read an applet, so neither may report not_run.
+    HOME=$(new_home); export HOME
+    json_two_profiles
+    fake_osa "$HOME/fakebin"
+    out=$(PATH="$HOME/fakebin:$PATH" "$AP" doctor --json 2>/dev/null)
+    assert_json "$out" || return
+    assert_equals "pass" "$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D13"][0]["status"]')" || return
+    assert_equals "" "$(json_get "$out" '[r for r in d["rules"] if r["rule"] == "D13"][0]["reason"]')"
 }
 
 case_doctor_report_writes_both_files() {
@@ -328,7 +353,8 @@ run_case "doctor --json lists every rule"              case_doctor_json_lists_ev
 run_case "doctor --json never calls D12 passing"       case_doctor_json_does_not_call_an_unrun_rule_passing
 run_case "doctor --json reports D12 once it runs"      case_doctor_json_reports_d12_once_it_has_run
 run_case "doctor --json marks D05, D11 and D12"        case_doctor_json_marks_the_keychain_rules_unrun_without_one
-run_case "doctor --json marks D13 and D14 unrun"       case_doctor_json_marks_the_desktop_rules_unrun_without_osadecompile
+run_case "doctor --json is honest about D13 and D14"   case_doctor_json_is_honest_about_the_desktop_rules
+run_case "doctor --json runs D13 when it can"          case_doctor_json_runs_the_desktop_rules_when_it_can
 run_case "doctor --report writes both files"           case_doctor_report_writes_both_files
 run_case "doctor --report keeps one extension"         case_doctor_report_does_not_double_the_extension
 run_case "doctor --report refuses an unwritable path"  case_doctor_report_refuses_a_path_it_cannot_write
