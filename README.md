@@ -798,7 +798,7 @@ offender, so it works from a cron entry or a shell hook.
 | D09 | A `claude-cli://` handler is installed and cannot be pinned |
 | D10 | A stored root is not in the form its credential is keyed on |
 | D11 | A credential exists for the default root, so something ran pinned to it |
-| D12 | Keychain credential entries belong to no known root |
+| D12 | Keychain credential entries belong to no known root (only with `--keychain-scan`) |
 | D13 | A desktop launcher does not pin its profile |
 | D14 | A desktop launcher exists that no profile claims |
 | D15 | More than one profile is registered at the same root |
@@ -807,6 +807,44 @@ The reasoning behind the trickier rules, D05's exact Keychain check, D13 and
 D14 on the desktop side, and D03's use of each transcript's own working
 directory, is in
 [The audit, rule by rule](docs/DESIGN.md#the-audit-rule-by-rule).
+
+## What doctor reads
+
+Every rule reads only what it needs to answer one yes or no question, and
+this table says what that is: which files and directories it looks at, which
+Keychain query it makes, and which external command it runs, if any.
+
+| Rule | Reads |
+| --- | --- |
+| D01 | Whether the default root exists, and a count of `*.jsonl` filenames under `<default root>/projects` (names only, not their content), plus the registry, to see whether a profile claims that root. |
+| D02 | Whether the agent state file beside the default root exists and sits outside every registered root. When it does, the `oauthAccount` block of that file: the account's email and organisation id, the same identity `list` already prints. |
+| D03 | Every transcript (`*.jsonl`) under each registered root's `projects` directory, read line by line only until the first record carrying a `cwd` field. Only that field is kept; the rest of the transcript, including its conversation content, is never read. |
+| D04 | The registry, and whether each registered root exists on disk. |
+| D05 | On macOS, whether a Keychain entry named `<service>-<hash>` exists for the profile's root (attributes only, via `security find-generic-password`), and whether `.credentials.json` exists in the root (existence only, never opened). Without a Keychain, falls back to the same `oauthAccount` block D02 reads, but from the profile's own root rather than the stray file's location. |
+| D06 | The directory listing of `$HOME` for entries matching the agent's root prefix (`.claude-*`), and the registry, to see which are unclaimed. |
+| D07 | The file mode of each registered root and its app data directory, via `stat`. No file content. |
+| D08 | The directory listing under `<root>/projects`. Directory names only, not the transcripts inside them. |
+| D09 | Whether the deep-link handler bundle exists on disk. |
+| D10 | The registry's stored root string, compared against its own canonical form. A string comparison, no filesystem or Keychain read. |
+| D11 | On macOS, whether a Keychain entry exists for the default root's own service name (attributes only, via `security find-generic-password`). |
+| D12, only with `--keychain-scan` | The entire login Keychain's item list, via `security dump-keychain`. Attributes only, specifically the `svce` field of each entry; no entry's secret data is read. |
+| D13 | The AppleScript source of the applet named in the profile's registry entry, or its default conventional path if none is registered, decompiled with `osadecompile`. Only its single `do shell script` launch line is read. |
+| D14 | Every `.app` bundle up to five levels deep under `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop` and `/Applications`) whose compiled script mentions the agent's config variable, decompiled the same way as D13. |
+| D15 | The registry only. No filesystem or Keychain access. |
+
+No rule ever reads a credential value. The two Keychain queries above,
+`find-generic-password` and `dump-keychain`, both stop at attributes; neither
+is ever called with `-g` or `-w`, which is what would print a secret. The
+account identity read by D02 and D05 is an email address and an organisation
+id, not a token, and it is the same identity `list` already shows on every
+run.
+
+This table is written by hand, not generated. Keeping it honest right now
+means updating it in the same change that changes what a rule reads, the way
+this pull request does for D12. A generator that reads a structured comment
+above each rule and rebuilds this table, checked by a test that regenerating
+produces no diff, is the natural next step and is not done here; see the
+pull request that introduced this table for that scoping.
 
 ## Exit codes
 
@@ -933,7 +971,7 @@ the desktop.
 ## Development
 
 ```sh
-tests/run.sh              # 177 tests, no dependencies
+tests/run.sh              # 179 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

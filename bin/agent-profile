@@ -1312,6 +1312,15 @@ finding() {
 }
 
 cmd_doctor() {
+    _doc_keychain_scan=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --keychain-scan) _doc_keychain_scan=1 ;;
+            *) die "doctor: unknown option '$1' (try: $SELF doctor --keychain-scan)" ;;
+        esac
+        shift
+    done
+
     need python3
     DOCTOR_FINDINGS=0
     _doc_names=$(profile_names)
@@ -1601,7 +1610,12 @@ cmd_doctor() {
             "path: open the project through a pinned shell instead of clicking them."
     done
 
-    # ---- D11, D12: what the Keychain says --------------------------------
+    # ---- D11: what the Keychain says about the default root ---------------
+    #
+    # doctor reads (D11):
+    #   keychain query: security find-generic-password, one named service per
+    #     known agent (the default root's own credential service). Attributes
+    #     only, via keychain_has; the credential value is never read.
     if keychain_available; then
         for _doc_agent in $KNOWN_AGENTS; do
             _doc_base=$(agent_def "$_doc_agent" cred_service)
@@ -1623,29 +1637,51 @@ cmd_doctor() {
                     "it unset: it is a separate login, stored under a separate entry." \
                     "The unpinned login is '$_doc_base' with no suffix."
             fi
-
-            # D12. Entries whose suffix matches no root on this machine. The
-            # hash is one-way, so these can only be reported, never resolved.
-            _doc_known="$_doc_base
-$_doc_base-$_doc_dhash"
-            for _doc_name in $_doc_names; do
-                _doc_r=$(reg_get "$_doc_name" root)
-                [ -n "$_doc_r" ] || continue
-                _doc_known="$_doc_known
-$_doc_base-$(cred_info "$_doc_r" | cut -f2)"
-            done
-
-            _doc_orphans=$(keychain_services \
-                | grep -c -F -x -v -f <(printf '%s\n' "$_doc_known") 2>/dev/null)
-            if [ "${_doc_orphans:-0}" -gt 0 ]; then
-                finding "D12" "$_doc_orphans Keychain credential entr(ies) belong to no known root" \
-                    "service prefix: $_doc_base-" \
-                    "Left over from roots that no longer exist, or from roots this tool" \
-                    "does not know about. The suffix is a one-way hash, so they cannot be" \
-                    "traced back to a path. Harmless, but they accumulate." \
-                    "This tool will not delete them: it never touches credentials."
-            fi
         done
+
+        # ---- D12: orphaned Keychain entries, opt-in ------------------------
+        #
+        # doctor reads (D12, only with --keychain-scan):
+        #   keychain query: security dump-keychain, which enumerates every
+        #     item in the login Keychain. keychain_services reads only the
+        #     "svce" attribute of each; the credential value is never read.
+        #
+        # This is the one Keychain check that does not name a single service:
+        # it walks the whole Keychain, which is slow when it holds a lot of
+        # items and is worth asking about before it runs. D05 and D11 stay
+        # unconditional because each of them queries one named service.
+        if [ -n "$_doc_keychain_scan" ]; then
+            for _doc_agent in $KNOWN_AGENTS; do
+                _doc_base=$(agent_def "$_doc_agent" cred_service)
+                _doc_default=$(agent_def "$_doc_agent" default_root)
+
+                # Entries whose suffix matches no root on this machine. The
+                # hash is one-way, so these can only be reported, never
+                # resolved.
+                _doc_dhash=$(cred_info "$_doc_default" | cut -f2)
+                _doc_known="$_doc_base
+$_doc_base-$_doc_dhash"
+                for _doc_name in $_doc_names; do
+                    _doc_r=$(reg_get "$_doc_name" root)
+                    [ -n "$_doc_r" ] || continue
+                    _doc_known="$_doc_known
+$_doc_base-$(cred_info "$_doc_r" | cut -f2)"
+                done
+
+                _doc_orphans=$(keychain_services \
+                    | grep -c -F -x -v -f <(printf '%s\n' "$_doc_known") 2>/dev/null)
+                if [ "${_doc_orphans:-0}" -gt 0 ]; then
+                    finding "D12" "$_doc_orphans Keychain credential entr(ies) belong to no known root" \
+                        "service prefix: $_doc_base-" \
+                        "Left over from roots that no longer exist, or from roots this tool" \
+                        "does not know about. The suffix is a one-way hash, so they cannot be" \
+                        "traced back to a path. Harmless, but they accumulate." \
+                        "This tool will not delete them: it never touches credentials."
+                fi
+            done
+        else
+            printf 'Orphaned Keychain entries were not checked (D12). Run "%s doctor --keychain-scan" to check them.\n\n' "$SELF"
+        fi
     fi
 
     # ---- D03: the same project under two roots ----------------------------
@@ -2395,7 +2431,12 @@ SHELL
                             eval "$(@SELF@ guard)"
 
 AUDIT
-  doctor                  Check that the profiles are actually isolated.
+  doctor [--keychain-scan]
+                          Check that the profiles are actually isolated.
+                          --keychain-scan also enumerates the whole login
+                          Keychain for orphaned entries (D12), which reads
+                          every item's attributes and is slow on a large
+                          Keychain, so it is off by default.
   verify                  Re-check the behavioural assumptions this tool rests on.
   explain                 Explain the scheme and where each profile's data lives.
 

@@ -107,7 +107,7 @@ case_d12_counts_orphaned_entries() {
         "$(cred_service_for "$HOME/.claude-bouvet")" \
         "Claude Code-credentials-deadbeef" \
         "Claude Code-credentials-cafef00d"
-    out=$(mac doctor 2>&1)
+    out=$(mac doctor --keychain-scan 2>&1)
     assert_contains "$out" "D12" || return
     assert_contains "$out" "2 Keychain credential"
 }
@@ -116,7 +116,29 @@ case_d12_quiet_when_every_entry_is_known() {
     HOME=$(new_home); export HOME
     signed_in_profile
     fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
-    assert_not_contains "$(mac doctor 2>&1)" "D12"
+    assert_not_contains "$(mac doctor --keychain-scan 2>&1)" "D12"
+}
+
+case_d12_not_checked_without_the_flag() {
+    # D12 walks the whole Keychain, unlike D05 and D11 which query one named
+    # service each. Without --keychain-scan it must not run, and doctor must
+    # say plainly that it did not.
+    HOME=$(new_home); export HOME
+    signed_in_profile
+    fake_keychain "$HOME/fakebin" \
+        "$(cred_service_for "$HOME/.claude-bouvet")" \
+        "Claude Code-credentials-deadbeef"
+    out=$(mac doctor 2>&1)
+    assert_not_contains "$out" "belong to no known root" || return
+    assert_contains "$out" "were not checked" || return
+    assert_contains "$out" "--keychain-scan"
+}
+
+case_doctor_rejects_an_unknown_option() {
+    HOME=$(new_home); export HOME
+    out=$(mac doctor --bogus 2>&1); status=$?
+    assert_status 1 "$status" || return
+    assert_contains "$out" "unknown option"
 }
 
 case_verify_checks_the_keychain_naming() {
@@ -192,6 +214,8 @@ run_case "D11 reports a default-root credential"        case_d11_reports_a_crede
 run_case "D11 quiet without that entry"                 case_d11_quiet_without_that_entry
 run_case "D12 counts orphaned entries"                  case_d12_counts_orphaned_entries
 run_case "D12 quiet when every entry is known"          case_d12_quiet_when_every_entry_is_known
+run_case "D12 not checked without the flag"             case_d12_not_checked_without_the_flag
+run_case "doctor rejects an unknown option"             case_doctor_rejects_an_unknown_option
 run_case "verify checks the Keychain naming"            case_verify_checks_the_keychain_naming
 run_case "verify catches the naming changing"           case_verify_catches_the_naming_changing
 run_case "new normalises a trailing slash"              case_new_normalises_a_trailing_slash
