@@ -282,6 +282,7 @@ report_prose() {
                 ok)        _rp_label="ok" ;;
                 broken)    _rp_label="BROKEN" ;;
                 unchecked) _rp_label="unchecked" ;;
+                note)      _rp_label="note" ;;
                 *)         _rp_label="$1" ;;
             esac
             printf '  %-10s%s  %s\n' "$_rp_label" "$2" "$3"
