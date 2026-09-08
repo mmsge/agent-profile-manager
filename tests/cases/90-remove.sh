@@ -78,14 +78,16 @@ rm_doctor() {
         "$AP" doctor 2>&1
 }
 
-# rm_doctor_mac: the same, as if on macOS against a stand-in Keychain.
+# rm_doctor_mac: the same, as if on macOS against a stand-in Keychain. D12 is
+# opt-in, so the scan has to be asked for; without --keychain-scan doctor never
+# enumerates the Keychain and the orphaned credential is not reported.
 rm_doctor_mac() {
     PATH="$HOME/fakebin:$PATH" \
     AGENT_PROFILE_PLATFORM=Darwin \
     USER=tester \
     AGENT_PROFILE_APP_BUNDLE="$HOME/Claude.app" \
     AGENT_PROFILE_APPLET_DIRS="$HOME/Applications:$HOME/Desktop" \
-        "$AP" doctor 2>&1
+        "$AP" doctor --keychain-scan 2>&1
 }
 
 # ---------------------------------------------------------------------------
