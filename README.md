@@ -569,10 +569,10 @@ Verifying by hand, if you want to see it work:
 ```sh
 shasum -a 256 -c SHA256SUMS
 cosign verify-blob \
-    --bundle agent-profile-0.7.1.tar.gz.sigstore \
+    --bundle agent-profile-0.8.0.tar.gz.sigstore \
     --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    agent-profile-0.7.1.tar.gz
+    agent-profile-0.8.0.tar.gz
 ```
 
 ### Homebrew
@@ -591,7 +591,7 @@ See [`packaging/homebrew/README.md`](packaging/homebrew/README.md).
 ### Options
 
 ```sh
-tools/install.sh --version v0.7.1   # a named release rather than the newest
+tools/install.sh --version v0.8.0   # a named release rather than the newest
 tools/install.sh --prefix ~/bin     # where the two links go
 tools/install.sh --name apx         # a different short command name
 tools/install.sh --uninstall        # remove the links, and nothing else
@@ -1078,8 +1078,8 @@ merge commit:
 
 ```sh
 git checkout hovud && git pull
-git tag -s v0.7.1 -m "agent-profile 0.7.1"
-git push origin v0.7.1
+git tag -s v0.8.0 -m "agent-profile 0.8.0"
+git push origin v0.8.0
 ```
 
 `-s` makes it a signed annotated tag, which needs a signing key configured;

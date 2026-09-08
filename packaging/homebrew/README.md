@@ -58,7 +58,7 @@ The release workflow publishes `SHA256SUMS` beside the tarball, so the sum is
 read rather than computed by hand.
 
 ```sh
-version=0.7.1
+version=0.8.0
 base=https://github.com/mmsge/agent-profile-manager/releases/download/v$version
 sum=$(curl -fsSL "$base/SHA256SUMS" | awk '$2 == "agent-profile-'"$version"'.tar.gz" { print $1 }')
 echo "$sum"

@@ -12,8 +12,8 @@
 class Agpin < Formula
   desc "Keep several AI agent accounts apart on one Mac, and audit that they stay apart"
   homepage "https://github.com/mmsge/agent-profile-manager"
-  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.7.1/agent-profile-0.7.1.tar.gz"
-  version "0.7.1"
+  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.8.0/agent-profile-0.8.0.tar.gz"
+  version "0.8.0"
 
   # PLACEHOLDER. Replace with the sum from the release's SHA256SUMS the first
   # time this formula points at a real release, and on every release after
