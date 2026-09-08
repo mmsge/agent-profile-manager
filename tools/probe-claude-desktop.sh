@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # probe-claude-desktop.sh: answer the questions agent-profile cannot answer
 # from documentation, on a real Mac.

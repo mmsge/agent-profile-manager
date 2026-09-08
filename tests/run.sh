@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317,SC2329  # helpers are called from the sourced case files
 # shellcheck disable=SC2016  # fake_keychain generates script text; it must not expand here
 #
