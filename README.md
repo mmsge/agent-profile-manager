@@ -768,7 +768,11 @@ It is printed rather than installed, and re-derived on every shell start, for
 the same reason the prompt label is: a copy in a dotfile drifts from the tool,
 and this one would drift silently. That prompt label, and the one root where
 it has to work differently, are explained in
-[A prompt that cannot lie](docs/DESIGN.md#a-prompt-that-cannot-lie).
+[A prompt that cannot lie](docs/DESIGN.md#a-prompt-that-cannot-lie). If the
+label in `PROMPT=` above is calling `agpin` on every command more often than
+you would like, [Faster: caching the label per
+shell](docs/DESIGN.md#faster-caching-the-label-per-shell) has a zsh and a
+starship form that only call out when `CLAUDE_CONFIG_DIR` actually changes.
 
 **fish gets its own form**, because fish functions are not bash or zsh
 functions:
@@ -1247,10 +1251,16 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 294 tests, no dependencies
+tests/run.sh              # 295 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
+
+That count is generated, not typed by hand: after adding or removing tests,
+run `tools/gen-test-count.sh` and commit the README.md change it makes. `tools/gen-test-count.sh --check` is what CI runs; it fails, naming
+both the suite's count and README.md's, if the two disagree. Nobody has to
+compute the number by hand again, which is what used to make this line
+collide between branches that both added tests.
 
 CI runs the suite on macOS under both `/bin/bash` (the real 3.2) and Homebrew's
 latest bash. Tests never touch a real config root: every path the script

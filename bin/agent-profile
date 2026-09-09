@@ -11,6 +11,70 @@
 
 set -u
 
+# ---------------------------------------------------------------------------
+# Fast path: `which --label`
+#
+# The README puts this in a shell prompt, so it runs once per command typed
+# rather than once per invocation of this tool the way every other subcommand
+# does. Every subcommand pays for bash parsing this whole file first, and
+# `which --label` needs almost none of what that parsing produces: it reads
+# one environment variable and, for one narrow case, one registry file.
+# Measured under bash 3.2 on macOS and recorded in docs/FACTS.md, that parsing
+# cost was well past the point a prompt should spend on every command.
+#
+# This sits before every function definition on purpose. Bash reads a script
+# as it runs it, one top-level construct at a time, so exiting here means the
+# interpreter never reaches `agent_def`, `cmd_which`, or anything else below:
+# none of it gets read, let alone parsed. Move this block past even one
+# function definition and that saving is gone, because parsing a function
+# costs the same whether or not it is ever called.
+#
+# It duplicates the single-agent slice of `label_for_root` and
+# `profile_claiming_root` (further down) rather than calling them, since
+# calling either would require them to exist yet, which is the one thing this
+# block cannot ask for. Keep the two in step: `KNOWN_AGENTS` is "claude" alone
+# today, and if a second agent is ever added there, this block needs the same
+# case added, or `which --label` stops seeing that agent while the slow path
+# (a bare `which`, or a first argument other than `--label`) still does.
+#
+# The guarantee label_for_root documents holds here unchanged: the label is
+# derived from $CLAUDE_CONFIG_DIR fresh on every call, nothing is ever written,
+# and the one file this can read is a registry entry's `root=` line, never a
+# credential or an agent state file.
+if [ "${1:-}" = "which" ] && [ "${2:-}" = "--label" ]; then
+    _fp_root=${CLAUDE_CONFIG_DIR:-}
+    [ -n "$_fp_root" ] || exit 1
+
+    _fp_base=${_fp_root##*/}
+    case "$_fp_base" in
+        .claude-*)
+            printf '%s\n' "${_fp_base#.claude-}"
+            exit 0
+            ;;
+    esac
+
+    # The default root is the one root whose basename says nothing at all
+    # (".claude"), so for that root alone the registered name is used
+    # (docs/FACTS.md F06; see label_for_root below for the full reasoning).
+    # Every other root never touches the registry.
+    if [ "$_fp_root" = "$HOME/.claude" ]; then
+        _fp_reg=${AGENT_PROFILE_REGISTRY:-$HOME/.config/agent-profiles}
+        if [ -d "$_fp_reg" ]; then
+            for _fp_conf in "$_fp_reg"/*.conf; do
+                [ -f "$_fp_conf" ] || continue
+                if [ "$(sed -n 's/^root=//p' "$_fp_conf" | head -1)" = "$_fp_root" ]; then
+                    _fp_name=${_fp_conf##*/}
+                    printf '%s\n' "${_fp_name%.conf}"
+                    exit 0
+                fi
+            done
+        fi
+    fi
+
+    printf '%s\n' "$_fp_base"
+    exit 0
+fi
+
 AGENT_PROFILE_VERSION="0.8.0"
 AGENT_PROFILE_LICENSE="GPL-3.0-or-later"
 
@@ -855,6 +919,10 @@ profile_claiming_root() {
 # profile's registry entry and its label does follow. The alternative is a
 # prompt that says ".claude" and names no account, which is worse. Every other
 # root keeps the guarantee, and the test suite pins that boundary.
+#
+# The fast path near the top of this file duplicates this logic for the one
+# agent known today, so that `which --label` never reaches this function at
+# all. Change the reasoning here and that block needs the same change.
 label_for_root() {
     _lfr_prefix=$(agent_def "$1" root_prefix)
     _lfr_base=${2##*/}

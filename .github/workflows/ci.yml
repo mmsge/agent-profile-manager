@@ -70,34 +70,22 @@ jobs:
             "${{ steps.sh.outputs.path }}" -n "$f"
           done
 
-      # The suite's own "<n> test(s), <n> failure(s)" line and the count in
-      # README.md's Development section must agree, or the two have drifted
-      # and one of them is lying. Parsed at runtime on both sides: a number
-      # hard-coded here would itself become the next thing to drift.
       - name: Run the suite
         run: |
           set -o pipefail
           "${{ steps.sh.outputs.path }}" tests/run.sh | tee /tmp/test-output.txt
 
-          # sed, not grep: sed exits 0 whether or not a line matches, so a
-          # missing or reworded line falls through to the checks below
-          # instead of failing the step with no explanation.
-          reported=$(sed -n 's/^\([0-9][0-9]*\) test(s), .*/\1/p' /tmp/test-output.txt | tail -1)
-          documented=$(sed -n 's/^tests\/run\.sh[[:space:]][[:space:]]*# \([0-9][0-9]*\) tests.*/\1/p' README.md | tail -1)
-
-          if [ -z "$reported" ]; then
-            echo "could not find the '<n> test(s), <n> failure(s)' summary line in tests/run.sh's output" >&2
-            exit 1
-          fi
-          if [ -z "$documented" ]; then
-            echo "could not find the test count in README.md's Development section" >&2
-            exit 1
-          fi
-          if [ "$reported" != "$documented" ]; then
-            echo "tests/run.sh reports $reported tests but README.md's Development section says $documented; update README.md" >&2
-            exit 1
-          fi
-          echo "test count agrees with README.md: $reported"
+      # The suite's own "<n> test(s), <n> failure(s)" line and the count in
+      # README.md's Development section must agree, or the two have drifted
+      # and one of them is lying. tools/gen-test-count.sh is the one place
+      # that parses both sides, so a contributor checking this locally and CI
+      # checking it here can never disagree about what "agrees" means; a
+      # number hard-coded into this workflow would itself become the next
+      # thing to drift. --from reads the run above instead of running the
+      # suite twice.
+      - name: Test count matches README.md
+        run: |
+          "${{ steps.sh.outputs.path }}" tools/gen-test-count.sh --check --from /tmp/test-output.txt
 
   lint:
     runs-on: ubuntu-latest
@@ -113,4 +101,4 @@ jobs:
         run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 
       - name: Refuse bash 4 constructs
-        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tests/run.sh
+        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tests/run.sh
