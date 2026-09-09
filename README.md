@@ -285,11 +285,18 @@ unpinned. Know what is still open, one honest sentence each:
   regardless of what is pinned; `doctor`'s D09 flags that the handler is
   installed, and the only mitigation is to open the project from a pinned
   shell instead of clicking the link.
-- **IDE extensions that spawn the CLI from the IDE process.** An extension
-  that execs `claude` directly, rather than through your shell, never passes
-  through the `guard` function, so it runs with whatever `CLAUDE_CONFIG_DIR`
-  the IDE's own process happens to have, usually none; check the extension's
-  own environment settings if it needs to be pinned.
+- **An IDE opened any way but `agpin code` or `agpin idea`.** The Claude Code
+  extension takes its config root from the IDE's own process environment, so an
+  IDE started from the Dock, Spotlight, Launchpad or a login item runs it
+  unpinned; `agpin code <profile> [path]` and `agpin idea <profile> [path]` are
+  the only launches that carry a root, `doctor`'s D16 reports that an extension
+  is installed, and `docs/FACTS.md` F19 to F21 record what each family does.
+- **An IDE extension pinned by its own settings rather than by its launch.**
+  VS Code's `claudeCode.environmentVariables` does reach the agent the
+  extension spawns, but not the extension's own config home, so its settings,
+  plans, session registry and lock file stay on the default root; the JetBrains
+  plugin's **Config directory** setting pins nothing at all and only chooses
+  where the plugin writes its lock file. Pin the launch, not the setting.
 - **Direct launches of the desktop app from Spotlight, Launchpad, the Dock or
   login items.** Only the generated applet's `open --env` line injects a
   config root, so launching `Claude.app` itself by any other route starts it
@@ -682,6 +689,8 @@ agent-profile doctor --report audit  # audit.json and audit.md, dated, to hand o
 agent-profile version --check     # am I running the newest release?
 agent-profile desktop bouvet      # launch the desktop app pinned
 agent-profile app bouvet          # build its Dock launcher
+agent-profile code bouvet ~/src/x   # launch VS Code pinned, --app Cursor for Cursor
+agent-profile idea bouvet ~/src/x   # the same for the JetBrains IDEs
 eval "$(agent-profile guard)"     # refuse to run the agent unpinned
 claude bouvet                     # with the guard on, this pins and runs
 eval "$(agent-profile completion bash)"  # tab-complete commands and profiles
@@ -840,6 +849,48 @@ A profile has two identities that can disagree with each other, the app's own
 login and the config root its embedded Claude Code writes to; see
 [Two identities, and they can disagree](docs/DESIGN.md#two-identities-and-they-can-disagree).
 
+## The IDEs
+
+An IDE extension is the launch path nobody watches. It starts a Claude Code
+session from inside the editor, so your shell never runs, the `guard` function
+is never consulted, and no applet is involved. What the session gets is
+whatever the IDE's own process environment holds, and an IDE opened from the
+Dock, Spotlight, Launchpad or a login item holds no `CLAUDE_CONFIG_DIR` at all.
+
+```sh
+agent-profile code bouvet ~/src/some-project      # VS Code
+agent-profile code bouvet ~/src/x --app Cursor    # Cursor, same family
+agent-profile idea bouvet ~/src/some-project      # IntelliJ IDEA
+agent-profile idea bouvet --app PyCharm           # any JetBrains IDE
+```
+
+These are the same mechanism as `desktop`, `open --env` in front of `--args`,
+and for the same reason: the pin has to be in the process environment and
+nothing else puts it there. `-n` is not decoration. Without it `open` hands the
+path to the IDE already running, which is the unpinned one you are trying to
+get away from, and a second window is the price of the pin applying at all.
+
+**`doctor` reports an installed extension as D16 every time.** Nothing on disk
+records how an IDE was launched, so the rule cannot know whether this one was
+pinned, and a rule that guessed would be worse than one that says what it
+found. Treat D16 the way you treat D09: a launch path that exists, with a
+supported way to use it safely.
+
+The two families are not the same underneath, and the finding says so. The VS
+Code extension bundles its own copy of Claude Code and spawns it from the
+extension host, so no rc file is ever read and a shell guard cannot see it. The
+JetBrains plugin bundles nothing: it types `claude` into the IDE's integrated
+terminal, so your rc file does run and your guard does see that call. What it
+still cannot fix is the root the IDE process started with.
+
+**Do not pin an IDE with the extension's own settings.** VS Code's
+`claudeCode.environmentVariables` reaches the agent the extension spawns but
+not the extension's own config home, so half of it moves and half of it does
+not. The JetBrains plugin's **Config directory** setting looks like a pin and
+is not one: it only chooses where the plugin writes its lock file. The full
+reading of both, with the code each claim comes from, is
+[F19 to F21](docs/FACTS.md#ide-extensions).
+
 ## The audit
 
 `doctor` is the command this tool exists for. It exits non-zero and names the
@@ -862,6 +913,7 @@ offender, so it works from a cron entry or a shell hook.
 | D13 | A desktop launcher does not pin its profile |
 | D14 | A desktop launcher exists that no profile claims |
 | D15 | More than one profile is registered at the same root |
+| D16 | A Claude Code IDE extension is installed and cannot be pinned |
 
 The reasoning behind the trickier rules, D05's exact Keychain check, D13 and
 D14 on the desktop side, and D03's use of each transcript's own working
@@ -939,6 +991,7 @@ Keychain query it makes, and which external command it runs, if any.
 | D13 | The AppleScript source of the applet named in the profile's registry entry, or its default conventional path if none is registered, decompiled with `osadecompile`. Only its single `do shell script` launch line is read. |
 | D14 | Every `.app` bundle up to five levels deep under `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop` and `/Applications`) whose compiled script mentions the agent's config variable, decompiled the same way as D13. |
 | D15 | The registry only. No filesystem or Keychain access. |
+| D16 | Directory names one level under `~/.vscode/extensions` and `~/.cursor/extensions`, and one level under `~/Library/Application Support/JetBrains`, `~/Library/Application Support` and `~/Library/Application Support/Google` for a `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in an extension is ever opened, and the IDE's own `--list-extensions` is deliberately not run. |
 
 No rule ever reads a credential value. The two Keychain queries above,
 `find-generic-password` and `dump-keychain`, both stop at attributes; neither
@@ -1112,9 +1165,16 @@ content, and answers the questions that need a real Mac. Paste its output into
 
 "After an update" is a per-profile question rather than a per-machine one. Each
 desktop profile downloads its own copy of Claude Code under its app data
-directory, so they update independently of each other and of the CLI. There is
-no single agent version on a machine like this, and an assumption can break for
-one profile while holding for the rest.
+directory, so they update independently of each other and of the CLI. The VS
+Code extension is a third case: it bundles a copy of its own and updates with
+the extension. There is no single agent version on a machine like this, and an
+assumption can break for one profile while holding for the rest.
+
+If an IDE extension is installed, the leak test settles it there too. Launch
+with `agent-profile code <name> <path>`, start a session, and run the `find`
+above; then launch the same IDE from the Dock and run it again. The two answers
+should differ, and if they stop differing, F19 has changed and D16's advice is
+wrong.
 
 `agent-profile explain` states the scheme in plain language and shows where this
 machine's data currently lives, for when you come back to this in six months.
@@ -1180,13 +1240,13 @@ find "$HOME"/.claude* -name '*.jsonl' -mmin -3
 ```
 
 The path it prints is the root that is really in use. It needs no throwaway
-root, no probe and no documentation, and it works the same for the terminal and
-the desktop.
+root, no probe and no documentation, and it works the same for the terminal,
+the desktop and an IDE.
 
 ## Development
 
 ```sh
-tests/run.sh              # 268 tests, no dependencies
+tests/run.sh              # 294 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

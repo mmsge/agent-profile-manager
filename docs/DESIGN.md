@@ -87,6 +87,26 @@ mentions the config-dir variable, and reports any that no profile names, saying
 which profile owns the root it pins. Set `AGENT_PROFILE_APPLET_DIRS` to search
 elsewhere; it is colon-separated like `PATH`.
 
+D16 is D09's shape applied to the IDEs: a launch path that exists, that this
+tool cannot pin unless the thing starting it was itself started pinned, and
+that nothing on disk records the launch of. So it reports an installed
+extension every time and names `code` or `idea` rather than guessing. It reads
+directory names under the two VS Code family extension directories and the
+three JetBrains config roots, and it deliberately does not run the IDE's own
+`--list-extensions`, which would be the authoritative answer: an audit reads
+the filesystem and asks the Keychain about named services, and starting an IDE
+binary to answer a question is a different class of act. `docs/FACTS.md` F21
+records exactly what that costs, which is every install whose extensions
+directory has been moved.
+
+Its prose differs by family because the mechanism does. The VS Code extension
+bundles its own copy of the agent and spawns it from the extension host, so no
+rc file is read and a shell guard cannot see it. The JetBrains plugin bundles
+nothing and types the command into the IDE's integrated terminal, so a guard
+does see it. A single wording would be wrong for one family or the other, and
+telling a JetBrains user their guard is bypassed sends them hunting for a leak
+that is not there.
+
 D03 is the one that catches real leakage, and it needs no configuration. Claude
 Code names a project directory after the working directory with every
 non-alphanumeric character replaced by `-`, so `my_repo`, `my-repo` and
@@ -119,7 +139,8 @@ explanatory mode is a threshold and a flag rather than a rewrite.
 The one thing the document has that the prose does not is the rule ledger:
 every rule with a status, not only the ones that fired. That exists because a
 rule can fail to run. `D12` is opt-in behind `--keychain-scan`, `D11` and `D12`
-need a Keychain, `D13` and `D14` need `osadecompile`. Silence from a check that
+need a Keychain, `D13` and `D14` need `osadecompile`, and `D16` knows where a
+JetBrains IDE keeps its plugins on macOS only. Silence from a check that
 never ran looks exactly like silence from a check that passed, and a document
 handed to a customer's security officer is the worst possible place for that
 confusion. `not_run` and `limited` are statuses of their own, each carrying the
