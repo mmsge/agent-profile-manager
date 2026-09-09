@@ -1195,6 +1195,13 @@ shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
 
+The `268` above is generated, not typed by hand: after adding or removing
+tests, run `tools/gen-test-count.sh` and commit the README.md change it
+makes. `tools/gen-test-count.sh --check` is what CI runs; it fails, naming
+both the suite's count and README.md's, if the two disagree. Nobody has to
+compute the number by hand again, which is what used to make this line
+collide between branches that both added tests.
+
 CI runs the suite on macOS under both `/bin/bash` (the real 3.2) and Homebrew's
 latest bash. Tests never touch a real config root: every path the script
 resolves comes from `HOME` or an `AGENT_PROFILE_*` variable, and the harness
