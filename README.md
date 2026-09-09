@@ -599,10 +599,10 @@ Verifying by hand, if you want to see it work:
 ```sh
 shasum -a 256 -c SHA256SUMS
 cosign verify-blob \
-    --bundle agent-profile-0.8.0.tar.gz.sigstore \
+    --bundle agent-profile-0.9.0.tar.gz.sigstore \
     --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    agent-profile-0.8.0.tar.gz
+    agent-profile-0.9.0.tar.gz
 ```
 
 ### Homebrew
@@ -621,7 +621,7 @@ See [`packaging/homebrew/README.md`](packaging/homebrew/README.md).
 ### Options
 
 ```sh
-tools/install.sh --version v0.8.0   # a named release rather than the newest
+tools/install.sh --version v0.9.0   # a named release rather than the newest
 tools/install.sh --prefix ~/bin     # where the two links go
 tools/install.sh --name apx         # a different short command name
 tools/install.sh --uninstall        # remove the links, and nothing else
@@ -1309,8 +1309,8 @@ there are two ways to cut the release, and they end in the same place.
 
 ```sh
 git checkout hovud && git pull
-git tag -s v0.8.0 -m "agent-profile 0.8.0"
-git push origin v0.8.0
+git tag -s v0.9.0 -m "agent-profile 0.9.0"
+git push origin v0.9.0
 ```
 
 `-s` makes it a signed annotated tag, which needs a signing key configured;
@@ -1319,7 +1319,7 @@ the release, and the Sigstore bundle records what the workflow then built from
 it. Those answer different questions, so do both.
 
 **By hand, from the Actions tab.** Run the Release workflow on `hovud` and give
-it the version without the leading `v`, for example `0.8.0`. It creates the tag
+it the version without the leading `v`, for example `0.9.0`. It creates the tag
 itself and carries on. This exists because pushing a tag needs git write access
 to this repository, and whoever is cutting the release does not always have it
 from where they are: a borrowed machine, a phone, an agent working through an
