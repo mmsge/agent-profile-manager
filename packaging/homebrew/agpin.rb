@@ -15,11 +15,12 @@ class Agpin < Formula
   url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.8.0/agent-profile-0.8.0.tar.gz"
   version "0.8.0"
 
-  # PLACEHOLDER. Replace with the sum from the release's SHA256SUMS the first
-  # time this formula points at a real release, and on every release after
-  # that. Sixty-four zeros is not a sum anything can produce, so a formula that
-  # still carries it fails loudly rather than installing something unchecked.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  # From the v0.8.0 release's own SHA256SUMS, and checked three ways before it
+  # was written here: against the tarball downloaded from the release, against
+  # the digest GitHub reports for that asset, and against a tarball rebuilt
+  # from the v0.8.0 tag on a different machine, which reproduced this sum
+  # exactly. Replace it on every release, from that release's SHA256SUMS.
+  sha256 "96e7121202621c586f9e92ec14d2928d5b6758c537789fb8eb4d23dca6258831"
 
   # Homebrew audits for this, and it must match the LICENSE file at the
   # repository root.
