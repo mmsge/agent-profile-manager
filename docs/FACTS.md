@@ -554,6 +554,17 @@ stop it. `agent-profile code` now refuses to launch into a running editor and
 offers `--new-instance`, which uses a separate `--user-data-dir` so the
 instance cannot be forwarded to.
 
+Both halves of that fix were then confirmed on the same Mac, later the same
+day. With VS Code open, `agent-profile code <profile> <path>` refused and named
+the two ways forward, so the running check answers correctly on macOS rather
+than only against the stand-in `pgrep` the tests use. Run again with
+`--new-instance`, it launched, and VS Code wrote a complete user data tree into
+`~/Library/Application Support/Claude-<Profile>/ide/Visual-Studio-Code`,
+`User`, `Cache`, `logs`, `machineid` and the rest, timestamped at the launch.
+That directory is the evidence the instance was genuinely separate: a forwarded
+launch writes nothing of its own. It also sits where `remove --purge` already
+deletes, so an offboarding takes that editor state with it.
+
 **Still not verified at runtime.** No Claude Code extension was installed on
 the machine that ran the test, so what remains unobserved is the extension
 reading the variable and a session landing in the pinned root. The environment

@@ -12,15 +12,14 @@
 class Agpin < Formula
   desc "Keep several AI agent accounts apart on one Mac, and audit that they stay apart"
   homepage "https://github.com/mmsge/agent-profile-manager"
-  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.8.0/agent-profile-0.8.0.tar.gz"
-  version "0.8.0"
+  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.9.0/agent-profile-0.9.0.tar.gz"
+  version "0.9.0"
 
-  # From the v0.8.0 release's own SHA256SUMS, and checked three ways before it
-  # was written here: against the tarball downloaded from the release, against
-  # the digest GitHub reports for that asset, and against a tarball rebuilt
-  # from the v0.8.0 tag on a different machine, which reproduced this sum
-  # exactly. Replace it on every release, from that release's SHA256SUMS.
-  sha256 "96e7121202621c586f9e92ec14d2928d5b6758c537789fb8eb4d23dca6258831"
+  # PLACEHOLDER until v0.9.0 is published, because the sum cannot exist before
+  # the workflow has built the tarball. Sixty-four zeros is not a sum anything
+  # can produce, so brew fails loudly rather than installing something
+  # unchecked. Replace it from the release's own SHA256SUMS, as v0.8.0 was.
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
   # Homebrew audits for this, and it must match the LICENSE file at the
   # repository root.

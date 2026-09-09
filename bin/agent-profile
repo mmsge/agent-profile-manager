@@ -75,7 +75,7 @@ if [ "${1:-}" = "which" ] && [ "${2:-}" = "--label" ]; then
     exit 0
 fi
 
-AGENT_PROFILE_VERSION="0.8.0"
+AGENT_PROFILE_VERSION="0.9.0"
 AGENT_PROFILE_LICENSE="GPL-3.0-or-later"
 
 # The name this was invoked as. Every message names the command the reader

@@ -61,7 +61,7 @@ Adds `profiles`, `rules` and `findings`.
   "command": "doctor",
   "generated_at": "2026-09-08T09:14:02Z",
   "tool": "agpin",
-  "tool_version": "0.8.0",
+  "tool_version": "0.9.0",
   "verified_against": "2.1.263",
   "agents": [{ "agent": "claude", "version": "2.1.263" }],
   "hostname": "mbp.local",
