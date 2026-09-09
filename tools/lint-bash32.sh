@@ -14,7 +14,7 @@
 set -u
 
 
-FILES="${*:-bin/agent-profile tools/probe-claude-desktop.sh tests/run.sh}"
+FILES="${*:-bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tests/run.sh}"
 STATUS=0
 
 check() {
