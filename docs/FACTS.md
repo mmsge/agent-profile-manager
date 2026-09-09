@@ -449,9 +449,12 @@ transferable.
 
 **The macOS extension is the same code as the one that was read.** The
 `darwin-arm64` VSIX ships a byte-identical `extension.js` and `package.json` to
-the `linux-x64` one; only `resources/native-binaries/<platform>/` differs. So a
-statement about the extension's JavaScript is a statement about the macOS
-build.
+the `linux-x64` one. Their file lists differ in exactly one entry, the
+`resources/audio-capture/<arch>-<platform>/audio-capture.node` native module,
+and the only other difference is the content of
+`resources/native-binary/claude`, which is each platform's own build of the
+agent. So a statement about the extension's JavaScript is a statement about the
+macOS build.
 
 **Cursor installs the same extension.** The `darwin-arm64` VSIX from Open VSX,
 the registry Cursor draws from, is byte-identical to the one from the VS Code
