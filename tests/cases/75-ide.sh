@@ -7,17 +7,24 @@
 # exercises the applet machinery without a Mac, so the macOS-only paths are
 # tested in CI rather than shipped unrun.
 
-# ide: run agent-profile as if on macOS, against the fixture's stand-in open.
+# ide: run agent-profile as if on macOS, against the fixture's stand-in tools.
 ide() {
-    PATH="$HOME/fakebin:$PATH" AGENT_PROFILE_PLATFORM=Darwin "$AP" "$@"
+    PATH="$HOME/fakebin:$PATH" AGENT_PROFILE_PLATFORM=Darwin USER=tester "$AP" "$@"
 }
 
 # ide_fixture: a throwaway HOME with one profile and an open that takes --env.
 # No extension is installed; each case that wants one installs it.
+#
+# The stand-in security(1) is not optional, for the reason 70-desktop.sh gives:
+# these cases pin the platform to Darwin, and on a real Mac that would send
+# doctor and verify at the runner's own Keychain, so the same commit would pass
+# on Linux and behave differently on macOS. It is given bouvet's own service so
+# the Keychain-backed rules stay quiet and a D16 assertion is testing D16.
 ide_fixture() {
     HOME=$(new_home); export HOME
     fake_open "$HOME/fakebin" env
     "$AP" new bouvet >/dev/null 2>&1
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
 }
 
 # fixture_vscode_ext <ide-dir>: an installed Claude Code extension, named the
@@ -175,7 +182,8 @@ case_d16_reports_a_vs_code_extension() {
     ide_fixture
     fixture_vscode_ext ".vscode/extensions"
     out=$(ide doctor 2>&1); status=$?
-    assert_status 2 "$status" || return
+    # Every other rule is quiet on this fixture, so the exit code is D16's.
+    assert_status 2 "$status" "$out" || return
     assert_contains "$out" "D16" || return
     assert_contains "$out" "extension for VS Code is installed and cannot be pinned" || return
     assert_contains "$out" "$HOME/.vscode/extensions/anthropic.claude-code-2.1.266-darwin-arm64" || return
@@ -232,7 +240,8 @@ case_d16_is_quiet_with_no_extension_installed() {
     ide_fixture
     mkdir -p "$HOME/.vscode/extensions/ms-python.python-2026.1.0"
     mkdir -p "$HOME/Library/Application Support/JetBrains/IntelliJIdea2026.1/plugins/some-other-plugin"
-    out=$(ide doctor 2>&1)
+    out=$(ide doctor 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
     assert_not_contains "$out" "D16" || return
     assert_equals "pass" \
         "$(ide_json "$(ide doctor --json 2>/dev/null)" '[r for r in d["rules"] if r["rule"] == "D16"][0]["status"]')"
