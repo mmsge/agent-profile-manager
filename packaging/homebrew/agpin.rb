@@ -15,11 +15,12 @@ class Agpin < Formula
   url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.9.0/agent-profile-0.9.0.tar.gz"
   version "0.9.0"
 
-  # PLACEHOLDER until v0.9.0 is published, because the sum cannot exist before
-  # the workflow has built the tarball. Sixty-four zeros is not a sum anything
-  # can produce, so brew fails loudly rather than installing something
-  # unchecked. Replace it from the release's own SHA256SUMS, as v0.8.0 was.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  # From the v0.9.0 release's own SHA256SUMS, checked three ways before it was
+  # written here: against the tarball downloaded from the release, against the
+  # published sums file, and against a tarball rebuilt from the v0.9.0 tag on
+  # different hardware and a different operating system from the runner, which
+  # reproduced this sum exactly. Replace it on every release, the same way.
+  sha256 "a2ac334040e810f3284cdf1ca7771ea06fb961f091695e4f4908f2feaf9f492a"
 
   # Homebrew audits for this, and it must match the LICENSE file at the
   # repository root.
