@@ -1184,4 +1184,18 @@ the pinned figure above; update this section rather than adding a new one.
    find "$HOME"/.claude* -name '*.jsonl' -mmin -3
    ```
 
-5. Update the "Last full review" line and the affected entries above.
+5. If an IDE extension is installed, do the same for it (F19). The VS Code
+   extension bundles a copy of the agent of its own, so it is a third thing
+   that updates on its own schedule, and the extension can move ahead of the
+   CLI on `PATH`.
+
+   ```sh
+   agent-profile code <name> ~/src/some-project    # or: idea
+   find "$HOME"/.claude* -name '*.jsonl' -mmin -3
+   ```
+
+   Then launch the same IDE from the Dock and run the `find` again. The two
+   answers should differ. If they stop differing, F19 has changed and what D16
+   tells a reader to do is wrong.
+
+6. Update the "Last full review" line and the affected entries above.
