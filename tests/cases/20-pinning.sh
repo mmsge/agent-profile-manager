@@ -40,6 +40,42 @@ case_which_label_fails_when_unpinned() {
     assert_equals "" "$out"
 }
 
+case_the_fast_path_never_parses_past_itself() {
+    # The fast path at the top of the file exists to save the cost of parsing
+    # everything below it, and that only works because bash reads a script as
+    # it executes it: exiting inside the fast path must happen before the
+    # interpreter reads a single byte past it, not merely before it runs a
+    # single byte past it. Prove the mechanism rather than trust the comment:
+    # break the syntax immediately after the fast path's closing `fi` (the
+    # only bare `fi` in the file, by construction, since everything after it
+    # lives inside an indented function body) and confirm `which --label`
+    # still answers correctly through the broken copy.
+    HOME=$(new_home); export HOME
+    "$AP" new bouvet >/dev/null 2>&1
+    src="$ROOT/bin/agent-profile"
+    fp_end=$(grep -n '^fi$' "$src" | head -1 | cut -d: -f1)
+    if [ -z "$fp_end" ]; then
+        fail "no bare 'fi' found in $src; the fast path moved or was removed"
+        return
+    fi
+    broken="$HOME/broken-agent-profile"
+    awk -v n="$fp_end" 'NR==n { print; print "echo \"unterminated"; next } { print }' \
+        "$src" > "$broken"
+
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "${BASH:-/bin/bash}" "$broken" which --label 2>&1)
+    status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_equals "bouvet" "$out" || return
+
+    # The control: without the fast path being taken, the same broken copy
+    # must actually fail to parse, or the case above would pass for the wrong
+    # reason (a broken copy that still runs fine either way).
+    out2=$("${BASH:-/bin/bash}" "$broken" which 2>&1); status2=$?
+    if [ "$status2" -eq 0 ]; then
+        fail "expected the broken copy to fail to parse without the fast path" "got: $out2"
+    fi
+}
+
 case_which_derives_label_from_root() {
     HOME=$(new_home); export HOME
     "$AP" new bouvet >/dev/null 2>&1
@@ -226,6 +262,7 @@ run_case "run forwards all arguments"                case_run_forwards_all_argum
 run_case "shell pins the config-dir variable"        case_shell_pins_the_variable
 run_case "which says so explicitly when unpinned"    case_which_says_so_when_unpinned
 run_case "which --label exits 1 when unpinned"       case_which_label_fails_when_unpinned
+run_case "the fast path never parses past itself"    case_the_fast_path_never_parses_past_itself
 run_case "which derives the label from the root"     case_which_derives_label_from_root
 run_case "the label ignores the registry"            case_label_comes_from_the_root_not_the_registry
 run_case "the label survives a renamed entry"        case_label_survives_a_renamed_registry_entry

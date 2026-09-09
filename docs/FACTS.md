@@ -824,6 +824,74 @@ in the shape the macOS one has.
 
 ---
 
+## Prompt-cost timings
+
+Issue #27 asked to measure `agpin which --label` and `agpin guard` under
+`/bin/bash` on macOS, since the README puts the first in a shell prompt and the
+second runs once per shell start. That measurement could not be taken here:
+this session runs in a Linux container, under bash 5.2.21, on container
+hardware with no relation to a Mac's. Every number below is from that
+environment, not from macOS or from bash 3.2, and is labelled as such rather
+than presented as the answer the issue asked for.
+
+**Method.** A loop of 300 calls to `bin/agent-profile which --label` (pinned
+to a throwaway `CLAUDE_CONFIG_DIR`) and to `bin/agent-profile guard`, timed
+with the shell's `time` builtin, `AGENT_PROFILE_REGISTRY` pointed at an empty
+throwaway directory. Repeated twice; the two runs agreed to within about 5%.
+
+**Before the fast path below existed** (script size at the time: 3792 lines):
+
+| Call | Total, 300 runs | Per call |
+| --- | --- | --- |
+| `bash -c 'exit 0'` (process-start floor) | 0.65s | 2.2 ms |
+| `which --label`, pinned | 4.71s | 15.7 ms |
+| `which --label`, unpinned | 4.33s | 14.4 ms |
+| `guard` | 5.53s | 18.4 ms |
+| `bash -n` (parse only, no exec) | 2.19s | 7.3 ms |
+
+**After** the fast path added in this change:
+
+| Call | Total, 300 runs | Per call |
+| --- | --- | --- |
+| `which --label`, pinned | 0.82s | 2.7 ms |
+| `which --label`, unpinned | 1.10s | 3.7 ms |
+| `which` (no `--label`, unchanged slow path) | 4.77s | 15.9 ms |
+
+**Reasoning about the decision, given the platform mismatch.** The issue's
+threshold is ten milliseconds. The pinned `which --label` measured here, before
+the change, was 15.7 ms: 57% past the threshold, on bash 5.2, a materially
+faster interpreter than bash 3.2, running on container hardware rather than a
+Mac. Nothing about bash 3.2 being older suggests it would parse this script
+*faster* than 5.2 does; if anything a script this reliant on command
+substitution (`$(...)` forks a subshell per use, and this file uses it
+heavily) is exactly the pattern an older, less optimized interpreter tends to
+be slower at, not faster. So while the exact millisecond figure on a real Mac
+is unmeasured, this is not a case where the platform difference could
+plausibly flip the answer from "under ten milliseconds" to "over": the Linux
+number was already over, on the faster of the two bash versions. The fast path
+was implemented on that basis rather than left provisional.
+
+`guard` was measured for completeness, since the issue named it, but it runs
+once per shell start rather than once per prompt, so its 18.4 ms is a one-time
+cost at login and was not judged to need a fast path of its own.
+
+**What this does not establish, and how to check it.** The actual number on
+the platform this tool supports. On a Mac, with this repository checked out:
+
+```sh
+N=300
+time ( i=0; while [ "$i" -lt "$N" ]; do bin/agent-profile which --label >/dev/null 2>&1; i=$((i+1)); done )
+time ( i=0; while [ "$i" -lt "$N" ]; do bin/agent-profile guard >/dev/null 2>&1; i=$((i+1)); done )
+```
+
+run under `/bin/bash` (the system one, for the bash-3.2 numbers the issue
+actually asked for) with `CLAUDE_CONFIG_DIR` pinned to a throwaway directory.
+`hyperfine 'bin/agent-profile which --label'` if it is installed. Divide the
+first `time` result by 300 and compare against ten milliseconds and against
+the pinned figure above; update this section rather than adding a new one.
+
+---
+
 ## After an agent update
 
 1. `agent-profile verify`
