@@ -48,6 +48,51 @@ terminal only. The desktop app renders no status line of its own, so there is
 nothing inside it that says which root it is using. For the desktop, the
 launcher is the guarantee and `doctor`'s D13 is the check.
 
+### Faster: caching the label per shell
+
+A fast path in `bin/agent-profile` now answers `which --label` before the rest
+of the script is even read, which is most of what made it slow (docs/FACTS.md
+has the numbers). What is left is a process to start, which a prompt still
+pays for on every single command. This caches the label in the shell and only
+calls out to `agent-profile` again when `CLAUDE_CONFIG_DIR` has actually
+changed, which in practice means "when this shell got pinned or re-pinned",
+not "every time a prompt is drawn".
+
+The guarantee is unaffected: the caching lives entirely in the shell, and the
+value it caches is never anything but what `agent-profile which --label` most
+recently answered for the root currently pinned. Pin a different profile and
+the next prompt recomputes, because the comparison is against
+`$CLAUDE_CONFIG_DIR` itself, not against anything this tool stored.
+
+```sh
+# ~/.zshrc
+autoload -Uz add-zsh-hook
+_agent_profile_precmd() {
+    if [ "${CLAUDE_CONFIG_DIR:-}" != "${_agent_profile_label_root:-}" ]; then
+        _agent_profile_label_root=${CLAUDE_CONFIG_DIR:-}
+        AGENT_PROFILE_LABEL=$(agent-profile which --label 2>/dev/null)
+        export AGENT_PROFILE_LABEL
+    fi
+}
+add-zsh-hook precmd _agent_profile_precmd
+setopt PROMPT_SUBST
+PROMPT='$AGENT_PROFILE_LABEL %~ %# '
+```
+
+[starship](https://starship.rs) needs the same hook: starship renders a
+prompt, it does not run other tools' prompt logic for you, so nothing calls
+`agent-profile` unless something still does. Keep the hook above, drop the
+`PROMPT=` line, and point starship at the variable it maintains with an
+`env_var` module, which costs starship nothing beyond reading memory that is
+already there:
+
+```toml
+# ~/.config/starship.toml
+[env_var.AGENT_PROFILE_LABEL]
+format = "[$env_value]($style) "
+style = "bold cyan"
+```
+
 ## Two identities, and they can disagree
 
 A profile has two. `--user-data-dir` selects the app's own login, the account
