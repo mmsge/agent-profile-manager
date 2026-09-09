@@ -131,6 +131,141 @@ is_known_agent() {
 }
 
 # ---------------------------------------------------------------------------
+# The IDE seam.
+#
+# An IDE extension is a third launch path, beside the shell and the desktop
+# app, and the one nobody sees: it starts a session from inside the editor, so
+# the guard function is never consulted and no applet is involved. What reaches
+# the agent is whatever environment the IDE process happens to hold, which for
+# a Dock or Spotlight launch is nothing (docs/FACTS.md F19).
+#
+# Everything IDE-specific lives here, so adding Windsurf later is a case in
+# this function rather than a change to D16 or to the launcher.
+#
+# Fields:
+#   label      the IDE's name, as a reader would say it
+#   app        the application name open(1) resolves, and the default for --app
+#   kind       vscode or jetbrains: which shape the install check takes, and
+#              which of the two mechanisms in F19 applies
+#   command    the subcommand of this tool that launches it pinned
+#   ext_dirs   colon-separated directories that hold installed extensions.
+#              Same consequence as AGENT_PROFILE_APPLET_DIRS: a directory whose
+#              name contains a colon cannot be searched
+#   ext_name   for kind vscode, the prefix of the extension directory's name;
+#              for kind jetbrains, the exact plugin directory name, found one
+#              level down under <entry>/plugins
+#   ext_probe  the one directory whose existence means this IDE keeps its
+#              extensions on this machine. It is not in ext_dirs because
+#              "the IDE is here" and "here is where its extensions are" are
+#              different questions, and verify needs the first one
+KNOWN_IDES="vscode cursor jetbrains"
+
+ide_def() {
+    _id_ide="$1"
+    _id_field="$2"
+    case "$_id_ide" in
+        vscode)
+            case "$_id_field" in
+                label)    printf '%s\n' "VS Code" ;;
+                app)      printf '%s\n' "Visual Studio Code" ;;
+                kind)     printf '%s\n' "vscode" ;;
+                command)  printf '%s\n' "code" ;;
+                ext_dirs) printf '%s\n' "$HOME/.vscode/extensions" ;;
+                ext_name) printf '%s\n' "anthropic.claude-code-" ;;
+                ext_probe) printf '%s\n' "$HOME/.vscode" ;;
+                *) die "internal: unknown ide field '$_id_field'" ;;
+            esac
+            ;;
+        cursor)
+            case "$_id_field" in
+                label)    printf '%s\n' "Cursor" ;;
+                app)      printf '%s\n' "Cursor" ;;
+                kind)     printf '%s\n' "vscode" ;;
+                command)  printf '%s\n' "code" ;;
+                ext_dirs) printf '%s\n' "$HOME/.cursor/extensions" ;;
+                ext_name) printf '%s\n' "anthropic.claude-code-" ;;
+                ext_probe) printf '%s\n' "$HOME/.cursor" ;;
+                *) die "internal: unknown ide field '$_id_field'" ;;
+            esac
+            ;;
+        jetbrains)
+            case "$_id_field" in
+                label)    printf '%s\n' "a JetBrains IDE" ;;
+                app)      printf '%s\n' "IntelliJ IDEA" ;;
+                kind)     printf '%s\n' "jetbrains" ;;
+                command)  printf '%s\n' "idea" ;;
+                # The three roots the agent's own plugin detection searches on
+                # macOS, in its order (docs/FACTS.md F21).
+                ext_dirs) printf '%s\n' "$HOME/Library/Application Support/JetBrains:$HOME/Library/Application Support:$HOME/Library/Application Support/Google" ;;
+                ext_name) printf '%s\n' "claude-code-jetbrains-plugin" ;;
+                ext_probe) printf '%s\n' "$HOME/Library/Application Support/JetBrains" ;;
+                *) die "internal: unknown ide field '$_id_field'" ;;
+            esac
+            ;;
+        *)
+            die "unknown IDE '$_id_ide' (known: $KNOWN_IDES)"
+            ;;
+    esac
+}
+
+# ides_for_command <code|idea>: the IDEs that subcommand can launch.
+ides_for_command() {
+    for _ifc in $KNOWN_IDES; do
+        [ "$(ide_def "$_ifc" command)" = "$1" ] && printf '%s\n' "$_ifc"
+    done
+}
+
+# ide_scan <ide>: every installed extension directory for that IDE, one per
+# line, empty when none is installed.
+#
+# Directories, not `code --list-extensions`. The IDE's own CLI is the
+# authoritative answer and this reads the weaker one on purpose: an audit reads
+# the filesystem and asks the Keychain about named services, and starting an
+# IDE binary to answer a question is a different class of act. docs/FACTS.md
+# F21 records what that costs, which is every install whose extensions
+# directory has been moved.
+ide_scan() {
+    _is_kind=$(ide_def "$1" kind)
+    _is_name=$(ide_def "$1" ext_name)
+    _is_dirs=$(ide_def "$1" ext_dirs)
+    _is_rest="$_is_dirs"
+    while [ -n "$_is_rest" ]; do
+        case "$_is_rest" in
+            *:*) _is_dir=${_is_rest%%:*}; _is_rest=${_is_rest#*:} ;;
+            *)   _is_dir="$_is_rest"; _is_rest="" ;;
+        esac
+        [ -n "$_is_dir" ] || continue
+        [ -d "$_is_dir" ] || continue
+        for _is_entry in "$_is_dir"/*; do
+            [ -d "$_is_entry" ] || continue
+            case "$_is_kind" in
+                vscode)
+                    _is_base=${_is_entry##*/}
+                    case "$_is_base" in
+                        "$_is_name"*) printf '%s\n' "$_is_entry" ;;
+                    esac
+                    ;;
+                jetbrains)
+                    [ -d "$_is_entry/plugins/$_is_name" ] && \
+                        printf '%s\n' "$_is_entry/plugins/$_is_name"
+                    ;;
+            esac
+        done
+    done
+}
+
+# ide_installed: does any IDE this tool knows keep extensions on this machine?
+#
+# The difference between "no extension installed" and "no IDE here at all",
+# which is what stops verify reporting a scan that found nothing as a pass.
+ide_installed() {
+    for _iin in $KNOWN_IDES; do
+        [ -d "$(ide_def "$_iin" ext_probe)" ] && return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
 
@@ -791,15 +926,46 @@ open_pinned() {
     _op_bundle=$(agent_def "$_op_agent" app_bundle)
     _op_flag=$(agent_def "$_op_agent" app_flag)
 
-    set -- open -n -a "$_op_bundle" \
+    open_exec open -n -a "$_op_bundle" \
         --env "$_op_var=$_op_root" \
         --args "$_op_flag=$_op_data" "$@"
+}
 
+# open_ide <agent> <root> <application> [path]
+#
+# The IDE counterpart of open_pinned, and the same mechanism: the pin travels
+# in --env, because an extension takes its config root from the environment the
+# IDE process was started with and from nowhere else (docs/FACTS.md F19).
+#
+# -n is not decoration here. Without it, open hands the path to an IDE that is
+# already running, which is the unpinned one the reader is trying to get away
+# from: the window opens, the project opens, and every session in it writes to
+# the default root. A second window is the price of the pin actually applying.
+#
+# --args is emitted only when there is a path, so launching with no path opens
+# the IDE rather than opening a file called nothing.
+open_ide() {
+    _oi_agent="$1"; shift
+    _oi_root="$1"; shift
+    _oi_app="$1"; shift
+    _oi_var=$(agent_def "$_oi_agent" envvar)
+
+    if [ $# -gt 0 ]; then
+        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" --args "$@"
+    else
+        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root"
+    fi
+}
+
+# open_exec <open> [args...]: print the command under a dry run, exec it
+# otherwise. One place, so the two launchers cannot drift apart in what they
+# claim to do and what they do.
+open_exec() {
     if [ -n "$AGENT_PROFILE_DRY_RUN" ]; then
-        _op_sep=""
-        for _op_arg in "$@"; do
-            printf '%s%s' "$_op_sep" "$_op_arg"
-            _op_sep=" "
+        _oe_sep=""
+        for _oe_arg in "$@"; do
+            printf '%s%s' "$_oe_sep" "$_oe_arg"
+            _oe_sep=" "
         done
         printf '\n'
         return 0
@@ -1946,6 +2112,80 @@ See docs/FACTS.md F13."
 }
 
 # ---------------------------------------------------------------------------
+# code, idea
+#
+# Launch an IDE with a profile pinned. The only supported way to start an IDE
+# whose Claude Code extension is not writing to the default root, because the
+# pin has to be in the IDE's process environment and open --env is what puts it
+# there (docs/FACTS.md F19, and F13 for the mechanism).
+#
+# `code` covers the VS Code family, `idea` the JetBrains family, and --app
+# names a different application in either: --app Cursor, --app PyCharm. There
+# is no list of blessed applications, because the mechanism does not care which
+# one it is, and a tool that refuses to launch PyCharm because nobody added it
+# to a list is worse than one that hands the name to open.
+# ---------------------------------------------------------------------------
+
+cmd_ide() {
+    _ci_cmd="$1"; shift
+    _ci_app=""
+    _ci_name=""
+    _ci_path=""
+    _ci_have_path=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --app) shift; [ $# -gt 0 ] || die "--app needs a value"; _ci_app="$1" ;;
+            -*)    die "unknown option '$1'
+Try: $SELF $_ci_cmd <profile> [path] [--app NAME]" ;;
+            *)
+                if [ -z "$_ci_name" ]; then
+                    _ci_name="$1"
+                elif [ -z "$_ci_have_path" ]; then
+                    _ci_path="$1"; _ci_have_path=1
+                else
+                    die "unexpected argument '$1'
+Try: $SELF $_ci_cmd <profile> [path] [--app NAME]"
+                fi
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$_ci_name" ] || die "usage: $SELF $_ci_cmd <profile> [path] [--app NAME]"
+    require_profile "$_ci_name"
+    _ci_agent=$(profile_agent "$_ci_name")
+    _ci_root=$(profile_root "$_ci_name")
+
+    # The default application is the first IDE this subcommand covers. Naming
+    # the family in the message matters: someone running `code` for Cursor has
+    # to be told the flag exists before they conclude the tool cannot do it.
+    if [ -z "$_ci_app" ]; then
+        _ci_first=$(ides_for_command "$_ci_cmd" | head -1)
+        [ -n "$_ci_first" ] || die "internal: no IDE is registered for '$_ci_cmd'"
+        _ci_app=$(ide_def "$_ci_first" app)
+    fi
+
+    if [ -z "$AGENT_PROFILE_DRY_RUN" ]; then
+        command -v open >/dev/null 2>&1 || die "the 'open' command is not on your PATH (this command is macOS only)"
+        open_supports_env || die "this open(1) does not support --env, so the IDE cannot be pinned.
+Launching it anyway would start an IDE whose Claude Code extension writes to
+the default root, which is the leak this tool exists to prevent, so nothing was
+launched. See docs/FACTS.md F13 and F19."
+    fi
+
+    # The application is not checked for on disk. open resolves a name through
+    # LaunchServices, so an IDE installed anywhere but /Applications would fail
+    # a path check while open would have found it. A name that resolves to
+    # nothing fails in open, with open's own message.
+    if [ -n "$_ci_have_path" ]; then
+        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_path"
+    else
+        open_ide "$_ci_agent" "$_ci_root" "$_ci_app"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # app
 #
 # Generate or repair the AppleScript applet that launches a profile from the
@@ -2191,7 +2431,8 @@ doctor_rule_catalog() {
         "D12	Keychain credential entries belong to no known root" \
         "D13	A desktop launcher does not pin its profile" \
         "D14	A desktop launcher exists that no profile claims" \
-        "D15	More than one profile is registered at the same root"
+        "D15	More than one profile is registered at the same root" \
+        "D16	A Claude Code IDE extension is installed and cannot be pinned"
 }
 
 cmd_doctor() {
@@ -2520,6 +2761,66 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
             "default root whatever this tool has configured. Treat links as a leak" \
             "path: open the project through a pinned shell instead of clicking them."
     done
+
+    # ---- D16: an IDE extension that cannot carry a config root ------------
+    #
+    # The same shape as D09, and for the same reason: a launch path this tool
+    # cannot pin unless the thing that starts it was itself started pinned.
+    # Nothing on disk records how an IDE was launched, so an installed
+    # extension is reported every time and the finding names the pinned
+    # launcher rather than pretending to know. See docs/FACTS.md F19 to F21.
+    #
+    # The two kinds get different prose because the mechanism genuinely
+    # differs. The VS Code family spawns its own bundled agent from the
+    # extension host, so no rc file is ever consulted and the guard cannot see
+    # it. The JetBrains plugin types the command into the IDE's integrated
+    # terminal, so a guard in an rc file does see it, and saying otherwise
+    # would send a reader looking for a leak that is not there.
+    for _doc_ide in $KNOWN_IDES; do
+        _doc_ide_scan=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d16.XXXXXX") || \
+            die "could not create a temporary file under ${TMPDIR:-/tmp}"
+        ide_scan "$_doc_ide" > "$_doc_ide_scan" 2>/dev/null
+
+        # Read from a file rather than a pipe: a pipeline runs the loop in a
+        # subshell and the finding count would not survive it.
+        while IFS= read -r _doc_ext; do
+            [ -n "$_doc_ext" ] || continue
+            _doc_ide_label=$(ide_def "$_doc_ide" label)
+            _doc_ide_cmd=$(ide_def "$_doc_ide" command)
+            case "$(ide_def "$_doc_ide" kind)" in
+                jetbrains)
+                    finding "D16" "a Claude Code plugin for $_doc_ide_label is installed and cannot be pinned" \
+                        "$_doc_ext" \
+                        "The plugin runs the agent in the IDE's integrated terminal, so a guard" \
+                        "in your rc file does see that call. What it does not see is the config" \
+                        "root the IDE process was started with, which a Dock or Spotlight launch" \
+                        "leaves unset. The plugin's own Config directory setting only chooses" \
+                        "where it writes its lock file; it pins nothing." \
+                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                    ;;
+                *)
+                    finding "D16" "a Claude Code extension for $_doc_ide_label is installed and cannot be pinned" \
+                        "$_doc_ext" \
+                        "The extension spawns its own copy of the agent from the IDE's process," \
+                        "so the shell guard never sees the call and the config root can only" \
+                        "come from the environment the IDE was launched with. A Dock or" \
+                        "Spotlight launch carries none, and every session started that way" \
+                        "writes to the default root." \
+                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                    ;;
+            esac
+        done < "$_doc_ide_scan"
+        rm -f "$_doc_ide_scan"
+    done
+
+    # Where a JetBrains IDE keeps its plugins is known for macOS only, so on
+    # any other platform D16 has looked in two of its three places. Saying so
+    # is the difference between a rule that passed and a rule that was half
+    # blindfolded.
+    if [ "$AGENT_PROFILE_PLATFORM" != "Darwin" ]; then
+        emit data rule_status D16 limited \
+            "the JetBrains plugin directory is only known for macOS, so a JetBrains install elsewhere was not checked"
+    fi
 
     # ---- D11: what the Keychain says about the default root ---------------
     #
@@ -2980,6 +3281,49 @@ cmd_verify() {
         fi
     fi
 
+    # ---- The IDE extensions, F19 to F21 -----------------------------------
+    #
+    # F21 is what D16 scans, and D16 scans directories rather than asking the
+    # IDE's own CLI, so its silence has two meanings. This is where they are
+    # told apart: nothing installed is a pass, nothing looked at is unchecked.
+    # Without it, an extensions directory that moved would turn D16 into a
+    # rule that reports a clean machine because it looked in the wrong place.
+    _ver_ide_found=0
+    for _ver_ide in $KNOWN_IDES; do
+        _ver_ide_hits=$(ide_scan "$_ver_ide" | grep -c '')
+        _ver_ide_found=$((_ver_ide_found + _ver_ide_hits))
+    done
+
+    # F19 and F20 need a real IDE and a real session, the same way F01 does.
+    # Both were established by reading the shipped extension and plugin rather
+    # than by watching a session land in a root, so verify says how to settle
+    # them rather than pretending it just did.
+    # shellcheck disable=SC2016  # literal help text; the user types this
+    vnote "F19" "the IDE extensions do take the config root from the IDE's process environment" \
+        "Read from the shipped extension and plugin, not from a session that ran." \
+        "Re-confirm with: $SELF code <name> <path>, start a session in the IDE," \
+        'then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3'
+
+    vnote "F20" "a settings pin is not a launch pin, in either IDE family" \
+        "VS Code's claudeCode.environmentVariables reaches the agent the extension" \
+        "spawns but not the extension's own config home, and the JetBrains Config" \
+        "directory setting only moves the plugin's lock file. Pin the IDE itself." \
+        "See docs/FACTS.md F20."
+
+    if [ "$_ver_ide_found" -gt 0 ]; then
+        vok "F21" "$_ver_ide_found Claude Code IDE extension(s) found where D16 looks; doctor reports each as D16"
+    elif ide_installed; then
+        vnote "F21" "an IDE keeps its extensions here and none of them is Claude Code's" \
+            "D16 will stay quiet, which is right if the extension is not installed and" \
+            "wrong if the directory naming has moved since F21 was established." \
+            "Settle it with: code --list-extensions | grep anthropic.claude-code"
+    else
+        vunchecked "F21" "no IDE extensions directory on this machine, so D16's scan was not exercised" \
+            "Nothing here says whether D16 would find an extension on a machine that has one."
+    fi
+
+    emit normal text ""
+
     vnote "F02" "moot: the app's environment editor only mattered if F01 was negative"
 
     vnote "F06" "a root cannot be relocated without losing its login" \
@@ -3294,7 +3638,7 @@ _@SELF@_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="new list ls remove run shell env path which guard desktop app doctor verify explain completion version help"
+    cmds="new list ls remove run shell env path which guard desktop code idea app doctor verify explain completion version help"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
@@ -3314,6 +3658,12 @@ _@SELF@_complete() {
             ;;
         run|shell|env|path|desktop)
             COMPREPLY=( $(compgen -W "$(__@SELF@_profiles)" -- "$cur") )
+            ;;
+        code|idea)
+            case "$prev" in
+                --app) return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --app" -- "$cur") )
             ;;
         app)
             case "$prev" in
@@ -3370,6 +3720,8 @@ _@SELF@() {
         'which:which profile this shell is pinned to'
         'guard:print the unpinned-run guard'
         'desktop:launch the desktop app pinned to a profile'
+        'code:launch VS Code pinned to a profile'
+        'idea:launch a JetBrains IDE pinned to a profile'
         'app:build the Dock launcher'
         'doctor:audit that the isolation holds'
         'verify:re-check the assumptions this tool rests on'
@@ -3400,6 +3752,12 @@ _@SELF@() {
         run|shell|env|path|desktop)
             profiles=(${(f)"$(__@SELF@_profiles)"})
             _describe -t profiles 'profile' profiles
+            ;;
+        code|idea)
+            profiles=(${(f)"$(__@SELF@_profiles)"})
+            _describe -t profiles 'profile' profiles
+            _arguments '--app[application to launch]:application:' \
+                '*:path:_files -/'
             ;;
         app)
             profiles=(${(f)"$(__@SELF@_profiles)"})
@@ -3452,6 +3810,8 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a path -d 'Print the config root 
 complete -c @SELF@ -n '__fish_use_subcommand' -a which -d 'Which profile this shell is pinned to'
 complete -c @SELF@ -n '__fish_use_subcommand' -a guard -d 'Print the unpinned-run guard'
 complete -c @SELF@ -n '__fish_use_subcommand' -a desktop -d 'Launch the desktop app pinned to a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a code -d 'Launch VS Code pinned to a profile'
+complete -c @SELF@ -n '__fish_use_subcommand' -a idea -d 'Launch a JetBrains IDE pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a app -d 'Build the Dock launcher'
 complete -c @SELF@ -n '__fish_use_subcommand' -a doctor -d 'Audit that the isolation holds'
 complete -c @SELF@ -n '__fish_use_subcommand' -a verify -d 'Re-check the assumptions this tool rests on'
@@ -3461,12 +3821,13 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a version -d 'Print the version'
 complete -c @SELF@ -n '__fish_use_subcommand' -a help -d 'Show help'
 complete -c @SELF@ -n '__fish_use_subcommand' -a '(__@SELF@_profiles)' -d Profile
 
-complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app' -a '(__@SELF@_profiles)' -d Profile
+complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app code idea' -a '(__@SELF@_profiles)' -d Profile
 
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l agent -d Agent -a claude
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l root -d 'Config root path'
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l app-data -d 'App data dir path'
 complete -c @SELF@ -n '__fish_seen_subcommand_from remove' -l purge -d 'Delete everything, after a typed confirmation'
+complete -c @SELF@ -n '__fish_seen_subcommand_from code idea' -l app -d 'Application to launch'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l applet -d 'Applet path'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l icon -d '1024px PNG'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l label -d 'Print the bare label only'
@@ -3678,6 +4039,20 @@ PINNED EXECUTION
   path <name>             Print a profile's config root.
   which [--label]         Which profile this shell is pinned to, if any.
 
+IDEs
+  code <name> [path] [--app NAME]
+                          Launch VS Code pinned to a profile, opening PATH if
+                          given. --app names another application in the same
+                          family, such as --app Cursor.
+  idea <name> [path] [--app NAME]
+                          The same for the JetBrains IDEs, IntelliJ IDEA by
+                          default; --app PyCharm and so on.
+                          An IDE started any other way runs its Claude Code
+                          extension unpinned, because the extension takes the
+                          config root from the IDE's own process environment
+                          and a Dock or Spotlight launch carries none. doctor
+                          reports an installed extension as D16.
+
 DESKTOP
   desktop <name>          Launch the desktop app pinned to a profile. Running
                           @SELF@ with no arguments asks instead.
@@ -3768,6 +4143,8 @@ main() {
         guard)    cmd_guard "$@" ;;
         completion) cmd_completion "$@" ;;
         desktop)  cmd_desktop "$@" ;;
+        code)     cmd_ide code "$@" ;;
+        idea)     cmd_ide idea "$@" ;;
         app)      cmd_app "$@" ;;
         doctor)   cmd_doctor "$@" ;;
         verify)   cmd_verify "$@" ;;
