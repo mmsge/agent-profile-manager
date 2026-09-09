@@ -871,9 +871,39 @@ agent-profile idea bouvet --app PyCharm           # any JetBrains IDE
 
 These are the same mechanism as `desktop`, `open --env` in front of `--args`,
 and for the same reason: the pin has to be in the process environment and
-nothing else puts it there. `-n` is not decoration. Without it `open` hands the
-path to the IDE already running, which is the unpinned one you are trying to
-get away from, and a second window is the price of the pin applying at all.
+nothing else puts it there.
+
+**They refuse when that editor is already running,** and this is the part worth
+understanding, because it was found the hard way. `open -n` stops LaunchServices
+handing your folder to the running application, but a VS Code started that way
+still finds the older instance over its own socket, gives it the folder and
+exits. The window you get back belongs to that older process and carries
+whatever root it was started with. Tested on a Mac: two windows, opened from
+two different profiles, both writing to the first profile's root. It looked
+right and it was wrong, which is the one outcome this tool must not produce, so
+the command now refuses rather than hands you that window.
+
+Two ways past it:
+
+```sh
+# quit the editor, then launch as normal
+agent-profile code bouvet ~/src/some-project
+
+# or start a genuinely separate instance, which can be pinned whatever is open
+agent-profile code bouvet ~/src/some-project --new-instance
+```
+
+`--new-instance` gives that instance its own `--user-data-dir`, which is what
+stops it being forwarded to. Its settings and window state live under the
+profile's app data directory, so they are that customer's and `remove --purge`
+takes them with everything else. Extensions are not part of user data and stay
+shared, so the Claude Code extension does not need installing again per
+profile. There is no `--new-instance` for `idea`: a JetBrains IDE has no
+equivalent, so quitting it is the only way.
+
+If the check cannot tell whether the editor is running, it refuses too. Being
+told to quit an editor that was already closed costs a moment; a session
+silently writing into another customer's root costs rather more.
 
 **`doctor` reports an installed extension as D16 every time.** Nothing on disk
 records how an IDE was launched, so the rule cannot know whether this one was
@@ -1251,7 +1281,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 295 tests, no dependencies
+tests/run.sh              # 303 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

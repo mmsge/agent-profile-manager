@@ -536,8 +536,29 @@ environment is two variables and no more:
 returns the command unchanged. Everything else the terminal gets is inherited
 from the IDE process, and then whatever the rc file does on top of it.
 
-**Not verified at runtime.** No IDE was launched. What is read here is the code
-that would run, not a session that did.
+**Partly verified at runtime, on a Mac, 2026-09-09.** The environment half is
+now observed rather than read. `agent-profile code <profile> <path>` on macOS
+put `CLAUDE_CONFIG_DIR` into the VS Code process: the integrated terminal in
+the window it opened printed the profile's root. So `open --env` does reach the
+IDE process, which is the part this tool controls.
+
+The same test found a defect, and it is recorded here because it changes what
+this fact means in practice. **The pin only applies when the editor was not
+already running.** Launched with VS Code already up, `open -n` starts a new
+process, that process finds the running instance over VS Code's own socket,
+hands it the folder and exits. The window belongs to the older instance and
+carries the environment the older instance was started with. Two windows opened
+from two different profiles both reported the first profile's root, which is
+the leak this tool exists to prevent, arriving through the command meant to
+stop it. `agent-profile code` now refuses to launch into a running editor and
+offers `--new-instance`, which uses a separate `--user-data-dir` so the
+instance cannot be forwarded to.
+
+**Still not verified at runtime.** No Claude Code extension was installed on
+the machine that ran the test, so what remains unobserved is the extension
+reading the variable and a session landing in the pinned root. The environment
+arrives; that the extension consumes it is still read from the code above
+rather than watched.
 
 **How to re-check,** on a Mac with the IDE and the extension installed:
 
@@ -547,7 +568,8 @@ agent-profile code <name> ~/src/some-project   # or: agent-profile idea <name> ~
 find "$HOME"/.claude* -name '*.jsonl' -mmin -3
 ```
 
-The path it prints is the root actually in use. Repeat the same test after
+Quit the editor first, or the command will refuse: see the defect above. The
+path it prints is the root actually in use. Repeat the same test after
 launching the IDE from the Dock instead; the two answers should differ, and
 that difference is the whole reason D16 exists.
 
