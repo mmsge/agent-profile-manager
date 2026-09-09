@@ -999,26 +999,61 @@ open_pinned() {
         --args "$_op_flag=$_op_data" "$@"
 }
 
-# open_ide <agent> <root> <application> [path]
+# ide_running <application>: is a copy of this application already running?
+#
+# Three answers, not two: 0 running, 1 not running, 2 could not tell. The third
+# is the point. A launch into a running VS Code lands in that process's
+# environment rather than the one --env asked for, so a caller that treats
+# "could not tell" as "not running" reintroduces exactly the silent mispin this
+# check exists to stop. Callers must fail closed.
+#
+# pgrep -f matches the whole command line, which for a macOS application
+# contains its bundle path. That is a heuristic, not an identity: it is why the
+# unknown answer exists and why --new-instance can always override the refusal.
+ide_running() {
+    _ir_app="$1"
+    command -v pgrep >/dev/null 2>&1 || return 2
+    pgrep -f "/$_ir_app.app/" >/dev/null 2>&1
+    case "$?" in
+        0) return 0 ;;
+        1) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
+# open_ide <agent> <root> <application> [user-data-dir] [path]
 #
 # The IDE counterpart of open_pinned, and the same mechanism: the pin travels
 # in --env, because an extension takes its config root from the environment the
 # IDE process was started with and from nowhere else (docs/FACTS.md F19).
 #
-# -n is not decoration here. Without it, open hands the path to an IDE that is
-# already running, which is the unpinned one the reader is trying to get away
-# from: the window opens, the project opens, and every session in it writes to
-# the default root. A second window is the price of the pin actually applying.
+# -n is necessary and, on its own, not sufficient. It stops LaunchServices
+# reusing the running application, but a VS Code started that way still finds
+# the older instance over its own socket, hands the folder to it and exits, so
+# the window you get belongs to the differently pinned process. Verified on a
+# Mac on 2026-09-09: two windows, one opened per profile, both reporting the
+# first profile's root. cmd_ide therefore refuses rather than launching into
+# that, and --user-data-dir is what makes a genuinely separate instance when
+# the reader asks for one, because an instance only forwards to another sharing
+# its user data directory.
 #
-# --args is emitted only when there is a path, so launching with no path opens
-# the IDE rather than opening a file called nothing.
+# The user data directory is passed after --args, because it is the
+# application's argument rather than open's, the same ordering --env depends on
+# (docs/FACTS.md F13).
 open_ide() {
     _oi_agent="$1"; shift
     _oi_root="$1"; shift
     _oi_app="$1"; shift
+    _oi_data="$1"; shift
     _oi_var=$(agent_def "$_oi_agent" envvar)
 
-    if [ $# -gt 0 ]; then
+    if [ -n "$_oi_data" ] && [ $# -gt 0 ]; then
+        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" \
+            --args --user-data-dir "$_oi_data" "$@"
+    elif [ -n "$_oi_data" ]; then
+        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" \
+            --args --user-data-dir "$_oi_data"
+    elif [ $# -gt 0 ]; then
         open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" --args "$@"
     else
         open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root"
@@ -2200,12 +2235,14 @@ cmd_ide() {
     _ci_name=""
     _ci_path=""
     _ci_have_path=""
+    _ci_new=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --app) shift; [ $# -gt 0 ] || die "--app needs a value"; _ci_app="$1" ;;
+            --new-instance) _ci_new=1 ;;
             -*)    die "unknown option '$1'
-Try: $SELF $_ci_cmd <profile> [path] [--app NAME]" ;;
+Try: $SELF $_ci_cmd <profile> [path] [--app NAME] [--new-instance]" ;;
             *)
                 if [ -z "$_ci_name" ]; then
                     _ci_name="$1"
@@ -2213,14 +2250,14 @@ Try: $SELF $_ci_cmd <profile> [path] [--app NAME]" ;;
                     _ci_path="$1"; _ci_have_path=1
                 else
                     die "unexpected argument '$1'
-Try: $SELF $_ci_cmd <profile> [path] [--app NAME]"
+Try: $SELF $_ci_cmd <profile> [path] [--app NAME] [--new-instance]"
                 fi
                 ;;
         esac
         shift
     done
 
-    [ -n "$_ci_name" ] || die "usage: $SELF $_ci_cmd <profile> [path] [--app NAME]"
+    [ -n "$_ci_name" ] || die "usage: $SELF $_ci_cmd <profile> [path] [--app NAME] [--new-instance]"
     require_profile "$_ci_name"
     _ci_agent=$(profile_agent "$_ci_name")
     _ci_root=$(profile_root "$_ci_name")
@@ -2242,14 +2279,66 @@ the default root, which is the leak this tool exists to prevent, so nothing was
 launched. See docs/FACTS.md F13 and F19."
     fi
 
+    # Which family this subcommand belongs to, read from the seam rather than
+    # from the application name, because --app may name any editor in it.
+    _ci_kind=$(ide_def "$(ides_for_command "$_ci_cmd" | head -1)" kind)
+
+    # A separate instance is a VS Code mechanism. A JetBrains IDE has no
+    # equivalent, and its plugin does not spawn the agent anyway (F19), so
+    # offering the flag there would be offering something that does nothing.
+    if [ -n "$_ci_new" ] && [ "$_ci_kind" != "vscode" ]; then
+        die "--new-instance is a VS Code mechanism and $_ci_app is not in that family.
+Quit the IDE and run this again, which is the only way to pin it."
+    fi
+
+    # An editor that is already running will not be pinned by this launch: it
+    # takes the folder over its own socket and the window belongs to the older,
+    # differently pinned process. Refuse rather than hand back a window that
+    # looks pinned and is not, which is the failure this tool exists to prevent.
+    #
+    # Fails closed. "Could not tell" is treated as running, because being told
+    # to quit an editor that was already closed costs a moment, and a session
+    # silently writing to another customer's root costs rather more.
+    if [ -z "$_ci_new" ]; then
+        ide_running "$_ci_app"
+        case "$?" in
+            0) _ci_why="$_ci_app is already running" ;;
+            2) _ci_why="whether $_ci_app is running could not be determined" ;;
+            *) _ci_why="" ;;
+        esac
+        [ -z "$_ci_why" ] || die "$_ci_why, so this launch would not pin it.
+A running editor takes the folder over its own socket, and the window you would
+get belongs to that process, pinned to whatever it was started with. It would
+look right and write to the wrong root.
+
+Either quit $_ci_app and run this again, or:
+
+    $SELF $_ci_cmd $_ci_name${_ci_have_path:+ $_ci_path} --new-instance
+
+which starts a separate instance with its own settings and window state, kept
+under this profile, so the pin applies whatever else is open."
+    fi
+
+    # Under --new-instance, the separate instance needs somewhere of its own to
+    # keep user data, and it goes beside the profile's other app data rather
+    # than inside the agent's config root: the root is the agent's, and remove
+    # --purge already deletes the app data directory, so offboarding takes this
+    # with it and nothing new has to remember it.
+    _ci_data=""
+    if [ -n "$_ci_new" ]; then
+        _ci_data=$(reg_get "$_ci_name" app_data)
+        [ -n "$_ci_data" ] || _ci_data="$(agent_def "$_ci_agent" app_support)/$(agent_def "$_ci_agent" app_prefix)$(capitalize "$_ci_name")"
+        _ci_data="$_ci_data/ide/$(printf '%s' "$_ci_app" | tr ' ' '-')"
+    fi
+
     # The application is not checked for on disk. open resolves a name through
     # LaunchServices, so an IDE installed anywhere but /Applications would fail
     # a path check while open would have found it. A name that resolves to
     # nothing fails in open, with open's own message.
     if [ -n "$_ci_have_path" ]; then
-        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_path"
+        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_data" "$_ci_path"
     else
-        open_ide "$_ci_agent" "$_ci_root" "$_ci_app"
+        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_data"
     fi
 }
 
@@ -4108,13 +4197,20 @@ PINNED EXECUTION
   which [--label]         Which profile this shell is pinned to, if any.
 
 IDEs
-  code <name> [path] [--app NAME]
+  code <name> [path] [--app NAME] [--new-instance]
                           Launch VS Code pinned to a profile, opening PATH if
                           given. --app names another application in the same
-                          family, such as --app Cursor.
+                          family, such as --app Cursor. Refuses when that
+                          editor is already running, because the launch would
+                          land in the running instance and be pinned to
+                          whatever it was started with; --new-instance starts a
+                          separate one, with its own settings kept under this
+                          profile, so the pin applies anyway.
   idea <name> [path] [--app NAME]
                           The same for the JetBrains IDEs, IntelliJ IDEA by
-                          default; --app PyCharm and so on.
+                          default; --app PyCharm and so on. It refuses on a
+                          running IDE for the same reason, and has no
+                          --new-instance: quit it and run this again.
                           An IDE started any other way runs its Claude Code
                           extension unpinned, because the extension takes the
                           config root from the IDE's own process environment

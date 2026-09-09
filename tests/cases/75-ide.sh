@@ -363,3 +363,122 @@ run_case "verify reports F21 ok with an extension"    case_verify_reports_f21_ok
 run_case "verify notes an IDE without the extension"  case_verify_notes_an_ide_without_the_extension
 run_case "verify says how to settle F19 and F20"      case_verify_says_how_to_settle_f19_and_f20
 run_case "help and completions name code and idea"    case_help_and_completions_name_the_ide_commands
+
+# ---------------------------------------------------------------------------
+# A running editor
+#
+# The case the original tests could not reach. Every one of them ran under
+# AGENT_PROFILE_DRY_RUN and asserted the command string, which was correct and
+# still let a real defect through: -n does not stop VS Code handing the folder
+# to an instance that is already up, so the window came back pinned to the
+# wrong profile. These drive the decision instead of the string.
+# ---------------------------------------------------------------------------
+
+# fake_pgrep <dir> <running|quiet|broken>: a stand-in pgrep with a fixed
+# answer, so the three branches of ide_running can each be reached from a test.
+fake_pgrep() {
+    mkdir -p "$1"
+    case "$2" in
+        running) printf '#!/bin/sh\nexit 0\n' > "$1/pgrep" ;;
+        quiet)   printf '#!/bin/sh\nexit 1\n' > "$1/pgrep" ;;
+        broken)  printf '#!/bin/sh\nexit 3\n' > "$1/pgrep" ;;
+        *) fail "fake_pgrep: unknown mode '$2'"; return 1 ;;
+    esac
+    chmod +x "$1/pgrep"
+}
+
+case_code_refuses_when_the_editor_is_running() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "already running" || return
+    assert_contains "$out" "--new-instance" || return
+    # It must not have printed a launch it is refusing to perform.
+    assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
+}
+
+case_code_launches_when_the_editor_is_not_running() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" quiet
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet"
+}
+
+# Fails closed. An unusable pgrep must read as "running", not as "clear to go":
+# the cost of being wrong the other way is a session in another customer's root.
+case_code_refuses_when_it_cannot_tell() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" broken
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "could not be determined" || return
+    assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
+}
+
+case_new_instance_launches_past_a_running_editor() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project --new-instance 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_contains "$out" "--user-data-dir" || return
+    assert_contains "$out" "/ide/Visual-Studio-Code" || return
+    # The path still reaches the editor, after the user data directory rather
+    # than straight after --args. Asserted as the last argument, because a path
+    # that landed anywhere else would be read as a value for another flag.
+    case "$out" in
+        *" /tmp/project") ;;
+        *) fail "the path must be the last argument" "got: $out"; return ;;
+    esac
+}
+
+# The user data directory is what makes the instance separate, so it has to be
+# the application's argument, after --args, exactly as --env has to be open's,
+# before it. On the wrong side it is silently ignored and the instance is not
+# separate at all.
+case_new_instance_puts_user_data_dir_after_args() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet --new-instance 2>&1)
+    before=${out%%--args*}
+    case "$before" in
+        *--user-data-dir*) fail "--user-data-dir must come after --args" "got: $out"; return ;;
+    esac
+    assert_contains "$out" "--args --user-data-dir"
+}
+
+# It lives under the profile's app data directory, which remove --purge already
+# deletes, so an offboarding does not leave a customer's editor state behind.
+case_new_instance_user_data_dir_sits_under_the_app_data_dir() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet --new-instance 2>&1)
+    assert_contains "$out" "Application Support/Claude-Bouvet/ide/Visual-Studio-Code"
+}
+
+case_new_instance_is_refused_for_jetbrains() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet --new-instance 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "VS Code mechanism" || return
+    assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
+}
+
+case_idea_refuses_when_the_ide_is_running() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "already running"
+}
+run_case "code refuses a running editor"              case_code_refuses_when_the_editor_is_running
+run_case "code launches when nothing is running"      case_code_launches_when_the_editor_is_not_running
+run_case "code refuses when it cannot tell"           case_code_refuses_when_it_cannot_tell
+run_case "--new-instance launches past a running one" case_new_instance_launches_past_a_running_editor
+run_case "--user-data-dir comes after --args"         case_new_instance_puts_user_data_dir_after_args
+run_case "the instance data sits under app data"      case_new_instance_user_data_dir_sits_under_the_app_data_dir
+run_case "--new-instance is refused for JetBrains"    case_new_instance_is_refused_for_jetbrains
+run_case "idea refuses a running IDE"                 case_idea_refuses_when_the_ide_is_running
