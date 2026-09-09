@@ -285,12 +285,13 @@ unpinned. Know what is still open, one honest sentence each:
   regardless of what is pinned; `doctor`'s D09 flags that the handler is
   installed, and the only mitigation is to open the project from a pinned
   shell instead of clicking the link.
-- **An IDE opened any way but `agpin code` or `agpin idea`.** The Claude Code
-  extension takes its config root from the IDE's own process environment, so an
-  IDE started from the Dock, Spotlight, Launchpad or a login item runs it
-  unpinned; `agpin code <profile> [path]` and `agpin idea <profile> [path]` are
-  the only launches that carry a root, `doctor`'s D16 reports that an extension
-  is installed, and `docs/FACTS.md` F19 to F21 record what each family does.
+- **An IDE opened any way but `agent-profile code` or `agent-profile idea`.**
+  The Claude Code extension takes its config root from the IDE's own process
+  environment, so an IDE started from the Dock, Spotlight, Launchpad or a login
+  item runs its extension unpinned and every session in it writes to the
+  default root; those two commands are the only launches that carry a root,
+  `doctor`'s D16 reports that an extension is installed, and `docs/FACTS.md`
+  F19 to F21 record what each family does.
 - **An IDE extension pinned by its own settings rather than by its launch.**
   VS Code's `claudeCode.environmentVariables` does reach the agent the
   extension spawns, but not the extension's own config home, so its settings,

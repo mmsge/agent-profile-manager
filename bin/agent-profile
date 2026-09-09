@@ -2157,9 +2157,9 @@ Try: $SELF $_ci_cmd <profile> [path] [--app NAME]"
     _ci_agent=$(profile_agent "$_ci_name")
     _ci_root=$(profile_root "$_ci_name")
 
-    # The default application is the first IDE this subcommand covers. Naming
-    # the family in the message matters: someone running `code` for Cursor has
-    # to be told the flag exists before they conclude the tool cannot do it.
+    # The default application is the first IDE this subcommand covers, read
+    # from the seam rather than written here, so a family's default and the
+    # rule that audits that family come from one place.
     if [ -z "$_ci_app" ]; then
         _ci_first=$(ides_for_command "$_ci_cmd" | head -1)
         [ -n "$_ci_first" ] || die "internal: no IDE is registered for '$_ci_cmd'"
@@ -3288,12 +3288,6 @@ cmd_verify() {
     # told apart: nothing installed is a pass, nothing looked at is unchecked.
     # Without it, an extensions directory that moved would turn D16 into a
     # rule that reports a clean machine because it looked in the wrong place.
-    _ver_ide_found=0
-    for _ver_ide in $KNOWN_IDES; do
-        _ver_ide_hits=$(ide_scan "$_ver_ide" | grep -c '')
-        _ver_ide_found=$((_ver_ide_found + _ver_ide_hits))
-    done
-
     # F19 and F20 need a real IDE and a real session, the same way F01 does.
     # Both were established by reading the shipped extension and plugin rather
     # than by watching a session land in a root, so verify says how to settle
@@ -3309,6 +3303,12 @@ cmd_verify() {
         "spawns but not the extension's own config home, and the JetBrains Config" \
         "directory setting only moves the plugin's lock file. Pin the IDE itself." \
         "See docs/FACTS.md F20."
+
+    _ver_ide_found=0
+    for _ver_ide in $KNOWN_IDES; do
+        _ver_ide_hits=$(ide_scan "$_ver_ide" | grep -c '')
+        _ver_ide_found=$((_ver_ide_found + _ver_ide_hits))
+    done
 
     if [ "$_ver_ide_found" -gt 0 ]; then
         vok "F21" "$_ver_ide_found Claude Code IDE extension(s) found where D16 looks; doctor reports each as D16"
