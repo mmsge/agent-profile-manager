@@ -424,6 +424,280 @@ than deriving one from the other.
 
 ---
 
+## IDE extensions
+
+The Claude Code extensions for VS Code, Cursor and the JetBrains IDEs are a
+launch path of their own: they start a Claude Code session from inside the IDE,
+so the shell guard is not involved and the desktop launcher is not involved
+either. F19 to F21 are what this tool needs to know about them.
+
+**How this section was established.** No IDE was installed on the machine that
+wrote it, and it was not macOS, so nothing here was observed at runtime.
+Everything below was read out of the shipped artifacts themselves, downloaded
+and unpacked on 2026-09-09:
+
+| Artifact | Version | Where it came from |
+| --- | --- | --- |
+| `anthropic.claude-code` VSIX, `linux-x64` | 2.1.266 | VS Code Marketplace |
+| `anthropic.claude-code` VSIX, `darwin-arm64` | 2.1.266 | VS Code Marketplace |
+| `Anthropic.claude-code` VSIX, `darwin-arm64` | 2.1.266 | Open VSX, the registry Cursor installs from |
+| `claude-code-jetbrains-plugin-0.1.14-beta.zip` | 0.1.14-beta | JetBrains Marketplace, plugin id 27310, `com.anthropic.code.plugin` |
+| The Claude Code CLI binary | 2.1.266 | Installed on the machine that wrote this |
+
+Two identities were checked, because they are what make the reading
+transferable.
+
+**The macOS extension is the same code as the one that was read.** The
+`darwin-arm64` VSIX ships a byte-identical `extension.js` and `package.json` to
+the `linux-x64` one; only `resources/native-binaries/<platform>/` differs. So a
+statement about the extension's JavaScript is a statement about the macOS
+build.
+
+**Cursor installs the same extension.** The `darwin-arm64` VSIX from Open VSX,
+the registry Cursor draws from, is byte-identical to the one from the VS Code
+Marketplace, `9a8ffa7418e54636b8667f6d6934e1aa85f3669a13dd48b0db94e54c6c2a29b8`.
+There is no separate Cursor build to read.
+
+Reading a shipped artifact is stronger evidence than reading documentation and
+weaker than watching a real session land in a root. Each entry below says which
+of the two it is, and gives the command that settles it on a real Mac.
+
+### F19 Do the IDE extensions honour `CLAUDE_CONFIG_DIR` from the IDE's process environment?
+
+**Status:** `VERIFIED` 2026-09-09 from the shipped extension and plugin, at
+Claude Code 2.1.266 and JetBrains plugin 0.1.14-beta. Answer: **yes for VS Code
+and Cursor**, and **the question does not arise in that form for JetBrains**,
+which never spawns the CLI itself.
+
+**VS Code and Cursor.** The extension bundles its own copy of the CLI and
+spawns it. The environment that child gets is built in one function in
+`extension/extension.js`, quoted in full:
+
+```js
+function v9($){let Q=Yu$(F1("environmentVariables")),J={...process.env};
+if($)J.PATH=$;J.MCP_CONNECTION_NONBLOCKING="true",J.CLAUDE_CODE_ENABLE_TASKS="0";
+for(let X of Q)if(X.name)J[X.name]=X.value||"";
+return J.CLAUDE_CODE_ENTRYPOINT="claude-vscode",delete J.CLAUDECODE,
+delete J.CLAUDE_CODE_CHILD_SESSION,delete J.TRACEPARENT,delete J.TRACESTATE,J}
+```
+
+It starts from `{...process.env}`, the extension host's own environment, and
+the only four variables it removes are `CLAUDECODE`,
+`CLAUDE_CODE_CHILD_SESSION`, `TRACEPARENT` and `TRACESTATE`.
+`CLAUDE_CONFIG_DIR` is not one of them, so it is inherited. That result is the
+env of the spawn: the binary resolver returns
+`{pathToClaudeCodeExecutable, executableArgs, env}` with `env` set to this
+function's return value.
+
+The extension reads the variable for itself as well:
+
+```js
+function z8(){if(process.env.CLAUDE_CONFIG_DIR)return process.env.CLAUDE_CONFIG_DIR;
+return O7.join(XI.homedir(),".claude")}
+```
+
+so the config home it uses for user settings, plans, output styles, the live
+session registry and its own IDE lock file follows the same variable.
+
+The bundled CLI is a real one, not a wrapper: `resources/native-binary/claude`
+in the `linux-x64` VSIX is byte-identical to the installed Claude Code 2.1.266
+on the machine that read it,
+`19842705e989393fce936804df6d2ab034860e24b8f8880357981d87ffd83fac`. The
+documentation says the same thing in one sentence: "The extension bundles its
+own copy of the CLI (command-line interface) for the chat panel"
+([vs-code](https://code.claude.com/docs/en/vs-code)).
+
+**The consequence is F17's consequence, one layer out.** The pin has to be in
+the IDE's *process* environment, exactly as it has to be in the desktop app's
+(F01). A Dock, Spotlight or Launchpad launch of VS Code carries no
+`CLAUDE_CONFIG_DIR`, so the extension's sessions write to the default root. The
+same documentation page says as much about a different variable: "If you have
+`ANTHROPIC_API_KEY` set in your shell but still see the sign-in prompt, VS Code
+may not have inherited your shell environment. Launch VS Code from a terminal
+with `code .` so it inherits your environment variables" (same page).
+
+**JetBrains.** The plugin does not spawn Claude Code at all. It opens a shell
+widget in the IDE's own terminal and types the configured command into it:
+`TerminalUtil.openClaudeInTerminal` calls `createShellWidget` and then
+`sendCommandToExecute(claudeCommand)`. The documentation states the same: "The
+plugin runs the `claude` command in your IDE's integrated terminal and connects
+to it. It does not bundle its own copy of the CLI, so install both pieces"
+([jetbrains](https://code.claude.com/docs/en/jetbrains)).
+
+So the CLI it starts is the one on `PATH`, run by an interactive shell that
+sources your rc file. **A `guard` function in that rc file does see this call**,
+which the VS Code path never does. What the plugin itself adds to the terminal
+environment is two variables and no more:
+`TerminalCustomizer.customizeCommandAndEnvironment` puts
+`ENABLE_IDE_INTEGRATION=true` and `CLAUDE_CODE_SSE_PORT=<port>` into the map and
+returns the command unchanged. Everything else the terminal gets is inherited
+from the IDE process, and then whatever the rc file does on top of it.
+
+**Not verified at runtime.** No IDE was launched. What is read here is the code
+that would run, not a session that did.
+
+**How to re-check,** on a Mac with the IDE and the extension installed:
+
+```sh
+agent-profile code <name> ~/src/some-project   # or: agent-profile idea <name> ~/src/some-project
+# start a Claude Code session in the IDE, then
+find "$HOME"/.claude* -name '*.jsonl' -mmin -3
+```
+
+The path it prints is the root actually in use. Repeat the same test after
+launching the IDE from the Dock instead; the two answers should differ, and
+that difference is the whole reason D16 exists.
+
+### F20 Does any of them expose a setting for the config root?
+
+**Status:** `VERIFIED` 2026-09-09 from the shipped artifacts. Answer: **both do,
+and they are not the same kind of setting.** The VS Code one pins the CLI. The
+JetBrains one pins nothing at all.
+
+**VS Code and Cursor: `claudeCode.environmentVariables`.** Declared in the
+extension's `package.json` as an array of `{name, value}` objects at `machine`
+scope, described as "Environment variables to set when launching Claude." In
+`v9()` above, the loop that applies it runs *after* `{...process.env}`, so a
+`CLAUDE_CONFIG_DIR` entry there overrides the inherited value rather than
+losing to it. Setting it does pin the CLI the extension spawns.
+
+**It pins only half the extension.** `z8()`, quoted under F19, reads
+`process.env` directly and never consults the setting. So an IDE launched
+unpinned, with `claudeCode.environmentVariables` naming a root, ends up with
+the spawned CLI writing to that root while the extension's own config home, its
+user settings, plans, session registry and IDE lock file, stays on the default
+one. That is F18's two-identities problem in a second place, and it is why this
+tool pins the IDE's process environment with `open --env` rather than writing
+this setting.
+
+There is also `claudeCode.claudeProcessWrapper`, "Executable path used to
+launch the Claude process", which replaces the bundled binary outright. Nothing
+in this tool touches it, and a wrapper is another way an installation can
+differ from what D16 assumes.
+
+**JetBrains: a `Config directory` setting that is not a pin.** The plugin's
+settings hold a `claudeConfigDir` string, shown as **Settings → Tools → Claude
+Code [Beta] → Config directory**, with this comment, verbatim from the plugin
+jar: "Custom Claude config directory. This should be set to the same value as
+the CLAUDE_CONFIG_DIR environment variable."
+
+The comment is accurate, and worth reading twice. The setting is read in
+exactly one place, `LockFileUtil.ensureLockFileDirectory()`, which picks a
+directory in this order: the setting, then `System.getenv("CLAUDE_CONFIG_DIR")`,
+then `~/.claude`, and appends `ide` to it. It decides where the plugin writes
+`<dir>/ide/<port>.lock`, and nothing else. It is never put into the terminal
+environment, and no other class in the plugin reads it. The documentation
+describes the same lock file from the CLI's side: "Each IDE start generates a
+fresh random auth token, writes it to a lock file at `~/.claude/ide/<port>.lock`
+[...] If `CLAUDE_CONFIG_DIR` is set, the lock file is written to
+`$CLAUDE_CONFIG_DIR/ide/` instead"
+([jetbrains](https://code.claude.com/docs/en/jetbrains)).
+
+**So filling it in pins nothing.** Someone who finds "Config directory" in the
+plugin settings and fills it in has told the plugin where to leave a lock file
+for a CLI that is pinned some other way. Their sessions still go wherever the
+terminal's `CLAUDE_CONFIG_DIR` says. The JetBrains documentation page does not
+list this setting at all, which makes the misreading likelier rather than less
+likely.
+
+**How to re-check:** in VS Code, Settings → Extensions → Claude Code, and
+confirm `claudeCode.environmentVariables` is still there and still applied
+after `process.env`. In a JetBrains IDE, Settings → Tools → Claude Code [Beta],
+and confirm the Config directory comment still says it mirrors the variable
+rather than sets it.
+
+### F21 Where does each extension record its installed presence on disk?
+
+**Status:** `VERIFIED` 2026-09-09 for the JetBrains plugin directory name and
+for the VS Code extension id; `DOCUMENTED` for the VS Code extensions
+directory; `UNVERIFIED` for Cursor's extensions directory. This is what D16
+scans, so the mixed status matters.
+
+**The extension id is `anthropic.claude-code`.** The CLI hard-codes it in both
+directions, as the string it looks for and the one it installs:
+
+```js
+var uoo="anthropic.claude-code";
+... (await Be(n,["--list-extensions"],{env:hQe()})).stdout?.includes(uoo)
+... await Be(n,["--force","--install-extension","anthropic.claude-code"],{env:hQe()})
+```
+
+The same path covers Cursor: the CLI's IDE table gives `cursor`, `windsurf` and
+`vscode` the kind `vscode`, and the kind is what selects this branch. The VSIX
+manifest confirms the two halves, `Publisher="Anthropic"` and `Id="claude-code"`.
+
+**`--list-extensions` is the authoritative check, and this tool will not use
+it.** It is what the CLI itself asks, and it stays right whatever the
+extensions directory has been moved to. It also means running the IDE's own
+binary, which is a different class of act from what `doctor` does: `doctor`
+reads the filesystem and asks the Keychain about named services. So D16 reads
+directories instead, and this entry records that a directory is the weaker of
+the two answers.
+
+**VS Code:** `~/.vscode/extensions`, per the VS Code documentation, which gives
+`%USERPROFILE%\.vscode\extensions` on Windows and `~/.vscode/extensions` on
+macOS and Linux, and adds: "You can change the location by launching VS Code
+with the `--extensions-dir <dir>` command-line option"
+([extension-marketplace](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace)).
+Inside it, an extension is a directory whose name begins with its id. D16
+matches `anthropic.claude-code-*` rather than a full name, because the version
+and, for a platform-specific build such as this one, the target platform are
+appended, and pinning the exact suffix would make the rule wrong on the next
+release.
+
+**Cursor:** `~/.cursor/extensions`, by the same convention, Cursor being a VS
+Code fork. **This is the one path in this section with no source behind it.** No
+Cursor documentation naming it was found, and no Cursor install was available
+to look at. D16 looks there, and it may be looking in the wrong place.
+
+**JetBrains:** a directory named `claude-code-jetbrains-plugin` under an IDE
+config directory's `plugins`. The name is verified twice over: it is the
+top-level directory inside the marketplace zip, and it is the constant the CLI
+looks for, `var Jro="claude-code-jetbrains-plugin"`. The directories the CLI
+searches on macOS are, verbatim from its own source:
+
+```js
+case"darwin":if(r.push(QT(n,"Library","Application Support","JetBrains"),
+QT(n,"Library","Application Support")),
+e.toLowerCase()==="androidstudio")r.push(QT(n,"Library","Application Support","Google"));break;
+```
+
+with `n` the home directory. It then matches each entry against the product
+name (`IntelliJIdea`, `IdeaIC`, `PyCharm`, `WebStorm`, `PhpStorm`, `RubyMine`,
+`CLion`, `GoLand`, `Rider`, `DataGrip`, `AppCode`, `DataSpell`, `Aqua`,
+`Gateway`, `Fleet`, `AndroidStudio`), appends `plugins`, and checks for the
+plugin directory inside. So on macOS the full path is
+
+```
+~/Library/Application Support/JetBrains/<Product><Version>/plugins/claude-code-jetbrains-plugin
+```
+
+and D16 scans those three roots one level deep for
+`*/plugins/claude-code-jetbrains-plugin`.
+
+**What D16 cannot see.** An extensions directory moved with `--extensions-dir`,
+a portable install, a JetBrains Toolbox layout that puts the config somewhere
+else, and a remote or Dev Container install, where the extension lives on the
+other machine entirely. Each of those makes D16 quiet on a machine that does
+have the extension, which is a false negative rather than a false alarm.
+`verify` reports F21 as unchecked rather than passing when it finds no
+extensions directory at all, so silence from D16 is at least labelled.
+
+**How to re-check:**
+
+```sh
+code --list-extensions | grep anthropic.claude-code
+cursor --list-extensions | grep anthropic.claude-code
+ls -d ~/.vscode/extensions/anthropic.claude-code-*
+ls -d ~/.cursor/extensions/anthropic.claude-code-*
+ls -d ~/Library/Application\ Support/JetBrains/*/plugins/claude-code-jetbrains-plugin
+```
+
+If the first two find the extension and the last three find nothing, the
+directory layout has moved and D16 is looking in the wrong place.
+
+---
+
 ## Windows
 
 **No Windows machine has been probed.** Everything in this section was read out
