@@ -15,11 +15,17 @@ class Agpin < Formula
   url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.9.0/agent-profile-0.9.0.tar.gz"
   version "0.9.0"
 
-  # From the v0.9.0 release's own SHA256SUMS, checked three ways before it was
-  # written here: against the tarball downloaded from the release, against the
-  # published sums file, and against a tarball rebuilt from the v0.9.0 tag on
-  # different hardware and a different operating system from the runner, which
-  # reproduced this sum exactly. Replace it on every release, the same way.
+  # The row for this tarball in the release's own SHA256SUMS, checked against
+  # the tarball downloaded from that same release, and against the Sigstore
+  # signature on both, before it was written here. Those are the checks
+  # .github/workflows/homebrew-formula.yml makes on every release; it proposes
+  # this line in a pull request and a person merges it.
+  #
+  # The check it cannot make is the one that matters most: rebuilding the
+  # tarball from the tag on other hardware and getting this sum again. That
+  # says the release is the tree the tag names, rather than merely intact and
+  # signed, and it is the reviewer's to make. v0.8.0 and v0.9.0 were each
+  # given it by hand.
   sha256 "a2ac334040e810f3284cdf1ca7771ea06fb961f091695e4f4908f2feaf9f492a"
 
   # Homebrew audits for this, and it must match the LICENSE file at the
