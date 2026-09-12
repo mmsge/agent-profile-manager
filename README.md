@@ -1301,7 +1301,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 303 tests, no dependencies
+tests/run.sh              # 313 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
@@ -1311,6 +1311,15 @@ run `tools/gen-test-count.sh` and commit the README.md change it makes. `tools/g
 both the suite's count and README.md's, if the two disagree. Nobody has to
 compute the number by hand again, which is what used to make this line
 collide between branches that both added tests.
+
+The "What doctor reads" table is generated too. After changing what a rule
+reads, update the `# doctor reads (D07):` comment beside it and run
+`tools/gen-doctor-reads.sh`, then commit the README.md change it makes. The
+suite runs `tools/gen-doctor-reads.sh --check` against this checkout, so a
+table that no longer matches the source fails there, naming the rule rather
+than printing a diff. What goes in a declaration, and what the table can and
+cannot promise because of it, is in
+[What the table is derived from](#what-the-table-is-derived-from).
 
 CI runs the suite on macOS under both `/bin/bash` (the real 3.2) and Homebrew's
 latest bash. Tests never touch a real config root: every path the script

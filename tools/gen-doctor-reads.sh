@@ -53,11 +53,11 @@ END_MARK='<!-- END GENERATED: what doctor reads -->'
 
 TAB=$(printf '\t')
 
-MODE=write
+MODE="write"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --check) MODE=check ;;
+        --check) MODE="check" ;;
         -h|--help)
             printf 'usage: %s [--check]\n' "$SELF"
             exit 0
@@ -253,7 +253,7 @@ if [ "$MODE" = check ]; then
         elif [ "$_cur" != "$_row" ]; then
             printf "%s: README.md's row for %s is not what bin/agent-profile declares\n" \
                 "$SELF" "$_rule" >&2
-            printf '  README.md:       %s\n' "$_cur" >&2
+            printf '  README.md:         %s\n' "$_cur" >&2
             printf '  bin/agent-profile: %s\n' "$_row" >&2
             _reported=$((_reported + 1))
         fi
