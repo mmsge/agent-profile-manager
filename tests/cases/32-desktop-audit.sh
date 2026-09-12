@@ -299,7 +299,7 @@ print("%s|%s" % (rule["status"], rule["reason"] or ""))
 ' "$_rule")
         case "$_got" in
             not_run\|*test-not-darwin*) ;;
-            *) fail "$_rule should be not_run naming the platform" "got: $_got" ;;
+            *) fail "$_rule should be not_run naming the platform" "got: $_got"; return ;;
         esac
     done
 }
