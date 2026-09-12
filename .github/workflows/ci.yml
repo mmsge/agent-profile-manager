@@ -107,4 +107,4 @@ jobs:
         run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 
       - name: Refuse bash 4 constructs
-        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/update-homebrew-formula.sh tests/run.sh
+        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/gen-doctor-reads.sh tools/update-homebrew-formula.sh tests/run.sh
