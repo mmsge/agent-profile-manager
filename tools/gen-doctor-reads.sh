@@ -150,11 +150,14 @@ awk '
 ' "$SOURCE" > "$_tmp_decls"
 
 if grep -q "^!$TAB" "$_tmp_decls"; then
-    _bad=$(sed -n "s/^!$TAB\\([0-9]*\\)$TAB/  line \\1: /p" "$_tmp_decls")
-    die "a 'doctor reads' declaration in bin/agent-profile is not in the expected shape" \
-        "$_bad" \
-        "Expected: # doctor reads (D07):  followed by lines indented two" \
-        "spaces past the '#'."
+    # Printed here rather than through die(), so a second bad header lines up
+    # under the first instead of hanging off the end of one argument.
+    printf "%s: a 'doctor reads' declaration in bin/agent-profile is not in the expected shape\n" \
+        "$SELF" >&2
+    sed -n "s/^!$TAB\\([0-9]*\\)$TAB/  line \\1: /p" "$_tmp_decls" >&2
+    printf '  Expected: # doctor reads (D07):  followed by lines indented two\n' >&2
+    printf "  spaces past the '#'.\n" >&2
+    exit 1
 fi
 
 # A declaration for a rule the catalogue does not have is as much a drift as a
