@@ -357,13 +357,16 @@ SECEOF
 
 # guidance_fixture: a machine on which every doctor rule has the chance to
 # fire, so a claim about a rule is checked against a rule that really ran.
-# Without osadecompile D13 and D14 report themselves as not run, and without a
-# Keychain so do D11 and D12.
+# Without osadecompile D13 and D14 report themselves as not run, without a
+# Keychain so do D11 and D12, and without a defaults so does D17. The Dock
+# holds only applets here, which is the healthy machine: the rule runs and
+# finds nothing, which is what makes a claim about it answerable.
 guidance_fixture() {
     HOME=$(new_home); export HOME
     mkdir -p "$HOME/Claude.app"
     fake_osa "$HOME/fakebin"
     fake_open "$HOME/fakebin" env
+    fake_defaults "$HOME/fakebin" applets
     "$AP" new bouvet >/dev/null 2>&1
     fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
     fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
