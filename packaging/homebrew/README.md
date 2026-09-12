@@ -82,11 +82,11 @@ So these are still yours, in this order:
 4. Copy the merged formula to the tap, below. Nothing automatic goes near that
    repository.
 
-The pull request carries no checks of its own until somebody asks for them.
-GitHub starts no workflow run from a push or a pull request that a
-`GITHUB_TOKEN` made, so the workflow asks `ci.yml` to run on the branch by
-`workflow_dispatch`, which is the documented exception. If the checks are
-missing anyway, close and reopen the pull request.
+The pull request does not start CI by itself. GitHub runs no workflow for a
+push or a pull request that a `GITHUB_TOKEN` made, so the formula workflow
+asks `ci.yml` to run on the branch through `workflow_dispatch`, which is the
+documented exception to that rule. If the checks are missing anyway, close and
+reopen the pull request.
 
 The workflow also needs **Settings > Actions > General > Allow GitHub Actions
 to create and approve pull requests** to be on. Without it the branch is still

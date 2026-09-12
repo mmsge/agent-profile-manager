@@ -124,7 +124,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.plan.outputs.tag }}
-          VERSION: ${{ steps.plan.outputs.version }}
           TARBALL: ${{ steps.plan.outputs.tarball }}
           BRANCH: ${{ steps.plan.outputs.branch }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -143,6 +142,16 @@ jobs:
             echo "The formula already names $TAG and pins its sum. Nothing to open."
             echo "opened=no" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # There is a change to propose, so there has to be somewhere to
+          # propose it against. Refuse rather than guess, the way release.yml
+          # refuses when it cannot read this.
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "could not read the repository's default branch, so there is nothing" >&2
+            echo "to open a pull request against. The formula change is not lost: run" >&2
+            echo "tools/update-homebrew-formula.sh $TAG from a checkout." >&2
+            exit 1
           fi
 
           # Read back out of the file rather than passing the values along, so
