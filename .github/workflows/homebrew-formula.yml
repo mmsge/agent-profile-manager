@@ -1,0 +1,278 @@
+name: Homebrew formula
+
+# Propose the formula change a published release makes possible.
+#
+# packaging/homebrew/agpin.rb pins one tarball's sha256, and that sum cannot
+# exist until the release has been built, so it used to be pasted in by hand
+# afterwards. Until somebody remembered, the formula named a real release and
+# pinned a placeholder, and brew install failed for everybody. That is the
+# right failure and the wrong state to be in.
+#
+# A pull request, never a push. The pin is worth having because a person
+# looked at the release before the tap trusted it; a workflow that rewrote the
+# default branch would remove exactly the check the pin exists to provide.
+# What is automated here is the mechanical half: reading one number out of the
+# release's own SHA256SUMS, checking it against the tarball, and putting url,
+# version and sha256 into the file together. Reading the result, merging it
+# and copying it to the tap stay a person's, and packaging/homebrew/README.md
+# says why.
+#
+# Two ways in, because one of them cannot work alone. A release published from
+# the web interface by a person fires release: published, and this runs. A
+# release published by release.yml does not: GitHub starts no workflow run
+# from an event a GITHUB_TOKEN caused, or every workflow could start itself.
+# So release.yml dispatches this one by name once the release is up, which is
+# the documented exception to that rule. Both paths end in the same job.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          The published release's tag, with the leading v, for example v0.9.0.
+          The release must already exist: this reads its assets.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    # Not from a draft and not from a prerelease. The formula names the
+    # version a plain 'brew install agpin' gets, and a prerelease is not that.
+    # A manual run has no release object to ask, and the tag is then typed by
+    # somebody who means it.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.release.draft == false && github.event.release.prerelease == false)
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the branch the pull request is made from, and nothing more. The
+      # only ref this job ever writes is named after the release; the default
+      # branch changes when somebody merges the pull request, which is the
+      # decision this workflow exists to preserve.
+      contents: write
+      # Open the pull request.
+      pull-requests: write
+    outputs:
+      branch: ${{ steps.plan.outputs.branch }}
+      opened: ${{ steps.pr.outputs.opened }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The pull request targets the default branch, so the change has to
+          # sit on top of it. The released commit is usually on it, but the
+          # branch can have moved since, and a branch cut from the tag would
+          # propose reverting whatever landed in between.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Read the version from the release
+        id: plan
+        # Through the environment, never interpolated into the script. A
+        # ${{ }} expansion is pasted in as text before the shell sees it, and
+        # a tag is not something this workflow chooses: it comes from a
+        # release payload, or from a person's typing on the manual path, and
+        # this job holds contents: write. release.yml treats its one input the
+        # same way, for the same reason.
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$DISPATCH_TAG"
+          else
+            tag="$RELEASE_TAG"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) echo "'$tag' does not start with a v, so it is not a release tag." >&2; exit 1 ;;
+          esac
+          version="${tag#v}"
+          # The version reaches a URL, a file name and a branch name. Refuse
+          # anything that is not digits and dots before any of that happens.
+          case "$version" in
+            ''|*[!0-9.]*) echo "'$tag' is not a version tag like v0.9.0." >&2; exit 1 ;;
+          esac
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "tarball=agent-profile-$version.tar.gz"
+            echo "branch=homebrew/$tag-sum"
+          } >> "$GITHUB_OUTPUT"
+
+      # So the sum is not the only thing standing between the release page and
+      # the formula. The script checks both bundles when cosign is there, and
+      # says so instead of failing when it is not, so install it and let it
+      # make the check every time.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Update the formula from the release
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -eu
+          tools/update-homebrew-formula.sh "$VERSION"
+
+      - name: Open the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          TARBALL: ${{ steps.plan.outputs.tarball }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          formula=packaging/homebrew/agpin.rb
+          # Built here rather than taken from the release payload: it is the
+          # same address either way, and the body then links somewhere this
+          # workflow chose.
+          release_url="$GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG"
+
+          # Somebody may have updated the formula by hand already, or this may
+          # be a second run for the same release. Nothing to propose is a
+          # result, not a failure.
+          if git diff --quiet -- "$formula"; then
+            echo "The formula already names $TAG and pins its sum. Nothing to open."
+            echo "opened=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # There is a change to propose, so there has to be somewhere to
+          # propose it against. Refuse rather than guess, the way release.yml
+          # refuses when it cannot read this.
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "could not read the repository's default branch, so there is nothing" >&2
+            echo "to open a pull request against. The formula change is not lost: run" >&2
+            echo "tools/update-homebrew-formula.sh $TAG from a checkout." >&2
+            exit 1
+          fi
+
+          # Read back out of the file rather than passing the values along, so
+          # the body quotes what the diff actually says.
+          sum=$(sed -n 's/^  sha256 "\([0-9a-f]*\)"$/\1/p' "$formula" | head -1)
+          url=$(sed -n 's|^  url "\(.*\)"$|\1|p' "$formula" | head -1)
+          if [ -z "$sum" ] || [ -z "$url" ]; then
+            echo "could not read back the url and sha256 just written to $formula" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # -B rather than -b: the runner's checkout is fresh, so the branch
+          # cannot be there, but this is also the shape somebody reproducing
+          # the job by hand ends up running twice.
+          git checkout -B "$BRANCH"
+          git add "$formula"
+          git commit -F - <<COMMIT
+          Pin the $TAG tarball's sha256 in the Homebrew formula
+
+          Written by .github/workflows/homebrew-formula.yml after $TAG was
+          published. The sum is the row for that release's tarball in its own
+          SHA256SUMS, checked against the tarball downloaded from the release
+          before this commit was made.
+          COMMIT
+
+          # Named after the release and written only by this workflow, so a
+          # re-run replaces its own previous attempt rather than failing.
+          git push --force origin "$BRANCH"
+
+          cat > "$RUNNER_TEMP/pr-body.md" <<BODY
+          $TAG is published, so the formula can name it. This sets \`url\`,
+          \`version\` and \`sha256\` in \`packaging/homebrew/agpin.rb\` together, and
+          changes nothing else.
+
+              Release   $TAG
+              Tarball   $TARBALL
+              sha256    $sum
+              url       $url
+
+          $release_url
+
+          Checked on the runner before the branch was written:
+
+          - the row for the tarball in the release's own \`SHA256SUMS\`, matched
+            on the file name exactly. A missing row fails the job rather than
+            writing an empty or partial sum.
+          - that sum against \`$TARBALL\` downloaded from the same release and
+            hashed there, so a swapped or corrupted \`SHA256SUMS\` cannot reach
+            the formula unchecked.
+          - the Sigstore signature on both, which says this repository's release
+            workflow built them under this tag.
+
+          Still a person's job:
+
+          - reading the numbers above against the release page, which is why they
+            are written out here rather than left in a log,
+          - rebuilding the tarball from the tag and confirming the sum reproduces,
+            the third check v0.8.0 and v0.9.0 were given by hand,
+          - merging this, and copying the formula to the tap afterwards. That copy
+            stays deliberate, and \`packaging/homebrew/README.md\` says why.
+
+          Nothing was pushed to \`$DEFAULT_BRANCH\`, and the tap was not touched.
+
+          A push or a pull request made with \`GITHUB_TOKEN\` starts no workflow run,
+          so CI does not pick this branch up by itself. The workflow asks for a run
+          of \`ci.yml\` on it by \`workflow_dispatch\`, which is the documented
+          exception to that rule. If no checks appear below, close and reopen this
+          pull request and they will run.
+
+          Opened by \`.github/workflows/homebrew-formula.yml\`.
+          BODY
+
+          title="Pin the $TAG tarball's sha256 in the Homebrew formula"
+
+          # A second run for the same release updates the pull request it
+          # opened the first time rather than failing on a branch that is
+          # already spoken for.
+          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number' | head -1)
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body-file "$RUNNER_TEMP/pr-body.md"
+            echo "Updated pull request #$existing."
+          elif ! gh pr create \
+              --base "$DEFAULT_BRANCH" \
+              --head "$BRANCH" \
+              --title "$title" \
+              --body-file "$RUNNER_TEMP/pr-body.md"; then
+            echo "Could not open the pull request." >&2
+            echo "If the message above says Actions is not permitted to create pull" >&2
+            echo "requests, turn on Settings > Actions > General > Allow GitHub Actions" >&2
+            echo "to create and approve pull requests." >&2
+            echo "The branch $BRANCH is pushed either way, so nothing is lost: open" >&2
+            echo "the pull request from it by hand." >&2
+            exit 1
+          fi
+          echo "opened=yes" >> "$GITHUB_OUTPUT"
+
+  ci:
+    # The pull request above is authored by GITHUB_TOKEN, and GitHub starts no
+    # workflow run from a push or a pull request one of those made, so it would
+    # otherwise sit there with no checks at all. workflow_dispatch is the
+    # exception, so ask for a run of ci.yml on the branch.
+    #
+    # Its own job, because starting a workflow is a permission the job that
+    # writes the branch has no business also holding, and because a dispatch
+    # that fails must not make an opened pull request look like a failure. If
+    # this job is red the pull request is still there and still correct;
+    # closing and reopening it runs the checks.
+    needs: formula
+    if: needs.formula.outputs.opened == 'yes'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start CI on the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ needs.formula.outputs.branch }}
+        run: |
+          set -eu
+          gh workflow run ci.yml --ref "$BRANCH"
+          echo "Asked for a run of ci.yml on $BRANCH."

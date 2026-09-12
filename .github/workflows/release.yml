@@ -33,6 +33,10 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      # What the formula job below needs to know, and the only thing it is
+      # told: which release to read.
+      tag: ${{ steps.v.outputs.tag }}
     permissions:
       # Create the release and upload its assets.
       contents: write
@@ -220,3 +224,41 @@ jobs:
             "dist/${{ steps.v.outputs.tarball }}.sigstore" \
             dist/SHA256SUMS \
             dist/SHA256SUMS.sigstore
+
+  # The release exists, so the Homebrew formula can name it. That happens in
+  # homebrew-formula.yml, which opens a pull request rather than pushing, and
+  # this is how it hears about a release cut here.
+  #
+  # It has to be told. The release above is published with GITHUB_TOKEN, and
+  # GitHub starts no workflow run from an event a GITHUB_TOKEN caused, so
+  # release: published never fires for it. workflow_dispatch is the documented
+  # exception, and asking for it explicitly is clearer than a release that
+  # silently does not reach the workflow written for it.
+  #
+  # Its own job, holding one permission the publish job above does not need
+  # and not holding any of that job's. A failure here changes nothing about
+  # the release: it is published, signed and installable, and the formula can
+  # be proposed afterwards by running that workflow from the Actions tab with
+  # this tag, or by tools/update-homebrew-formula.sh from a checkout.
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Ask for the Homebrew formula pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "could not read the repository's default branch, so there is no ref" >&2
+            echo "to run the formula workflow from. The release is published; run the" >&2
+            echo "Homebrew formula workflow by hand with tag $TAG." >&2
+            exit 1
+          fi
+          gh workflow run homebrew-formula.yml --ref "$DEFAULT_BRANCH" -f tag="$TAG"
+          echo "Asked homebrew-formula.yml for a pull request pinning $TAG."

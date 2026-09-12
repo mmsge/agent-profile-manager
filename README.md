@@ -50,6 +50,14 @@ agpin new bouvet
 
 ```
 Created profile bouvet
+  agent     claude
+  root      /Users/alex/.claude-bouvet
+  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+
+The root is empty, which is the point: nothing is shared between profiles.
+That also means it has no settings, no hooks and none of the guardrails your
+other profiles may have. Set those up here directly; do not copy them across.
+
 Next: agent-profile run bouvet   (it will ask you to log in)
 ```
 
@@ -95,7 +103,12 @@ agpin app bouvet
 
 ```
 Created /Users/alex/Applications/Claude-Bouvet.app
-Next: start a session in the app, then --explain shows how to confirm the pin.
+  pins      CLAUDE_CONFIG_DIR=/Users/alex/.claude-bouvet
+  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+
+Confirm it actually pins, by starting a Code session in the app and running:
+  find "$HOME"/.claude* -name "*.jsonl" -mmin -3
+The path it prints is the root that is really in use.
 ```
 
 Drag the generated `.app` into the Dock. Repeat per account, then run it again
@@ -200,15 +213,12 @@ Five different kinds of residue, and each is resolved differently:
   unpinned leak, because a profile now claims it. It is still a different
   login from running unpinned, and D11 still says so.
 
-  It costs you D01 permanently, though, and `new` says so, in one line by
-  default: `NOTE: this profile owns the default root (run with --explain for
-  why that matters)`. An unpinned run writes to that same root in the same
-  layout, so on disk it is indistinguishable from that profile's own work.
-  D02 and D03 become the only rules still watching unpinned use, and moving
-  the root to recover D01 is not an option because that invalidates the
-  login. The real guard is never running the agent unpinned at all. Here is
-  the full note, verbatim, from `agent-profile new main --root ~/.claude
-  --explain`:
+  It costs you D01 permanently, though, and `new` says so when you do it. An
+  unpinned run writes to that same root in the same layout, so on disk it is
+  indistinguishable from that profile's own work. D02 and D03 become the only
+  rules still watching unpinned use, and moving the root to recover D01 is not
+  an option because that invalidates the login. The real guard is never
+  running the agent unpinned at all. Here is that note, verbatim:
 
   ```
   NOTE: this profile owns the default root.
@@ -689,56 +699,6 @@ eval "$(agent-profile completion bash)"  # tab-complete commands and profiles
 
 Adding a fourth account is one command and no edit to any file.
 
-### Output levels
-
-`new`, `app` and `which` say what happened and the next command, in a couple
-of lines, because these run many times over a profile's life and the reader
-has usually seen the reasoning before:
-
-```
-$ agent-profile new bouvet
-Created profile bouvet
-Next: agent-profile run bouvet   (it will ask you to log in)
-```
-
-`--explain`, or `AGENT_PROFILE_EXPLAIN=1` set once and left there, restores
-the full rationale these three commands always used to print, unchanged:
-
-```
-$ agent-profile new bouvet --explain
-Created profile bouvet
-  agent     claude
-  root      /Users/alex/.claude-bouvet
-  app data  /Users/alex/Library/Application Support/Claude-Bouvet
-
-The root is empty, which is the point: nothing is shared between profiles.
-That also means it has no settings, no hooks and none of the guardrails your
-other profiles may have. Set those up here directly; do not copy them across.
-
-Next: agent-profile run bouvet   (it will ask you to log in)
-```
-
-`doctor` and `verify` are not part of this: a finding is the product, so every
-finding, and every line under it, prints in full regardless. What they take
-instead is `--quiet`, for a cron entry or a shell hook that should say nothing
-on a clean run and rely on the exit code:
-
-```sh
-agent-profile doctor --quiet || mail -s "isolation problem" me@example.com <<<"$(agent-profile doctor)"
-```
-
-A clean `--quiet` run prints nothing and exits `0`. A run with a finding
-prints every finding, in full, exactly as it does without `--quiet`, and
-exits the same non-zero code as always; `--quiet` only ever removes the
-sentence that says nothing was wrong, never the sentence that says something
-was. `verify --quiet` works the same way, against its own broken and
-unchecked assumptions rather than doctor's findings.
-
-None of this reaches `--json` or `--report FILE`: those are the same document
-at every level, because `--quiet` and `--explain` change what the terminal
-shows, never what a rule found. See
-[A document, not a screenshot](#a-document-not-a-screenshot).
-
 ### Just asking
 
 Run it with no arguments and it asks:
@@ -969,8 +929,7 @@ reading of both, with the code each claim comes from, is
 ## The audit
 
 `doctor` is the command this tool exists for. It exits non-zero and names the
-offender, so it works from a cron entry or a shell hook; add `--quiet` and a
-clean run says nothing at all, see [Output levels](#output-levels).
+offender, so it works from a cron entry or a shell hook.
 
 | Rule | Finding |
 | --- | --- |
@@ -1034,10 +993,7 @@ question. A clean `doctor` on a Linux box is a much smaller claim than a clean
 
 Prose and JSON cannot drift apart, because they are two renderings of one
 record stream: every line these three commands produce goes through a single
-function, and neither format is written anywhere else. `--quiet` and
-`--explain` (see [Output levels](#output-levels)) sit in front of that
-rendering, not inside it, so `--json` and `--report FILE` read exactly the
-same whichever of the two, if either, was also given.
+function, and neither format is written anywhere else.
 
 `doctor --report FILE` writes both `FILE.json` and `FILE.md` side by side, the
 same document twice, one for a machine and one for a person. Either extension
@@ -1345,7 +1301,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 340 tests, no dependencies
+tests/run.sh              # 353 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
@@ -1427,10 +1383,27 @@ own timestamp, so anyone can check the tag out, rebuild it and get the same
 `sha256`. A checksum nobody can reproduce only says the file did not change in
 transit.
 
-Then update `packaging/homebrew/agpin.rb` and the tap, which
-[`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers. The
-formula cannot be updated before the release, because until it exists there is
-no sum to pin.
+The Homebrew formula then catches up on its own, to a point.
+`.github/workflows/homebrew-formula.yml` runs once the release is published:
+it reads the row for the tarball out of the release's own `SHA256SUMS`, hashes
+the tarball it downloads from that same release to check the two agree,
+verifies the Sigstore signature on both, and opens a pull request setting
+`url`, `version` and `sha256` in `packaging/homebrew/agpin.rb` together. A
+missing row or a sum the tarball does not have fails the job rather than
+writing a formula nobody can install from.
+
+A pull request, and never a push. The pin is worth having because somebody
+looked at the release, so the mechanical half is what is automated and the
+looking is not. Three things are still yours: read the pull request against
+the release page, which is why its body names the release, the tarball and the
+sum; rebuild the tarball from the tag and confirm the sum reproduces, which is
+the check no runner can make for you; then merge it and copy the formula to
+the tap. [`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers
+that copy, and `tools/update-homebrew-formula.sh` is the same script by hand
+if the run never happened.
+
+The formula still cannot be updated before the release, because until it
+exists there is no sum to pin.
 
 ## Licence
 
