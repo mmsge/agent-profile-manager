@@ -94,11 +94,17 @@ guidance_raw() {
             # Deliberately generous, and only ever used to notice text the
             # claim selector missed. Missing a phrasing here weakens the
             # guard; it can never fail a line that is already covered.
+            #
+            # Every marker is one that hands the reader something: a colon
+            # with a command after it, or an imperative Run at the head of a
+            # sentence. Bare "run" mid-sentence is not one of them, because
+            # "the app has been run unpinned" is a summary of what was found
+            # and hands the reader nothing. A summary that did tell somebody
+            # to do something would still carry a marker and still be caught.
             instruction = (probe ~ /with: /) || (probe ~ /[^A-Za-z_]Run /) ||
-                          (probe ~ /[^A-Za-z_]run /) || (probe ~ /run: /) ||
-                          (probe ~ /Try: /) || (probe ~ /Re-run:/) ||
-                          (probe ~ /instead: /) || (probe ~ /usage: /) ||
-                          (probe ~ /then: /)
+                          (probe ~ /run: /) || (probe ~ /Try: /) ||
+                          (probe ~ /Re-run:/) || (probe ~ /instead: /) ||
+                          (probe ~ /usage: /) || (probe ~ /then: /)
 
             if (claim)            printf "claim\t%s:%d\t%s\n", fn, NR, text
             else if (instruction) printf "orphan\t%s:%d\t%s\n", fn, NR, text
