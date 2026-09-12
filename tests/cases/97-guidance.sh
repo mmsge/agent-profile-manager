@@ -620,6 +620,13 @@ for rule in doc["rules"]:
     done < "$HOME/refs"
 }
 
+# assert_rule_ran <status>: a rule that ran, whichever way it went.
+assert_rule_ran() {
+    case "$1" in
+        not_run|"") fail "expected the rule to run, got: ${1:-no status at all}" ;;
+    esac
+}
+
 # And the proof that the case above is not vacuous. If every rule ran under
 # every invocation there would be nothing to catch, so pin the one gate that
 # makes the question real: D12 is behind --keychain-scan, and a claim that
@@ -627,14 +634,7 @@ for rule in doc["rules"]:
 case_a_rule_behind_a_flag_does_not_run_without_it() {
     guidance_fixture
     assert_equals "not_run" "$(g_rule_status D12)" || return
-    assert_not_equals_not_run "$(g_rule_status D12 --keychain-scan)"
-}
-
-# assert_not_equals_not_run <status>: a rule that ran, whichever way it went.
-assert_not_equals_not_run() {
-    case "$1" in
-        not_run|"") fail "expected the rule to run, got: ${1:-no status at all}" ;;
-    esac
+    assert_rule_ran "$(g_rule_status D12 --keychain-scan)"
 }
 
 case_every_fact_the_guidance_names_is_recorded() {
