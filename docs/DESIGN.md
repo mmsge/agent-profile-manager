@@ -132,6 +132,22 @@ mentions the config-dir variable, and reports any that no profile names, saying
 which profile owns the root it pins. Set `AGENT_PROFILE_APPLET_DIRS` to search
 elsewhere; it is colon-separated like `PATH`.
 
+D17 and D18 are the other end of the same problem: the launch with no applet in
+front of it at all. D17 reads the Dock, through `defaults read com.apple.dock
+persistent-apps`, and reports the app's own bundle sitting in it, because that
+tile is one click away from a session in the default root. Its other half, the
+login items, cannot be read at all: on Ventura and later that list belongs to
+Background Task Management, and every way to enumerate it needs root or an
+Automation consent dialogue, so D17 reports itself as `limited` and names what
+it did not check rather than passing on it. D18 reports the app data directory
+such a launch writes to, `~/Library/Application Support/Claude`, which is the
+earliest trace one leaves: D01 finds the sessions eventually, but only once the
+app's embedded Claude Code has written a transcript. It names an account if the
+directory holds one the way a config root does, and otherwise the directory and
+when it was last written to, which is the weaker answer and says so in the
+finding. `docs/FACTS.md` F22 records what both read, and how much of it has
+ever been checked on a Mac, which is none of it.
+
 D16 is D09's shape applied to the IDEs: a launch path that exists, that this
 tool cannot pin unless the thing starting it was itself started pinned, and
 that nothing on disk records the launch of. So it reports an installed
@@ -184,8 +200,9 @@ explanatory mode is a threshold and a flag rather than a rewrite.
 The one thing the document has that the prose does not is the rule ledger:
 every rule with a status, not only the ones that fired. That exists because a
 rule can fail to run. `D12` is opt-in behind `--keychain-scan`, `D11` and `D12`
-need a Keychain, `D13` and `D14` need `osadecompile`, and `D16` knows where a
-JetBrains IDE keeps its plugins on macOS only. Silence from a check that
+need a Keychain, `D13` and `D14` need `osadecompile`, `D17` and `D18` need
+macOS and `D17` needs a Dock it can read, and `D16` knows where a JetBrains IDE
+keeps its plugins on macOS only. Silence from a check that
 never ran looks exactly like silence from a check that passed, and a document
 handed to a customer's security officer is the worst possible place for that
 confusion. `not_run` and `limited` are statuses of their own, each carrying the

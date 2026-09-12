@@ -66,7 +66,7 @@ case_table_matches_the_source() {
     # of bin/agent-profile right now.
     gen_reads "$ROOT" --check
     assert_status 0 "$GRSTATUS" "$GROUT" || return
-    assert_contains "$GROUT" "16 rules"
+    assert_contains "$GROUT" "18 rules"
 }
 
 case_a_hand_edited_row_fails_by_name() {
@@ -118,13 +118,13 @@ case_a_rule_the_table_does_not_have_fails() {
     # reads.
     _d=$(docs_fixture)
     awk -v t="$(printf '\t')" '
-        index($0, "\"D16" t) > 0 {
+        index($0, "\"D18" t) > 0 {
             print $0 " \\"
-            print "        \"D17" t "Something new nobody has written down\""
+            print "        \"D42" t "Something new nobody has written down\""
             next
         }
         index($0, "cmd_doctor() {") == 1 {
-            print "# doctor reads (D17):"
+            print "# doctor reads (D42):"
             print "#   Something or other."
             print ""
         }
@@ -132,7 +132,7 @@ case_a_rule_the_table_does_not_have_fails() {
     ' "$_d/bin/agent-profile" > "$_d/bin/edited" && mv "$_d/bin/edited" "$_d/bin/agent-profile"
     gen_reads "$_d" --check
     assert_status 1 "$GRSTATUS" "$GROUT" || return
-    assert_contains "$GROUT" "no row for D17"
+    assert_contains "$GROUT" "no row for D42"
     rm -rf "$_d"
 }
 
