@@ -223,6 +223,110 @@ OPENEOF
     chmod +x "$1/open"
 }
 
+# fake_defaults <bindir> <mode> [app-bundle]: a stand-in defaults(1) that
+# answers `read com.apple.dock persistent-apps` and nothing else.
+#
+# The output is the shape the real one prints: an old-style plist, one
+# dictionary per Dock tile, with the application's path in a percent-encoded
+# `file://` URL under `_CFURLString`. One tile always carries a space in its
+# path, so the percent-decoding is exercised rather than assumed.
+#
+# Modes:
+#   app        the real Claude.app is pinned, which is what D17 reports
+#   applets    only the applets are pinned, which is the healthy machine
+#   empty      an empty Dock
+#   fails      defaults exits non-zero, as it does when the key is absent
+#
+# The third argument is the bundle the "app" mode pins, so a case can pin one
+# whose path only survives the round trip if the URL is really decoded. It
+# defaults to the fixture bundle the desktop cases use.
+fake_defaults() {
+    _fd_dir="$1"
+    _fd_mode="$2"
+    _fd_bundle="${3:-$HOME/Claude.app}"
+    mkdir -p "$_fd_dir"
+    {
+        printf '#!/bin/sh\n'
+        printf '[ "$1" = "read" ] || exit 1\n'
+        printf '[ "$2" = "com.apple.dock" ] || exit 1\n'
+        printf '[ "$3" = "persistent-apps" ] || exit 1\n'
+        if [ "$_fd_mode" = "fails" ]; then
+            printf 'echo "Domain com.apple.dock does not exist" >&2\n'
+            printf 'exit 1\n'
+        else
+            printf "cat <<'DOCKEOF'\n"
+            printf '(\n'
+            if [ "$_fd_mode" != "empty" ]; then
+                printf '        {\n'
+                printf '        GUID = 1105742130;\n'
+                printf '        "tile-data" =         {\n'
+                printf '            book = {length = 620, bytes = 0x626f6f6b6c02 ... 00000000};\n'
+                printf '            "bundle-identifier" = "com.apple.finder";\n'
+                printf '            "file-data" =             {\n'
+                printf '                "_CFURLString" = "file:///System/Library/CoreServices/Finder.app/";\n'
+                printf '                "_CFURLStringType" = 15;\n'
+                printf '            };\n'
+                printf '            "file-label" = Finder;\n'
+                printf '        };\n'
+                printf '        "tile-type" = "file-tile";\n'
+                printf '    },\n'
+                printf '        {\n'
+                printf '        GUID = 1105742131;\n'
+                printf '        "tile-data" =         {\n'
+                printf '            "file-data" =             {\n'
+                printf '                "_CFURLString" = "file:///Applications/Some%%20Other%%20App.app/";\n'
+                printf '                "_CFURLStringType" = 15;\n'
+                printf '            };\n'
+                printf '            "file-label" = "Some Other App";\n'
+                printf '        };\n'
+                printf '        "tile-type" = "file-tile";\n'
+                printf '    },\n'
+            fi
+            if [ "$_fd_mode" = "app" ]; then
+                printf '        {\n'
+                printf '        GUID = 1105742132;\n'
+                printf '        "tile-data" =         {\n'
+                printf '            "bundle-identifier" = "com.anthropic.claudefordesktop";\n'
+                printf '            "file-data" =             {\n'
+                printf '                "_CFURLString" = "file://%s/";\n' "$(url_encode "$_fd_bundle")"
+                printf '                "_CFURLStringType" = 15;\n'
+                printf '            };\n'
+                printf '            "file-label" = Claude;\n'
+                printf '        };\n'
+                printf '        "tile-type" = "file-tile";\n'
+                printf '    },\n'
+            fi
+            if [ "$_fd_mode" != "empty" ]; then
+                printf '        {\n'
+                printf '        GUID = 1105742133;\n'
+                printf '        "tile-data" =         {\n'
+                printf '            "file-data" =             {\n'
+                printf '                "_CFURLString" = "file://%s/";\n' "$(url_encode "$HOME/Applications/Claude-Tide.app")"
+                printf '                "_CFURLStringType" = 15;\n'
+                printf '            };\n'
+                printf '            "file-label" = "Claude-Tide";\n'
+                printf '        };\n'
+                printf '        "tile-type" = "file-tile";\n'
+                printf '    }\n'
+            fi
+            printf ')\n'
+            printf 'DOCKEOF\n'
+        fi
+    } > "$_fd_dir/defaults"
+    chmod +x "$_fd_dir/defaults"
+}
+
+# url_encode <path>: percent-encode a path the way the Dock stores one, so a
+# fixture under a HOME with a space in it is still the shape the real Dock
+# prints rather than a simpler one this tool would parse by accident.
+url_encode() {
+    python3 -c '
+import sys
+from urllib.parse import quote
+print(quote(sys.argv[1]))
+' "$1"
+}
+
 # fake_icon_tools <bindir>: stand-in sips and iconutil that only write markers.
 fake_icon_tools() {
     mkdir -p "$1"
