@@ -734,6 +734,127 @@ directory layout has moved and D16 is looking in the wrong place.
 
 ---
 
+## Direct launches of the desktop app
+
+The applets `app` builds are the only pinned way to open Claude Desktop. The
+app's own icon is not: a tile in the Dock, a Spotlight or Launchpad hit, or an
+Open at Login entry all go through LaunchServices, which passes no environment
+from any shell, so the app comes up with no `CLAUDE_CONFIG_DIR` and with its
+default data directory (F04 and F13 are the same mechanism seen from the other
+side). D17 and D18 are what report those two, and F22 is what they rest on.
+
+**Nothing in this section was observed on a Mac.** It was written on Linux on
+2026-09-12 from Apple's published behaviour and from the shape `defaults`
+prints, and the rules were exercised against a stand-in `defaults` in
+`tests/cases/32-desktop-audit.sh` rather than against a real Dock. The rest of
+this file's macOS facts were checked on **macOS 26.6.2**; this one has not
+been, on that version or any other. Read every status below accordingly, and
+settle them with the commands at the end.
+
+### F22 How are the Dock and the login items read?
+
+**Status:** `UNVERIFIED` 2026-09-12 for the Dock, on no macOS version;
+`UNVERIFIED` 2026-09-12 for the login items, stated for macOS 13 Ventura and
+later, where Background Task Management owns that list. This is what D17
+reads, so the mixed status matters.
+
+**The Dock is read with one command, and one field of its answer.**
+
+```sh
+defaults read com.apple.dock persistent-apps
+```
+
+That prints the pinned applications as an old-style property list, one
+dictionary per tile. Each tile's `tile-data` holds a `file-data` dictionary
+whose `_CFURLString` is the application's location as a percent-encoded
+`file://` URL with a trailing slash, e.g.
+`"file:///Applications/Claude.app/"`. D17 reads that field, percent-decodes
+it, drops the `file://` prefix and the trailing slash, and compares the result
+against `agent_def app_bundle` (by default `/Applications/Claude.app`,
+overridable with `AGENT_PROFILE_APP_BUNDLE`). A match is the finding.
+
+Three things about that reading are deliberate:
+
+- **The `book` blob beside it is never decoded.** Each tile also carries an
+  alias record, `book = {length = 620, bytes = 0x626f6f6b...}`, which encodes
+  the same path in a private format. One spelling of the answer is enough, and
+  the readable one is the right one to take.
+- **The value may be quoted or bare.** An old-style plist quotes a string only
+  when it holds a character it could not take bare, so the parser accepts both
+  spellings rather than assuming the quoted one.
+- **`defaults` failing is not an empty Dock.** A missing domain or key exits
+  non-zero, and D17 reports itself as `not_run` in that case instead of
+  reporting a clean Dock. An empty Dock exits zero with `( )` and is a pass.
+
+**What is not established:** that the key is still called `persistent-apps` and
+still holds `_CFURLString` on current macOS; that `defaults read` reflects a
+Dock the user has just changed, rather than a cached copy the Dock process has
+not yet written out; and whether `persistent-others` or `recent-apps` can hold
+an application tile that should count too. D17 reads `persistent-apps` alone.
+
+**The login items are not read at all, and that is the honest answer.** On
+macOS 13 Ventura and later the list a user sees under System Settings →
+General → Login Items is owned by Background Task Management, and every way to
+enumerate it costs something this tool will not spend:
+
+| Way in | Why not |
+| --- | --- |
+| `sfltool dumpbtm` | Needs root. `doctor` is a read-only audit a user runs as themselves |
+| `osascript -e 'tell application "System Events" to get the path of every login item'` | Triggers an Automation consent dialogue the first time, is slow, and lists only the old LSSharedFileList-style items, not one registered through `SMAppService` |
+| `~/Library/Application Support/com.apple.backgroundtaskmanagementagent/BackgroundItems-v*.btm` | A private binary format, and unreadable without Full Disk Access |
+| `~/Library/LaunchAgents/*.plist` | A real login-start mechanism, but not the one an app's own "Open at Login" checkbox uses on current macOS |
+
+So D17 checks the Dock, and reports itself as `limited` on macOS with the
+reason naming the login items, rather than passing on a question it never
+asked. If a no-privilege, no-prompt read of the Background Task Management
+list ever exists, this is the entry to change.
+
+### What a direct launch leaves behind
+
+**Status:** `REASONED` 2026-09-12 for the directory, from F17 and F18 plus
+Electron's documented default; `UNVERIFIED` 2026-09-12 for what is inside it.
+This is what D18 reads.
+
+`--user-data-dir` selects the app's own data directory, and per-profile ones
+are at `~/Library/Application Support/Claude-<Name>` (F17, F18). With no
+`--user-data-dir`, an Electron app uses `~/Library/Application
+Support/<app name>`, which for this app is
+**`~/Library/Application Support/Claude`**. Every launch that had no applet in
+front of it therefore shares that one directory, and it is the only trace such
+a launch leaves before its embedded Claude Code has written a transcript for
+D01 to find.
+
+D18 reports that directory when it exists and holds any entry at all. It reads
+names, never contents, with one exception: if a `.claude.json` is there it
+reads the `oauthAccount` block, which is the same email and organisation id
+`list` already prints for a root, so the finding can name the account rather
+than only a path.
+
+**The app is not known to store an account that way, and probably does not.**
+Its own login is Electron state, in the Keychain and in the directory's cookie
+and local-storage files, none of which this tool will open. So the fallback is
+the one that will normally fire: the directory and its modification time. That
+is a weaker answer than naming an account and the finding says so in as many
+words. Whether a `.claude.json` ever appears there is the `UNVERIFIED` half of
+this entry; the branch exists so the rule improves by itself if it does.
+
+**How to re-check, on a Mac:**
+
+```sh
+defaults read com.apple.dock persistent-apps | grep _CFURLString
+sfltool dumpbtm 2>&1 | head -5          # expect a permission error, not a list
+ls -la ~/Library/Application\ Support/Claude
+ls ~/Library/Application\ Support/Claude/.claude.json
+```
+
+If the first prints no `_CFURLString`, D17 is reading a key that no longer
+exists and is silent on a Mac that does have the app in its Dock. If the
+second prints a list as an ordinary user, the login-item half of D17 can be
+written and this entry is out of date. If the last one finds a file, D18's
+account branch is live and should be marked `VERIFIED` here.
+
+---
+
 ## Windows
 
 **No Windows machine has been probed.** Everything in this section was read out

@@ -302,6 +302,10 @@ unpinned. Know what is still open, one honest sentence each:
   login items.** Only the generated applet's `open --env` line injects a
   config root, so launching `Claude.app` itself by any other route starts it
   unpinned; put the applet, not the app, in the Dock and in login items.
+  `doctor`'s D17 reports the app's own icon sitting in the Dock and D18 reports
+  the default app data directory once such a launch has written to it, but
+  neither can see the login items: listing those needs root or an Automation
+  consent dialogue, and `docs/FACTS.md` F22 records why.
 - **`command claude`, which is the guard's own escape hatch.** It is
   documented and deliberate, on the theory that an escape hatch you can see
   beats one people find by deleting the guard from their rc file, but it also
@@ -949,6 +953,8 @@ offender, so it works from a cron entry or a shell hook.
 | D14 | A desktop launcher exists that no profile claims |
 | D15 | More than one profile is registered at the same root |
 | D16 | A Claude Code IDE extension is installed and cannot be pinned |
+| D17 | The desktop app itself is in the Dock, so it can be launched unpinned |
+| D18 | The default app data directory has been written to by an unpinned launch |
 
 The reasoning behind the trickier rules, D05's exact Keychain check, D13 and
 D14 on the desktop side, and D03's use of each transcript's own working
@@ -971,7 +977,7 @@ user. Then the registered profiles with their roots, app data directories,
 accounts and organisation ids, then every rule with a status, then the findings
 themselves. The full schema is in [docs/AUDIT-SCHEMA.md](docs/AUDIT-SCHEMA.md).
 
-The rules array is the part worth knowing about. It lists all fifteen rules,
+The rules array is the part worth knowing about. It lists all eighteen rules,
 not only the ones that fired, and a rule that did not run says so rather than
 appearing to pass:
 
@@ -986,9 +992,12 @@ appearing to pass:
 ```
 
 `not_run` is also what `D11` and `D12` get where there is no Keychain to ask,
-and `D13` and `D14` where `osadecompile` is missing so no launcher can be read.
-`D05` without a Keychain is `limited`, because it falls back to a weaker
-question. A clean `doctor` on a Linux box is a much smaller claim than a clean
+`D13` and `D14` where `osadecompile` is missing so no launcher can be read, and
+`D17` and `D18` anywhere but macOS, where there is no Dock and no
+`~/Library/Application Support` to look in. `D05` without a Keychain is
+`limited`, because it falls back to a weaker question, and so is `D17` on macOS
+itself: it reads the Dock, and the login items cannot be listed without root or
+a consent dialogue. A clean `doctor` on a Linux box is a much smaller claim than a clean
 `doctor` on a Mac, and the document is where that shows.
 
 Prose and JSON cannot drift apart, because they are two renderings of one
@@ -1028,6 +1037,8 @@ Keychain query it makes, and which external command it runs, if any.
 | D14 | Every `.app` bundle up to five levels deep under `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop` and `/Applications`) whose compiled script mentions the agent's config variable, decompiled the same way as D13. |
 | D15 | The registry only. No filesystem or Keychain access. |
 | D16 | Directory names one level under `~/.vscode/extensions` and `~/.cursor/extensions`, and one level under `~/Library/Application Support/JetBrains`, `~/Library/Application Support` and `~/Library/Application Support/Google` for a `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in an extension is ever opened, and the IDE's own `--list-extensions` is deliberately not run. |
+| D17 | On macOS, the `persistent-apps` key of the `com.apple.dock` preference domain, via `defaults read com.apple.dock persistent-apps`, and from each tile in it only the `_CFURLString` file URL, which is the path of the pinned application. Nothing is read for the login items: that half of the rule is reported as unchecked, because every way to list them needs root or a consent dialogue. |
+| D18 | On macOS, whether the default app data directory exists and holds any entry at all (names only, nothing inside it is opened), the directory's own modification time, and, when a state file is there, the `oauthAccount` block of it: the account's email and organisation id, the same identity `list` prints for a root. |
 <!-- END GENERATED: what doctor reads -->
 
 No rule ever reads a credential value. The two Keychain queries above,
@@ -1301,7 +1312,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 353 tests, no dependencies
+tests/run.sh              # 373 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```

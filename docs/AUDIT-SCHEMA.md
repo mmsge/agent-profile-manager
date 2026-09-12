@@ -133,10 +133,12 @@ A rule that did not run is never reported as passing. That distinction is the
 point of the array: `D12` is opt-in behind `--keychain-scan`, and a document
 that quietly called it `pass` would be claiming a check that never happened.
 The same applies to `D11` and `D12` where there is no Keychain to ask, to `D13`
-and `D14` where `osadecompile` is missing so no applet can be read, to `D05`,
-which without a Keychain falls back to asking only whether an account is on
-record and is reported as `limited`, and to `D16`, which off macOS knows two of
-the three places an IDE extension can live and is reported as `limited` too.
+and `D14` where `osadecompile` is missing so no applet can be read, to `D17` and
+`D18` anywhere but macOS, to `D05`, which without a Keychain falls back to
+asking only whether an account is on record and is reported as `limited`, to
+`D16`, which off macOS knows two of the three places an IDE extension can live
+and is reported as `limited` too, and to `D17` on macOS, which reads the Dock
+and cannot list the login items without root or a consent dialogue.
 
 `reason` is `null` unless a status was recorded for the rule, which happens
 when it could not run or ran in a weaker form. A rule can both run weakly and
