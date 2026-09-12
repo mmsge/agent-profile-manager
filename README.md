@@ -1009,6 +1009,7 @@ Every rule reads only what it needs to answer one yes or no question, and
 this table says what that is: which files and directories it looks at, which
 Keychain query it makes, and which external command it runs, if any.
 
+<!-- BEGIN GENERATED: what doctor reads (tools/gen-doctor-reads.sh) -->
 | Rule | Reads |
 | --- | --- |
 | D01 | Whether the default root exists, and a count of `*.jsonl` filenames under `<default root>/projects` (names only, not their content), plus the registry, to see whether a profile claims that root. |
@@ -1027,6 +1028,7 @@ Keychain query it makes, and which external command it runs, if any.
 | D14 | Every `.app` bundle up to five levels deep under `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop` and `/Applications`) whose compiled script mentions the agent's config variable, decompiled the same way as D13. |
 | D15 | The registry only. No filesystem or Keychain access. |
 | D16 | Directory names one level under `~/.vscode/extensions` and `~/.cursor/extensions`, and one level under `~/Library/Application Support/JetBrains`, `~/Library/Application Support` and `~/Library/Application Support/Google` for a `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in an extension is ever opened, and the IDE's own `--list-extensions` is deliberately not run. |
+<!-- END GENERATED: what doctor reads -->
 
 No rule ever reads a credential value. The two Keychain queries above,
 `find-generic-password` and `dump-keychain`, both stop at attributes; neither
@@ -1041,12 +1043,30 @@ document header runs the agent's own `--version`, which is the only time
 `oauthAccount` block, the same one D02 and D05 read and the same one `list`
 prints. Neither happens on a plain `doctor` run.
 
-This table is written by hand, not generated. Keeping it honest right now
-means updating it in the same change that changes what a rule reads, the way
-this pull request does for D12. A generator that reads a structured comment
-above each rule and rebuilds this table, checked by a test that regenerating
-produces no diff, is the natural next step and is not done here; see the
-pull request that introduced this table for that scoping.
+### What the table is derived from
+
+The table is generated. `tools/gen-doctor-reads.sh` rebuilds it from
+`bin/agent-profile`, and CI fails when the checked-in table and a regenerated
+one differ, so a table nobody updated cannot survive a change to the rules.
+Run it after changing a rule, and commit the README change it makes.
+
+Two different things go into a row, and it is worth knowing which is which.
+
+The rules come from the code. The generator reads `doctor_rule_catalog()`, the
+same list `doctor --json` reports, so the rows, their order and the fact that
+every rule has one are the program's own answer rather than a second list
+somebody has to remember. A rule added to the code without a row fails the
+check by name, which is the part of the table that cannot go stale.
+
+What each rule reads does not come from the code. It is a declaration written
+beside the rule, a `# doctor reads (D07):` comment above the rule's own body,
+and the generator copies it into the table without understanding it. A
+declaration can be left behind by a change to the code under it, exactly as
+this table used to be. It sits next to what it describes, which is the best
+place for it, and the generator refuses to build a table with a declaration
+missing, unparseable or naming a rule that does not exist. That narrows the
+gap between the document and the code. It does not close it: nothing short of
+reading the rule does.
 
 ## When an engagement ends
 
