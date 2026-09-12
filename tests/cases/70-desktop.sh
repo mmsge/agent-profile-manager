@@ -435,14 +435,22 @@ case_explicit_applet_wins_over_the_scan() {
 
 # The hint used to be built from root_prefix, whose glob ".claude-*" excludes
 # "~/.claude" -- the one place every unpinned session lands, and so the single
-# most important directory the leak test has to see.
+# most important directory the leak test has to see. That hint is behind
+# --explain now; the default form only points at the flag.
 case_the_leak_test_hint_covers_the_default_root() {
     desktop_fixture
-    out=$(desk app tide 2>&1)
+    out=$(desk app tide --explain 2>&1)
     # shellcheck disable=SC2016  # the literal text the hint must print
     assert_contains "$out" '"$HOME"/.claude* -name' || return
     # shellcheck disable=SC2016  # the literal text it must not print
     assert_not_contains "$out" '"$HOME"/.claude-* -name'
+}
+
+case_app_short_form_points_at_explain_instead_of_the_hint() {
+    desktop_fixture
+    out=$(desk app tide 2>&1)
+    assert_not_contains "$out" 'mmin -3' || return
+    assert_contains "$out" '--explain'
 }
 
 run_case "desktop puts --env before --args"           case_desktop_puts_env_before_args
@@ -480,3 +488,4 @@ run_case "app refuses two launchers for one root"   case_app_refuses_when_two_la
 run_case "app falls back to the conventional path"  case_app_falls_back_to_the_conventional_path
 run_case "an explicit --applet wins over the scan"  case_explicit_applet_wins_over_the_scan
 run_case "the leak test hint covers the default root" case_the_leak_test_hint_covers_the_default_root
+run_case "app's short form points at --explain instead" case_app_short_form_points_at_explain_instead_of_the_hint

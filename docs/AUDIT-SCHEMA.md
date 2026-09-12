@@ -23,7 +23,15 @@ recorded but never printed, which is how `doctor`'s prose stays silent about
 healthy profiles while the document still names every one of them. `prose` is
 printed but never recorded, which is how the line saying where a report was
 written stays out of the report. The three ordered levels exist so that a
-quieter or a more explanatory mode is a threshold change rather than a rewrite.
+quieter or a more explanatory mode is a threshold change rather than a
+rewrite: `doctor --quiet` and `verify --quiet` raise the threshold so only
+`always` reaches the terminal, and `--explain` (or `AGENT_PROFILE_EXPLAIN=1`)
+lowers it to `detail`. Either way the record stream itself, and therefore
+every document below, is captured in full regardless of the threshold: a
+level governs what `report_shows` lets reach the terminal as prose, never
+what reaches `--json` or `--report FILE`. See
+[Output levels](../README.md#output-levels) for what `--quiet` and
+`--explain` do on the terminal.
 
 ## Common fields
 

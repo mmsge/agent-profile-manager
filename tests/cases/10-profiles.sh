@@ -85,8 +85,10 @@ case_new_rejects_unknown_agent() {
 }
 
 case_new_warns_root_has_no_guardrails() {
+    # The rationale for why an empty root has no guardrails is long-form now,
+    # restored by --explain; the default form says only what happened.
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet 2>&1)
+    out=$("$AP" new bouvet --explain 2>&1)
     assert_contains "$out" "no settings, no hooks"
 }
 
@@ -210,24 +212,41 @@ case_new_reports_tightening_the_mode_on_adoption() {
 }
 
 # An empty root is still created, not adopted, so the guardrails warning that
-# matters for a fresh profile does not go missing.
+# matters for a fresh profile does not go missing under --explain.
 case_new_still_explains_an_empty_root() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new fresh 2>&1)
+    out=$("$AP" new fresh --explain 2>&1)
     assert_contains "$out" "The root is empty" || return
     assert_not_contains "$out" "adopted rather than created"
+}
+
+# The short default form still says the root is empty, without the paragraph
+# of rationale --explain restores.
+case_new_short_form_still_names_an_empty_root() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" new fresh 2>&1)
+    assert_not_contains "$out" "The root is empty" || return
+    assert_contains "$out" "Next: agent-profile run fresh"
 }
 
 # A profile at the default root permanently silences D01, because an unpinned
 # run and that profile's own runs are identical on disk. Nothing else says so,
 # and by the time it matters the choice cannot be undone: relocating a root
-# invalidates its login.
+# invalidates its login. The full reasoning is behind --explain now; the short
+# form still names the fact so it is never a silent surprise.
 case_new_warns_when_a_profile_claims_the_default_root() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet --root "$HOME/.claude" 2>&1)
+    out=$("$AP" new bouvet --root "$HOME/.claude" --explain 2>&1)
     assert_contains "$out" "owns the default root" || return
     assert_contains "$out" "D01 goes quiet" || return
     assert_contains "$out" "F06"
+}
+
+case_new_short_form_still_names_the_default_root() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" new bouvet --root "$HOME/.claude" 2>&1)
+    assert_contains "$out" "owns the default root" || return
+    assert_not_contains "$out" "D01 goes quiet"
 }
 
 case_new_is_silent_about_it_for_an_ordinary_root() {
@@ -293,7 +312,9 @@ run_case "new adopts a populated root untouched"   case_new_adopts_a_populated_r
 run_case "new does not call a populated root empty" case_new_does_not_call_a_populated_root_empty
 run_case "new reports tightening the mode"         case_new_reports_tightening_the_mode_on_adoption
 run_case "new still explains an empty root"        case_new_still_explains_an_empty_root
+run_case "new's short form still names an empty root"  case_new_short_form_still_names_an_empty_root
 run_case "new warns about the default root"       case_new_warns_when_a_profile_claims_the_default_root
+run_case "new's short form still names the default root" case_new_short_form_still_names_the_default_root
 run_case "new is silent for an ordinary root"     case_new_is_silent_about_it_for_an_ordinary_root
 run_case "a bare profile name runs it"            case_a_bare_profile_name_runs_it
 run_case "a bare profile name forwards arguments" case_a_bare_profile_name_forwards_arguments

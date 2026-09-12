@@ -116,6 +116,10 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 : "${AGENT_PROFILE_APPLET_DIRS:=$AGENT_PROFILE_APPS_DIR:$HOME/Desktop:/Applications}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
 
+# Set by --explain on a command that takes it, or directly by whoever wants
+# the long form every time rather than typing the flag on every command.
+: "${AGENT_PROFILE_EXPLAIN:=}"
+
 # Lets the suite exercise the interactive picker by piping answers. Faking a
 # terminal instead would mean script(1), whose arguments differ between the
 # BSD one on macOS and the util-linux one elsewhere, so the tests would be
@@ -365,14 +369,25 @@ need() {
 #   prose    never recorded; the terminal alone, for a line about the run
 #            itself rather than about the machine being audited
 #
-# REPORT_LEVEL is the threshold, and only "normal" is reachable today. The
-# ordering is here so that a quieter or a more explanatory mode is a change to
-# one comparison and a flag, rather than to every call site.
+# REPORT_LEVEL is the threshold. doctor and verify's own --quiet lowers it to
+# "always" and --explain (global, AGENT_PROFILE_EXPLAIN=1 has the same effect)
+# raises it to "detail", so a quieter or a more explanatory mode is a change to
+# one comparison and a flag, rather than to every call site. A record at
+# "always" is why finding() and vbroken()/vunchecked() use that level rather
+# than "normal": a finding is the product, and --quiet must not be able to
+# hide one. Nothing here is gated at "detail" yet, so --explain has no visible
+# effect on doctor or verify; it only restores the long form of new, app and
+# which, which is a separate flag on those commands rather than a record kind,
+# since none of the three renders a document for --explain to matter to.
 #
 # The record stream is captured only when a structured document was asked for,
-# so an ordinary run pays nothing for this. Fields are separated by NUL,
-# because a path may hold any byte except NUL and a line-based format would
-# lose a root whose name contains a newline.
+# so an ordinary run pays nothing for this, and it is captured in full
+# regardless of REPORT_LEVEL: the level governs what reaches the terminal as
+# prose, never what reaches the document. --quiet and --explain are therefore
+# about the terminal only, and doctor --json, list --json, verify --json and
+# doctor --report are byte-identical at every level. Fields are separated by
+# NUL, because a path may hold any byte except NUL and a line-based format
+# would lose a root whose name contains a newline.
 # ---------------------------------------------------------------------------
 
 REPORT_FORMAT=text    # text or json
@@ -1123,13 +1138,14 @@ cmd_new() {
             --agent)     shift; [ $# -gt 0 ] || die "--agent needs a value"; _new_agent="$1" ;;
             --root)      shift; [ $# -gt 0 ] || die "--root needs a value"; _new_root="$1" ;;
             --app-data)  shift; [ $# -gt 0 ] || die "--app-data needs a value"; _new_appdata="$1" ;;
+            --explain)   AGENT_PROFILE_EXPLAIN=1 ;;
             -*)          die "unknown option '$1'" ;;
             *)           [ -z "$_new_name" ] || die "unexpected argument '$1'"; _new_name="$1" ;;
         esac
         shift
     done
 
-    [ -n "$_new_name" ] || die "usage: $SELF new <name> [--agent NAME] [--root PATH] [--app-data PATH]"
+    [ -n "$_new_name" ] || die "usage: $SELF new <name> [--agent NAME] [--root PATH] [--app-data PATH] [--explain]"
     valid_name "$_new_name" || die "invalid profile name '$_new_name' (letters, digits, dash and underscore only)"
     is_known_agent "$_new_agent" || die "unknown agent '$_new_agent' (known: $KNOWN_AGENTS)"
 
@@ -1198,60 +1214,77 @@ if you really mean to start over."
         printf 'Created profile %s\n' "$_new_name"
     fi
 
-    printf '  agent     %s\n' "$_new_agent"
-    printf '  root      %s\n' "$_new_root"
-    printf '  app data  %s\n' "$_new_appdata"
-    printf '\n'
+    # Default output says what happened and the next command, nothing more:
+    # this runs many times over a profile's life and the reader has seen it
+    # before. --explain (or AGENT_PROFILE_EXPLAIN=1) restores the full
+    # rationale below, unchanged from what this command always used to print.
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        printf '  agent     %s\n' "$_new_agent"
+        printf '  root      %s\n' "$_new_root"
+        printf '  app data  %s\n' "$_new_appdata"
+        printf '\n'
+    fi
 
     if [ -n "$_new_data_had_mode" ] && [ "$_new_data_had_mode" != "700" ]; then
         printf 'The app data directory was mode %s and became 700, which is what doctor D07 wants.\n' \
             "$_new_data_had_mode"
-        printf '\n'
+        [ -z "$AGENT_PROFILE_EXPLAIN" ] || printf '\n'
     fi
 
     if [ -n "$_new_adopted" ]; then
         # Say exactly what was and was not done. This command is the entry
         # point for a machine that was set up by hand, so the one thing it
         # must never leave in doubt is whether it touched the data.
-        printf 'That root already held data, so it was adopted rather than created.\n'
-        printf 'Nothing was copied, moved, seeded or removed: %s session(s) and whatever\n' \
+        printf 'That root already held data, so it was adopted rather than created: %s session(s).\n' \
             "$(session_count "$_new_root")"
-        printf 'settings, hooks and skills were already there are exactly as they were.\n'
+        if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+            printf 'Nothing was copied, moved, seeded or removed: whatever settings, hooks and\n'
+            printf 'skills were already there are exactly as they were.\n'
+        fi
         if [ -n "$_new_had_mode" ] && [ "$_new_had_mode" != "700" ]; then
-            printf '\n'
             printf 'The one change: mode %s became 700, which is what doctor D07 wants.\n' "$_new_had_mode"
         fi
-        printf '\n'
-        printf 'Next: %s list      (check it reports the account you expect)\n' "$SELF"
-        printf '      %s doctor    (audit the isolation)\n' "$SELF"
+        [ -z "$AGENT_PROFILE_EXPLAIN" ] || printf '\n'
+        printf 'Next: %s doctor    (audit the isolation)\n' "$SELF"
+        if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+            printf '      %s list      (check it reports the account you expect)\n' "$SELF"
+        fi
     else
-        printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
-        printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
-        printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
-        printf '\n'
+        if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+            printf 'The root is empty, which is the point: nothing is shared between profiles.\n'
+            printf 'That also means it has no settings, no hooks and none of the guardrails your\n'
+            printf 'other profiles may have. Set those up here directly; do not copy them across.\n'
+            printf '\n'
+        fi
         printf 'Next: %s run %s   (it will ask you to log in)\n' "$SELF" "$_new_name"
     fi
 
     # A profile at the default root costs the audit a rule, permanently, and
     # nothing else says so. Better here, when it is still a choice, than in
     # six months when doctor is quietly reporting less than it appears to.
+    # The short form still names it, since it cannot be undone later, but the
+    # reasoning behind why moves behind --explain like everything else here.
     if [ "$_new_root" = "$(agent_def "$_new_agent" default_root)" ]; then
-        printf '\n'
-        printf 'NOTE: this profile owns the default root.\n'
-        printf '\n'
-        printf 'Anything that runs with nothing pinned writes to that same root, in the same\n'
-        printf 'layout, so from now on doctor cannot tell an unpinned run apart from this\n'
-        printf "profile's own. D01 goes quiet for good. It is not a bug and there is no\n"
-        printf 'setting for it: on disk the two are identical.\n'
-        printf '\n'
-        printf 'What still watches unpinned use:\n'
-        printf '  D02  the state file beside the root, which names whichever account last\n'
-        printf '       ran unpinned and need not be any profile here\n'
-        printf '  D03  the same project appearing under two roots\n'
-        printf '\n'
-        printf 'This cannot be undone by moving the root: credentials are keyed to the root\n'
-        printf 'path, so relocating it invalidates this login (docs/FACTS.md F06). The real\n'
-        printf 'guard is never running the agent unpinned in the first place.\n'
+        if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+            printf '\n'
+            printf 'NOTE: this profile owns the default root.\n'
+            printf '\n'
+            printf 'Anything that runs with nothing pinned writes to that same root, in the same\n'
+            printf 'layout, so from now on doctor cannot tell an unpinned run apart from this\n'
+            printf "profile's own. D01 goes quiet for good. It is not a bug and there is no\n"
+            printf 'setting for it: on disk the two are identical.\n'
+            printf '\n'
+            printf 'What still watches unpinned use:\n'
+            printf '  D02  the state file beside the root, which names whichever account last\n'
+            printf '       ran unpinned and need not be any profile here\n'
+            printf '  D03  the same project appearing under two roots\n'
+            printf '\n'
+            printf 'This cannot be undone by moving the root: credentials are keyed to the root\n'
+            printf 'path, so relocating it invalidates this login (docs/FACTS.md F06). The real\n'
+            printf 'guard is never running the agent unpinned in the first place.\n'
+        else
+            printf 'NOTE: this profile owns the default root (run with --explain for why that matters).\n'
+        fi
     fi
 }
 
@@ -1830,7 +1863,12 @@ cmd_path() {
 
 cmd_which() {
     _wh_label_only=""
-    [ "${1:-}" = "--label" ] && _wh_label_only=1
+    for _wh_arg in "$@"; do
+        case "$_wh_arg" in
+            --label)   _wh_label_only=1 ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+        esac
+    done
 
     for _wh_agent in $KNOWN_AGENTS; do
         _wh_var=$(agent_def "$_wh_agent" envvar)
@@ -1868,15 +1906,20 @@ cmd_which() {
         return 1
     fi
     printf 'Not pinned to any profile.\n'
-    printf '\n'
-    printf 'This shell has none of these set: '
-    for _wh_agent in $KNOWN_AGENTS; do
-        printf '%s ' "$(agent_def "$_wh_agent" envvar)"
-    done
-    printf '\n'
-    printf 'Anything you run here writes to the default root, which is what %s\n' "$SELF"
-    # shellcheck disable=SC2016  # literal help text; the user types this
-    printf 'doctor reports as a leak. Pin with: eval "$(%s env <profile>)"\n' "$SELF"
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        printf '\n'
+        printf 'This shell has none of these set: '
+        for _wh_agent in $KNOWN_AGENTS; do
+            printf '%s ' "$(agent_def "$_wh_agent" envvar)"
+        done
+        printf '\n'
+        printf 'Anything you run here writes to the default root, which is what %s\n' "$SELF"
+        # shellcheck disable=SC2016  # literal help text; the user types this
+        printf 'doctor reports as a leak. Pin with: eval "$(%s env <profile>)"\n' "$SELF"
+    else
+        # shellcheck disable=SC2016  # literal help text; the user types this
+        printf 'Pin with: eval "$(%s env <profile>)"\n' "$SELF"
+    fi
     return 0
 }
 
@@ -2181,11 +2224,13 @@ applet_set_icon() {
     touch "$_ai_applet"
 
     printf 'Set the icon on %s\n' "$_ai_applet"
-    printf '\n'
-    printf 'The Dock caches icons. If it still shows the old one, drag the applet out of\n'
-    printf 'the Dock and back in; killall Dock if that is not enough.\n'
-    printf 'At Dock size a word is illegible. One large initial and a distinct colour per\n'
-    printf 'account is what actually reads.\n'
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        printf '\n'
+        printf 'The Dock caches icons. If it still shows the old one, drag the applet out of\n'
+        printf 'the Dock and back in; killall Dock if that is not enough.\n'
+        printf 'At Dock size a word is illegible. One large initial and a distinct colour per\n'
+        printf 'account is what actually reads.\n'
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -2357,15 +2402,16 @@ cmd_app() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --applet) shift; [ $# -gt 0 ] || die "--applet needs a value"; _ap_applet="$1" ;;
-            --icon)   shift; [ $# -gt 0 ] || die "--icon needs a value"; _ap_icon="$1" ;;
-            -*)       die "unknown option '$1'" ;;
-            *)        [ -z "$_ap_name" ] || die "unexpected argument '$1'"; _ap_name="$1" ;;
+            --applet)  shift; [ $# -gt 0 ] || die "--applet needs a value"; _ap_applet="$1" ;;
+            --icon)    shift; [ $# -gt 0 ] || die "--icon needs a value"; _ap_icon="$1" ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+            -*)        die "unknown option '$1'" ;;
+            *)         [ -z "$_ap_name" ] || die "unexpected argument '$1'"; _ap_name="$1" ;;
         esac
         shift
     done
 
-    [ -n "$_ap_name" ] || die "usage: $SELF app <profile> [--applet PATH] [--icon PNG]"
+    [ -n "$_ap_name" ] || die "usage: $SELF app <profile> [--applet PATH] [--icon PNG] [--explain]"
     require_profile "$_ap_name"
     _ap_agent=$(profile_agent "$_ap_name")
     _ap_root=$(profile_root "$_ap_name")
@@ -2430,20 +2476,29 @@ re-point the other so doctor stops reporting it as D14."
     _ap_line=$(applet_launch_line "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
     _ap_verdict=$(applet_verdict "$_ap_applet" "$_ap_bundle" "$_ap_var" "$_ap_root" "$_ap_flag" "$_ap_data")
 
+    # Default output says which of the two things happened -- created,
+    # already correct, or repaired -- and the next command, nothing more.
+    # --explain (or AGENT_PROFILE_EXPLAIN=1) restores the rationale this
+    # command always used to print alongside it: why an adopted launcher
+    # matters, why a second correct run is not the same as one that never
+    # worked, and the fields to hand-verify a launch line against.
     if [ -n "$_ap_found" ]; then
-        printf 'Found an existing launcher for %s and adopted it:\n' "$_ap_name"
-        printf '  %s\n' "$_ap_applet"
-        printf 'It was not created just now, and it is not at the conventional path.\n'
-        printf '\n'
+        printf 'Found an existing launcher for %s and adopted it: %s\n' "$_ap_name" "$_ap_applet"
+        if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+            printf 'It was not created just now, and it is not at the conventional path.\n'
+            printf '\n'
+        fi
     fi
 
     case "$_ap_verdict" in
         ok)
             printf '%s is already correct.\n' "$_ap_applet"
-            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
-            printf '  app data  %s\n' "$_ap_data"
-            printf 'Nothing to do. This is what an applied change looks like on a second run;\n'
-            printf 'it is not the same as one that never worked.\n'
+            if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+                printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+                printf '  app data  %s\n' "$_ap_data"
+                printf 'Nothing to do. This is what an applied change looks like on a second run;\n'
+                printf 'it is not the same as one that never worked.\n'
+            fi
             ;;
         unreadable)
             die "cannot read $_ap_applet: osadecompile is not available.
@@ -2452,14 +2507,18 @@ overwriting one blind could replace a launcher you edited by hand."
             ;;
         no-applet)
             applet_write "$_ap_applet" "$_ap_name" "$_ap_line"
-            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
-            printf '  app data  %s\n' "$_ap_data"
+            if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+                printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+                printf '  app data  %s\n' "$_ap_data"
+            fi
             ;;
         *)
             printf 'Repairing %s: %s.\n' "$_ap_applet" "$(applet_verdict_says "$_ap_verdict")"
             applet_write "$_ap_applet" "$_ap_name" "$_ap_line"
-            printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
-            printf '  app data  %s\n' "$_ap_data"
+            if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+                printf '  pins      %s=%s\n' "$_ap_var" "$_ap_root"
+                printf '  app data  %s\n' "$_ap_data"
+            fi
             ;;
     esac
 
@@ -2473,11 +2532,15 @@ overwriting one blind could replace a launcher you edited by hand."
         applet_set_icon "$_ap_applet" "$_ap_icon"
     fi
 
-    printf '\n'
-    printf 'Confirm it actually pins, by starting a Code session in the app and running:\n'
-    # shellcheck disable=SC2016  # literal help text; the user types this
-    printf '  find "$HOME"/%s -name "*.jsonl" -mmin -3\n' "$(leak_test_glob "$_ap_agent")"
-    printf 'The path it prints is the root that is really in use.\n'
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        printf '\n'
+        printf 'Confirm it actually pins, by starting a Code session in the app and running:\n'
+        # shellcheck disable=SC2016  # literal help text; the user types this
+        printf '  find "$HOME"/%s -name "*.jsonl" -mmin -3\n' "$(leak_test_glob "$_ap_agent")"
+        printf 'The path it prints is the root that is really in use.\n'
+    else
+        printf 'Next: start a session in the app, then --explain shows how to confirm the pin.\n'
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -2556,6 +2619,9 @@ DOCTOR_FINDINGS=0
 # has to look at. It is kept apart from the detail lines because a consumer of
 # the JSON document needs to act on it, while the prose renders the two the
 # same way it always has.
+#
+# Emitted at "always": a finding is the product, and --quiet lowers the
+# threshold precisely so a clean run stays silent, never so a real one does.
 finding() {
     DOCTOR_FINDINGS=$((DOCTOR_FINDINGS + 1))
     _f_rule="$1"; _f_summary="$2"; shift 2
@@ -2564,7 +2630,7 @@ finding() {
     else
         _f_subject=""
     fi
-    emit normal finding "$_f_rule" "$_f_summary" "$_f_subject" "$@"
+    emit always finding "$_f_rule" "$_f_summary" "$_f_subject" "$@"
 }
 
 # doctor_rule_catalog: every rule this audit can report, and what it looks for.
@@ -2595,6 +2661,7 @@ doctor_rule_catalog() {
 cmd_doctor() {
     _doc_keychain_scan=""
     _doc_report=""
+    _doc_quiet=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --keychain-scan) _doc_keychain_scan=1 ;;
@@ -2604,11 +2671,24 @@ cmd_doctor() {
                 [ $# -gt 0 ] || die "--report needs a file"
                 _doc_report="$1"
                 ;;
+            --quiet)   _doc_quiet=1 ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
             *) die "doctor: unknown option '$1'
-Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
+Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explain]" ;;
         esac
         shift
     done
+
+    # --quiet always wins over --explain, whichever order they came in and
+    # whether the latter came from a flag or from AGENT_PROFILE_EXPLAIN: a
+    # request for silence on this one run is more specific than a standing
+    # preference for the long form. Neither changes a document: REPORT_LEVEL
+    # only gates what report_shows lets reach the terminal as prose.
+    if [ -n "$_doc_quiet" ]; then
+        REPORT_LEVEL=always
+    elif [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        REPORT_LEVEL=detail
+    fi
 
     # The two files are written side by side, so the argument names the pair
     # rather than one of them. Accepting either extension and dropping it stops
@@ -3176,12 +3256,16 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     _doc_exit="$EX_OK"
     [ "$DOCTOR_FINDINGS" -eq 0 ] || _doc_exit="$EX_FINDINGS"
 
+    # The two clean branches are at "normal", so --quiet silences them: a
+    # cron entry asked to say nothing when there is nothing to say. The branch
+    # with findings stays at "always", the same level finding() itself uses,
+    # so --quiet never hides the one thing it must still print.
     if [ "$DOCTOR_FINDINGS" -eq 0 ] && [ -z "$_doc_names" ]; then
-        emit always summary 2 findings 0 exit_code "$_doc_exit" \
+        emit normal summary 2 findings 0 exit_code "$_doc_exit" \
             "No profiles registered, so there is nothing to audit." \
             "Create one:  $SELF new <name>"
     elif [ "$DOCTOR_FINDINGS" -eq 0 ]; then
-        emit always summary 2 findings 0 exit_code "$_doc_exit" \
+        emit normal summary 2 findings 0 exit_code "$_doc_exit" \
             "No isolation problems found across $(printf '%s\n' "$_doc_names" | wc -l | tr -d ' ') profile(s)."
     else
         emit always summary 2 findings "$DOCTOR_FINDINGS" exit_code "$_doc_exit" \
@@ -3280,16 +3364,20 @@ vok() {
     emit normal check ok "$_vk_fact" "$_vk_sum" "$@"
 }
 
+# broken and unchecked are emitted at "always", the same level finding() uses,
+# because they are what --quiet must still print: the exit code alone (3 or 4)
+# does not say what stopped holding. ok and note are routine and stay at
+# "normal", so --quiet drops them on a run that is not clean too.
 vbroken() {
     VERIFY_BROKEN=$((VERIFY_BROKEN + 1))
     _vb_fact="$1"; _vb_sum="$2"; shift 2
-    emit normal check broken "$_vb_fact" "$_vb_sum" "$@"
+    emit always check broken "$_vb_fact" "$_vb_sum" "$@"
 }
 
 vunchecked() {
     VERIFY_UNCHECKED=$((VERIFY_UNCHECKED + 1))
     _vu_fact="$1"; _vu_sum="$2"; shift 2
-    emit normal check unchecked "$_vu_fact" "$_vu_sum" "$@"
+    emit always check unchecked "$_vu_fact" "$_vu_sum" "$@"
 }
 
 vnote() {
@@ -3298,13 +3386,24 @@ vnote() {
 }
 
 cmd_verify() {
+    _ver_quiet=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --json) REPORT_FORMAT=json ;;
-            *) die "verify: unknown option '$1' (try: $SELF verify --json)" ;;
+            --json)    REPORT_FORMAT=json ;;
+            --quiet)   _ver_quiet=1 ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+            *) die "verify: unknown option '$1'
+Try: $SELF verify [--json] [--quiet] [--explain]" ;;
         esac
         shift
     done
+
+    # See cmd_doctor: --quiet always wins over --explain.
+    if [ -n "$_ver_quiet" ]; then
+        REPORT_LEVEL=always
+    elif [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        REPORT_LEVEL=detail
+    fi
 
     need python3
     VERIFY_BROKEN=0
@@ -3558,6 +3657,10 @@ cmd_verify() {
         "This is why there is no rename and no move command."
 
     # ---- Summary -----------------------------------------------------------
+    #
+    # The broken and unchecked branches stay at "always", so --quiet cannot
+    # hide the one thing it must still print. The fully clean branch is
+    # "normal", so --quiet silences exactly the case it exists for.
     emit normal text ""
     if [ "$VERIFY_BROKEN" -gt 0 ]; then
         emit always summary 3 \
@@ -3574,7 +3677,7 @@ cmd_verify() {
         report_finish
         return "$EX_UNCHECKED"
     fi
-    emit always summary 3 broken 0 unchecked 0 exit_code "$EX_OK" \
+    emit normal summary 3 broken 0 unchecked 0 exit_code "$EX_OK" \
         "Every assumption still holds."
     report_finish
     return "$EX_OK"
@@ -3878,7 +3981,7 @@ _@SELF@_complete() {
                 --agent)           COMPREPLY=( $(compgen -W "claude" -- "$cur") ); return 0 ;;
                 --root|--app-data) return 0 ;;
             esac
-            COMPREPLY=( $(compgen -W "--agent --root --app-data" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--agent --root --app-data --explain" -- "$cur") )
             ;;
         remove)
             COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --purge" -- "$cur") )
@@ -3896,10 +3999,10 @@ _@SELF@_complete() {
             case "$prev" in
                 --applet|--icon) return 0 ;;
             esac
-            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --applet --icon" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --applet --icon --explain" -- "$cur") )
             ;;
         which)
-            COMPREPLY=( $(compgen -W "--label" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--label --explain" -- "$cur") )
             ;;
         guard)
             case "$prev" in
@@ -3908,7 +4011,10 @@ _@SELF@_complete() {
             COMPREPLY=( $(compgen -W "--shell" -- "$cur") )
             ;;
         doctor)
-            COMPREPLY=( $(compgen -W "--keychain-scan" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--keychain-scan --json --report --quiet --explain" -- "$cur") )
+            ;;
+        verify)
+            COMPREPLY=( $(compgen -W "--json --quiet --explain" -- "$cur") )
             ;;
         version)
             COMPREPLY=( $(compgen -W "--check" -- "$cur") )
@@ -3969,7 +4075,8 @@ _@SELF@() {
         new)
             _arguments '--agent[agent]:agent:(claude)' \
                 '--root[config root path]:path:_files -/' \
-                '--app-data[app data dir path]:path:_files -/'
+                '--app-data[app data dir path]:path:_files -/' \
+                '--explain[restore the full rationale]'
             ;;
         remove)
             profiles=(${(f)"$(__@SELF@_profiles)"})
@@ -3990,16 +4097,27 @@ _@SELF@() {
             profiles=(${(f)"$(__@SELF@_profiles)"})
             _describe -t profiles 'profile' profiles
             _arguments '--applet[applet path]:path:_files' \
-                '--icon[1024px PNG]:png:_files -g \*.png'
+                '--icon[1024px PNG]:png:_files -g \*.png' \
+                '--explain[restore the full rationale]'
             ;;
         which)
-            _arguments '--label[print the bare label only]'
+            _arguments '--label[print the bare label only]' \
+                '--explain[add why an unpinned shell matters]'
             ;;
         guard)
             _arguments '--shell[shell to target]:shell:(bash zsh fish)'
             ;;
         doctor)
-            _arguments '--keychain-scan[also scan the whole login Keychain]'
+            _arguments '--keychain-scan[also scan the whole login Keychain]' \
+                '--json[print the audit as one JSON document]' \
+                '--report[write a dated audit to FILE.json and FILE.md]:file:_files' \
+                '--quiet[print nothing on a clean run]' \
+                '--explain[no additional effect: findings always print in full]'
+            ;;
+        verify)
+            _arguments '--json[print the checks as one JSON document]' \
+                '--quiet[print nothing when every assumption holds]' \
+                '--explain[no additional effect today]'
             ;;
         version)
             _arguments '--check[compare against the newest release]'
@@ -4053,13 +4171,20 @@ complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop re
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l agent -d Agent -a claude
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l root -d 'Config root path'
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l app-data -d 'App data dir path'
+complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l explain -d 'Restore the full rationale'
 complete -c @SELF@ -n '__fish_seen_subcommand_from remove' -l purge -d 'Delete everything, after a typed confirmation'
 complete -c @SELF@ -n '__fish_seen_subcommand_from code idea' -l app -d 'Application to launch'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l applet -d 'Applet path'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l icon -d '1024px PNG'
+complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l explain -d 'Restore the full rationale'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l label -d 'Print the bare label only'
+complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l explain -d 'Add why an unpinned shell matters'
 complete -c @SELF@ -n '__fish_seen_subcommand_from guard' -l shell -d 'Shell to target' -a 'bash zsh fish'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l keychain-scan -d 'Also scan the whole login Keychain'
+complete -c @SELF@ -n '__fish_seen_subcommand_from doctor verify' -l json -d 'Print as one JSON document'
+complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l report -d 'Write a dated audit to FILE.json and FILE.md'
+complete -c @SELF@ -n '__fish_seen_subcommand_from doctor verify' -l quiet -d 'Print nothing on a clean run'
+complete -c @SELF@ -n '__fish_seen_subcommand_from doctor verify' -l explain -d 'No additional effect: findings always print in full'
 complete -c @SELF@ -n '__fish_seen_subcommand_from version' -l check -d 'Compare against the newest release'
 complete -c @SELF@ -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
 FISHCOMP
@@ -4245,9 +4370,11 @@ USAGE
   @SELF@ <command> [arguments]
 
 PROFILES
-  new <name> [--agent NAME] [--root PATH] [--app-data PATH]
+  new <name> [--agent NAME] [--root PATH] [--app-data PATH] [--explain]
                           Create an empty config root, an app data dir and a
-                          registry entry. Safe to run twice.
+                          registry entry. Safe to run twice. Default output is
+                          a few lines: what happened and the next command.
+                          --explain restores the full rationale.
   list [--json]           Every profile with its root, account and session count.
   remove <name> [--purge] Retire a profile. It removes the registry entry and
                           prints everything else the profile still has on this
@@ -4264,7 +4391,9 @@ PINNED EXECUTION
   shell <name>            Open an interactive subshell pinned to a profile.
   env <name>              Print exports. Use: eval "$(@SELF@ env work)"
   path <name>             Print a profile's config root.
-  which [--label]         Which profile this shell is pinned to, if any.
+  which [--label] [--explain]
+                          Which profile this shell is pinned to, if any.
+                          --explain adds why an unpinned shell matters.
 
 IDEs
   code <name> [path] [--app NAME] [--new-instance]
@@ -4290,12 +4419,14 @@ IDEs
 DESKTOP
   desktop <name>          Launch the desktop app pinned to a profile. Running
                           @SELF@ with no arguments asks instead.
-  app <name> [--applet PATH] [--icon PNG]
+  app <name> [--applet PATH] [--icon PNG] [--explain]
                           Generate or repair the AppleScript applet that
                           launches a profile from the Dock. Safe to run twice,
                           and it says which of the two happened. --icon takes a
                           1024px PNG; at Dock size only a single initial and a
-                          distinct colour per account are legible.
+                          distinct colour per account are legible. --explain
+                          restores the full rationale and how to confirm the
+                          pin actually took.
 
 SHELL
   guard [--shell bash|zsh|fish]
@@ -4316,7 +4447,7 @@ SHELL
                             @SELF@ completion fish | source     # fish
 
 AUDIT
-  doctor [--json] [--report FILE] [--keychain-scan]
+  doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explain]
                           Check that the profiles are actually isolated.
                           --keychain-scan also enumerates the whole login
                           Keychain for orphaned entries (D12), which reads
@@ -4326,15 +4457,31 @@ AUDIT
                           --report writes FILE.json and FILE.md, a dated
                           audit of this machine to hand to someone else.
                           The exit code is the same either way.
+                          --quiet prints nothing on a clean run and exits 0;
+                          a finding still prints in full and exits as always,
+                          for cron and shell hooks. Findings are the product,
+                          so --explain adds nothing here today.
                           Schema: docs/AUDIT-SCHEMA.md
-  verify [--json]         Re-check the behavioural assumptions this tool rests on.
-  explain                 Explain the scheme and where each profile's data lives.
+  verify [--json] [--quiet] [--explain]
+                          Re-check the behavioural assumptions this tool rests
+                          on. --quiet and --explain work as they do for doctor.
+  explain                 Explain the scheme and where each profile's data
+                          lives, in full, always. Not the --explain flag above:
+                          this is its own command, for when the reader wants
+                          the whole layout rather than one command's rationale.
 
 OTHER
   version [--check]       Print the version. --check compares it against the
                           newest release and exits non-zero when this one is
                           behind. It downloads nothing and installs nothing.
   help
+
+OUTPUT LEVELS
+  new, app, which and doctor's and verify's --explain, plus running with
+  AGENT_PROFILE_EXPLAIN=1 set, all mean the same thing: print the reasoning
+  behind a line, not only the line. Nothing here changes what a command does,
+  what it exits with, or what --json or --report FILE contain -- those are
+  the same document at every level. Only the terminal gets shorter or longer.
 
 EXIT CODES
   0  success, nothing to report
