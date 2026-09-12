@@ -2640,6 +2640,8 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         _doc_agent=$(profile_agent "$_doc_name")
         _doc_root=$(profile_root "$_doc_name")
 
+        # doctor reads (D04):
+        #   The registry, and whether each registered root exists on disk.
         if [ ! -d "$_doc_root" ]; then
             finding "D04" "profile '$_doc_name' has a registered root that does not exist" \
                 "$_doc_root" \
@@ -2650,6 +2652,9 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
 
         _doc_roots[${#_doc_roots[@]}]="$_doc_root"
 
+        # doctor reads (D07):
+        #   The file mode of each registered root and its app data directory,
+        #   via `stat`. No file content.
         _doc_mode=$(dir_mode "$_doc_root")
         if [ -n "$_doc_mode" ] && [ "$_doc_mode" != "700" ]; then
             finding "D07" "profile '$_doc_name' root is mode $_doc_mode, not 700" \
@@ -2679,6 +2684,10 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         _doc_form=$(printf '%s' "$_doc_info" | cut -f3)
         _doc_service="$(agent_def "$_doc_agent" cred_service)-$_doc_hash"
 
+        # doctor reads (D10):
+        #   The registry's stored root string, compared against its own
+        #   canonical form. A string comparison, no filesystem or Keychain
+        #   read.
         if [ "$_doc_form" != "ok" ]; then
             finding "D10" "profile '$_doc_name' has a root that is not in canonical form ($_doc_form)" \
                 "$_doc_root" \
@@ -2687,6 +2696,13 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
                 "Recreate the profile with the canonical path."
         fi
 
+        # doctor reads (D05):
+        #   On macOS, whether a Keychain entry named `<service>-<hash>` exists
+        #   for the profile's root (attributes only, via `security
+        #   find-generic-password`), and whether `.credentials.json` exists in
+        #   the root (existence only, never opened). Without a Keychain, falls
+        #   back to the same `oauthAccount` block D02 reads, but from the
+        #   profile's own root rather than the stray file's location.
         if keychain_available; then
             if ! keychain_has "$_doc_service" && [ ! -f "$_doc_root/.credentials.json" ]; then
                 finding "D05" "profile '$_doc_name' has no credential" \
@@ -2711,6 +2727,10 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         # working directory is absolute and "/" encodes to "-". Anything else
         # means CLAUDE_CODE_PROJECT_DIR_NAME named it, so nothing about the name
         # says where the project is.
+        #
+        # doctor reads (D08):
+        #   The directory listing under `<root>/projects`. Directory names
+        #   only, not the transcripts inside them.
         if [ -d "$_doc_root/projects" ]; then
             for _doc_pdir in "$_doc_root/projects"/*; do
                 [ -d "$_doc_pdir" ] || continue
@@ -2736,6 +2756,12 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         # hand-tuned launch line that still pins the right root, which is
         # nobody's business but its owner's, and "unreadable" is a question
         # for verify rather than a finding here.
+        #
+        # doctor reads (D13):
+        #   The AppleScript source of the applet named in the profile's
+        #   registry entry, or its default conventional path if none is
+        #   registered, decompiled with `osadecompile`. Only its single
+        #   `do shell script` launch line is read.
         _doc_applet=$(profile_applet "$_doc_name" "$_doc_agent")
         _doc_data=$(reg_get "$_doc_name" app_data)
         [ -n "$_doc_data" ] || _doc_data="$(agent_def "$_doc_agent" app_support)/$(agent_def "$_doc_agent" app_prefix)$(capitalize "$_doc_name")"
@@ -2759,6 +2785,11 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
 
     # ---- D01, D02: something ran unpinned ---------------------------------
     for _doc_agent in $KNOWN_AGENTS; do
+        # doctor reads (D01):
+        #   Whether the default root exists, and a count of `*.jsonl`
+        #   filenames under `<default root>/projects` (names only, not their
+        #   content), plus the registry, to see whether a profile claims that
+        #   root.
         _doc_default=$(agent_def "$_doc_agent" default_root)
         _doc_claimed=""
         for _doc_name in $_doc_names; do
@@ -2783,6 +2814,12 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
         # not make this file legitimate. On the first real machine this ran on,
         # the wrong guard hid a 104 KB state file holding an account none of
         # the three profiles owns.
+        #
+        # doctor reads (D02):
+        #   Whether the agent state file beside the default root exists and
+        #   sits outside every registered root. When it does, the
+        #   `oauthAccount` block of that file: the account's email and
+        #   organisation id, the same identity `list` already prints.
         _doc_state=$(agent_def "$_doc_agent" state_file)
         _doc_inside=""
         for _doc_name in $_doc_names; do
@@ -2806,6 +2843,10 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     done
 
     # ---- D06: an unregistered root ----------------------------------------
+    #
+    # doctor reads (D06):
+    #   The directory listing of `$HOME` for entries matching the agent's root
+    #   prefix (`.claude-*`), and the registry, to see which are unclaimed.
     for _doc_agent in $KNOWN_AGENTS; do
         _doc_prefix=$(agent_def "$_doc_agent" root_prefix)
         for _doc_cand in "$HOME/$_doc_prefix"*; do
@@ -2829,6 +2870,9 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     # label resolves a root to a name, and with two names for one root it has
     # to pick one. It also means one account's sessions are being reported
     # under two identities everywhere else in this audit.
+    #
+    # doctor reads (D15):
+    #   The registry only. No filesystem or Keychain access.
     for _doc_name in $_doc_names; do
         _doc_root=$(reg_get "$_doc_name" root)
         [ -n "$_doc_root" ] || continue
@@ -2860,6 +2904,12 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     # It exists because assuming launchers live in the conventional directory
     # is wrong on a real machine. Two working ones were sitting on a Desktop,
     # completely outside the audit, while doctor reported a clean desktop.
+    #
+    # doctor reads (D14):
+    #   Every `.app` bundle up to five levels deep under
+    #   `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop`
+    #   and `/Applications`) whose compiled script mentions the agent's config
+    #   variable, decompiled the same way as D13.
     for _doc_agent in $KNOWN_AGENTS; do
         _doc_scan=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d14.XXXXXX") || \
             die "could not create a temporary file under ${TMPDIR:-/tmp}"
@@ -2909,6 +2959,9 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     # The handler is launched by LaunchServices, which passes no environment
     # from any shell, so a link opens against whatever the default root is
     # regardless of what this tool has set up. See docs/FACTS.md F04.
+    #
+    # doctor reads (D09):
+    #   Whether the deep-link handler bundle exists on disk.
     for _doc_agent in $KNOWN_AGENTS; do
         _doc_handler=$(agent_def "$_doc_agent" url_handler)
         [ -d "$_doc_handler" ] || continue
@@ -2933,6 +2986,15 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     # it. The JetBrains plugin types the command into the IDE's integrated
     # terminal, so a guard in an rc file does see it, and saying otherwise
     # would send a reader looking for a leak that is not there.
+    #
+    # doctor reads (D16):
+    #   Directory names one level under `~/.vscode/extensions` and
+    #   `~/.cursor/extensions`, and one level under `~/Library/Application
+    #   Support/JetBrains`, `~/Library/Application Support` and
+    #   `~/Library/Application Support/Google` for a
+    #   `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in
+    #   an extension is ever opened, and the IDE's own `--list-extensions` is
+    #   deliberately not run.
     for _doc_ide in $KNOWN_IDES; do
         _doc_ide_scan=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d16.XXXXXX") || \
             die "could not create a temporary file under ${TMPDIR:-/tmp}"
@@ -2982,9 +3044,11 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
     # ---- D11: what the Keychain says about the default root ---------------
     #
     # doctor reads (D11):
-    #   keychain query: security find-generic-password, one named service per
-    #     known agent (the default root's own credential service). Attributes
-    #     only, via keychain_has; the credential value is never read.
+    #   On macOS, whether a Keychain entry exists for the default root's own
+    #   service name (attributes only, via `security find-generic-password`).
+    #
+    # One named service per known agent, asked through keychain_has, which
+    # never passes -g or -w, so no credential value is ever read.
     if keychain_available; then
         for _doc_agent in $KNOWN_AGENTS; do
             _doc_base=$(agent_def "$_doc_agent" cred_service)
@@ -3010,10 +3074,10 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan]" ;;
 
         # ---- D12: orphaned Keychain entries, opt-in ------------------------
         #
-        # doctor reads (D12, only with --keychain-scan):
-        #   keychain query: security dump-keychain, which enumerates every
-        #     item in the login Keychain. keychain_services reads only the
-        #     "svce" attribute of each; the credential value is never read.
+        # doctor reads (D12, only with `--keychain-scan`):
+        #   The entire login Keychain's item list, via `security
+        #   dump-keychain`. Attributes only, specifically the `svce` field of
+        #   each entry; no entry's secret data is read.
         #
         # This is the one Keychain check that does not name a single service:
         # it walks the whole Keychain, which is slow when it holds a lot of
@@ -3078,6 +3142,12 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     # This is the check that replaces a hand-maintained list of path prefixes
     # per profile. It needs no configuration, so it cannot go stale and cannot
     # pass quietly because nothing was declared.
+    #
+    # doctor reads (D03):
+    #   Every transcript (`*.jsonl`) under each registered root's `projects`
+    #   directory, read line by line only until the first record carrying a
+    #   `cwd` field. Only that field is kept; the rest of the transcript,
+    #   including its conversation content, is never read.
     if [ ${#_doc_roots[@]} -gt 0 ]; then
         _doc_tmp=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d03.XXXXXX") || \
             die "could not create a temporary file under ${TMPDIR:-/tmp}"
