@@ -7,6 +7,12 @@ on:
   # Called by release.yml, so a tag runs exactly the checks a branch runs and
   # the two cannot drift apart.
   workflow_call:
+  # Started by hand, and by homebrew-formula.yml on the branch it opens its
+  # pull request from. GitHub starts no workflow run from a push or a pull
+  # request that a GITHUB_TOKEN made, so a branch pushed by a workflow would
+  # otherwise carry no checks at all. workflow_dispatch is the documented
+  # exception to that rule, and this is what makes it available.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -101,4 +107,4 @@ jobs:
         run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 
       - name: Refuse bash 4 constructs
-        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/gen-doctor-reads.sh tests/run.sh
+        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/gen-doctor-reads.sh tools/update-homebrew-formula.sh tests/run.sh

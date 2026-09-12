@@ -1301,7 +1301,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 313 tests, no dependencies
+tests/run.sh              # 326 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
@@ -1383,10 +1383,27 @@ own timestamp, so anyone can check the tag out, rebuild it and get the same
 `sha256`. A checksum nobody can reproduce only says the file did not change in
 transit.
 
-Then update `packaging/homebrew/agpin.rb` and the tap, which
-[`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers. The
-formula cannot be updated before the release, because until it exists there is
-no sum to pin.
+The Homebrew formula then catches up on its own, to a point.
+`.github/workflows/homebrew-formula.yml` runs once the release is published:
+it reads the row for the tarball out of the release's own `SHA256SUMS`, hashes
+the tarball it downloads from that same release to check the two agree,
+verifies the Sigstore signature on both, and opens a pull request setting
+`url`, `version` and `sha256` in `packaging/homebrew/agpin.rb` together. A
+missing row or a sum the tarball does not have fails the job rather than
+writing a formula nobody can install from.
+
+A pull request, and never a push. The pin is worth having because somebody
+looked at the release, so the mechanical half is what is automated and the
+looking is not. Three things are still yours: read the pull request against
+the release page, which is why its body names the release, the tarball and the
+sum; rebuild the tarball from the tag and confirm the sum reproduces, which is
+the check no runner can make for you; then merge it and copy the formula to
+the tap. [`packaging/homebrew/README.md`](packaging/homebrew/README.md) covers
+that copy, and `tools/update-homebrew-formula.sh` is the same script by hand
+if the run never happened.
+
+The formula still cannot be updated before the release, because until it
+exists there is no sum to pin.
 
 ## Licence
 
