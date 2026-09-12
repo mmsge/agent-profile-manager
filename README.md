@@ -1281,7 +1281,7 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 303 tests, no dependencies
+tests/run.sh              # 316 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 ```
