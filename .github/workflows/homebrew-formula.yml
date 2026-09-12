@@ -156,15 +156,18 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
+          # -B rather than -b: the runner's checkout is fresh, so the branch
+          # cannot be there, but this is also the shape somebody reproducing
+          # the job by hand ends up running twice.
+          git checkout -B "$BRANCH"
           git add "$formula"
           git commit -F - <<COMMIT
           Pin the $TAG tarball's sha256 in the Homebrew formula
 
           Written by .github/workflows/homebrew-formula.yml after $TAG was
-          published. The sum is the row for $TARBALL in the release's own
-          SHA256SUMS, checked against the tarball downloaded from the same
-          release before this commit was made.
+          published. The sum is the row for that release's tarball in its own
+          SHA256SUMS, checked against the tarball downloaded from the release
+          before this commit was made.
           COMMIT
 
           # Named after the release and written only by this workflow, so a
@@ -185,12 +188,12 @@ jobs:
 
           Checked on the runner before the branch was written:
 
-          - the row for \`$TARBALL\` in the release's own \`SHA256SUMS\`, matched on
-            the file name exactly. A missing row fails the job rather than writing
-            an empty or partial sum.
-          - that sum against the tarball downloaded from the same release and
-            hashed there, so a swapped or corrupted \`SHA256SUMS\` cannot reach the
-            formula unchecked.
+          - the row for the tarball in the release's own \`SHA256SUMS\`, matched
+            on the file name exactly. A missing row fails the job rather than
+            writing an empty or partial sum.
+          - that sum against \`$TARBALL\` downloaded from the same release and
+            hashed there, so a swapped or corrupted \`SHA256SUMS\` cannot reach
+            the formula unchecked.
           - the Sigstore signature on both, which says this repository's release
             workflow built them under this tag.
 
