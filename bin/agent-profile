@@ -158,6 +158,8 @@ KNOWN_AGENTS="claude"
 #   url_scheme    that scheme
 #   app_prefix    directory-name prefix for the desktop app's data dir
 #   app_support   parent directory for desktop app data dirs
+#   app_data_dflt the app's own data directory when nothing selects one, the
+#                 one a Dock or Spotlight launch uses (docs/FACTS.md F22)
 #   app_bundle    the desktop app itself, resolved by open -a rather than by
 #                 a path to a binary inside it (docs/FACTS.md F05)
 #   app_flag      the flag that selects the app's own data directory
@@ -179,6 +181,7 @@ agent_def() {
                 url_scheme)   printf '%s\n' "claude-cli" ;;
                 app_prefix)   printf '%s\n' "Claude-" ;;
                 app_support)  printf '%s\n' "$HOME/Library/Application Support" ;;
+                app_data_dflt) printf '%s\n' "$HOME/Library/Application Support/Claude" ;;
                 app_bundle)   printf '%s\n' "$AGENT_PROFILE_APP_BUNDLE" ;;
                 app_flag)     printf '%s\n' "--user-data-dir" ;;
                 applet_prefix) printf '%s\n' "Claude-" ;;
@@ -2603,6 +2606,79 @@ dir_mode() {
     printf '%s\n' "$_dm"
 }
 
+# dir_mtime <path>: the modification time as a UTC timestamp, empty when the
+# path cannot be read.
+#
+# Through python3 rather than stat, because the format string for a printable
+# time differs between the BSD stat on macOS and the GNU one everywhere else,
+# and doctor already requires python3.
+dir_mtime() {
+    python3 - "$1" <<'PY'
+import os, sys, time
+
+try:
+    stamp = os.path.getmtime(sys.argv[1])
+except OSError:
+    sys.exit(0)
+print(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp)))
+PY
+}
+
+# dir_has_entries <dir>: true when the directory holds at least one entry.
+#
+# Names only. Nothing inside is opened, which is the whole point: an empty
+# directory is a directory the app has never written to, and that is as much
+# as D18 needs to know before it reports one.
+dir_has_entries() {
+    for _dhe_entry in "$1"/* "$1"/.[!.]*; do
+        if [ -e "$_dhe_entry" ] || [ -L "$_dhe_entry" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# dock_app_paths: every application path currently pinned in the user's Dock,
+# one per line. Non-zero when the Dock could not be read at all, which is a
+# different answer from an empty Dock and must stay that way.
+#
+# `defaults read com.apple.dock persistent-apps` prints an old-style plist,
+# one dictionary per tile. The only field read here is each tile's
+# `_CFURLString`, a percent-encoded `file://` URL with a trailing slash. The
+# `book` blob beside it, an alias record that also encodes the path, is never
+# decoded: one spelling of the answer is enough. See docs/FACTS.md F22.
+dock_app_paths() {
+    command -v defaults >/dev/null 2>&1 || return 1
+    _dap_tmp=$(mktemp "${TMPDIR:-/tmp}/agent-profile-dock.XXXXXX") || return 1
+    if ! defaults read com.apple.dock persistent-apps > "$_dap_tmp" 2>/dev/null; then
+        rm -f "$_dap_tmp"
+        return 1
+    fi
+    python3 - "$_dap_tmp" <<'PY'
+import re, sys
+from urllib.parse import unquote
+
+with open(sys.argv[1], encoding="utf-8", errors="replace") as fh:
+    text = fh.read()
+
+# The value is quoted when it holds a character an old-style plist would not
+# take bare, and printed bare when it does not, so accept both spellings.
+pattern = re.compile(r'_CFURLString"?\s*=\s*(?:"([^"]*)"|([^;\s]+))\s*;')
+seen = set()
+for match in pattern.finditer(text):
+    value = match.group(1) if match.group(1) is not None else match.group(2)
+    if not value or not value.startswith("file://"):
+        continue
+    path = unquote(value[len("file://"):]).rstrip("/")
+    if path and path not in seen:
+        seen.add(path)
+        print(path)
+PY
+    _dap_status=$?
+    rm -f "$_dap_tmp"
+    return "$_dap_status"
+}
+
 # ---------------------------------------------------------------------------
 # doctor
 #
@@ -2655,7 +2731,9 @@ doctor_rule_catalog() {
         "D13	A desktop launcher does not pin its profile" \
         "D14	A desktop launcher exists that no profile claims" \
         "D15	More than one profile is registered at the same root" \
-        "D16	A Claude Code IDE extension is installed and cannot be pinned"
+        "D16	A Claude Code IDE extension is installed and cannot be pinned" \
+        "D17	The desktop app itself is in the Dock, so it can be launched unpinned" \
+        "D18	The default app data directory has been written to by an unpinned launch"
 }
 
 cmd_doctor() {
@@ -3033,6 +3111,153 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
         done < "$_doc_scan"
         rm -f "$_doc_scan"
     done
+
+    # ---- D17: the real app in the Dock, and in the login items ------------
+    #
+    # D13 and D14 audit the applets. This audits the thing they exist to
+    # replace: the app's own icon. A tile in the Dock, or an Open at Login
+    # entry, launches Claude.app through LaunchServices, which passes no
+    # environment from any shell, so the app comes up against the default
+    # config root and the default app data directory however many applets sit
+    # beside it. It is the first mistake a new user makes, and nothing else
+    # here sees it.
+    #
+    # Only the Dock half can be read. On Ventura and later the login items a
+    # user sees in System Settings are Background Task Management records:
+    # `sfltool dumpbtm` needs root, and the one user-level reading,
+    # `osascript -e 'tell application "System Events" to get the path of
+    # every login item'`, asks the user for Automation consent the first time
+    # and still does not list an app registered through SMAppService. doctor
+    # asks the operating system nothing that opens a dialogue, so the
+    # login-item half is reported as unchecked rather than guessed at. See
+    # docs/FACTS.md F22.
+    #
+    # doctor reads (D17):
+    #   On macOS, the `persistent-apps` key of the `com.apple.dock` preference
+    #   domain, via `defaults read com.apple.dock persistent-apps`, and from
+    #   each tile in it only the `_CFURLString` file URL, which is the path of
+    #   the pinned application. Nothing is read for the login items: that half
+    #   of the rule is reported as unchecked, because every way to list them
+    #   needs root or a consent dialogue.
+    _doc_d17_dock=""
+    _doc_d17_hint=""
+    if [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]; then
+        _doc_dock=$(mktemp "${TMPDIR:-/tmp}/agent-profile-d17.XXXXXX") || \
+            die "could not create a temporary file under ${TMPDIR:-/tmp}"
+        if dock_app_paths > "$_doc_dock" 2>/dev/null; then
+            _doc_d17_dock=1
+        fi
+
+        for _doc_agent in $KNOWN_AGENTS; do
+            [ -n "$_doc_d17_dock" ] || continue
+            _doc_bundle=$(agent_def "$_doc_agent" app_bundle)
+            [ -n "$_doc_bundle" ] || continue
+
+            # A Dock tile's path can hold spaces, so never iterate it with
+            # word splitting, and read from the file rather than a pipe so the
+            # finding count survives the loop.
+            while IFS= read -r _doc_tile; do
+                [ -n "$_doc_tile" ] || continue
+                [ "${_doc_tile%/}" = "${_doc_bundle%/}" ] || continue
+                finding "D17" "the $_doc_agent desktop app itself is in the Dock, so it can be launched unpinned" \
+                    "$_doc_tile" \
+                    "This tile is the application, not one of the applets. LaunchServices" \
+                    "passes no environment, so clicking it starts the app with no config" \
+                    "root and with the default app data directory, whatever this tool has" \
+                    "set up. The same is true of Spotlight, Launchpad and Open at Login." \
+                    "Keep only the applets in the Dock. Build one per profile with:" \
+                    "$SELF app <profile>"
+                _doc_d17_hint=1
+            done < "$_doc_dock"
+        done
+        rm -f "$_doc_dock"
+
+        # The status is recorded whether or not anything fired, because half
+        # this rule cannot run on any macOS this tool supports and a document
+        # that called it a clean pass would be overstating what was checked.
+        if [ -n "$_doc_d17_dock" ]; then
+            emit data rule_status D17 limited \
+                "the Dock was read, but the login items were not: listing them needs root or an Automation consent dialogue"
+        else
+            emit data rule_status D17 not_run \
+                "the Dock could not be read, and the login items need root or an Automation consent dialogue"
+        fi
+    else
+        emit data rule_status D17 not_run \
+            "the Dock and the login items are macOS, and this is $AGENT_PROFILE_PLATFORM"
+    fi
+
+    # The hint follows the finding rather than sitting inside it, because it
+    # is one instruction for however many tiles fired, and because it is
+    # advice rather than evidence: --quiet drops it and keeps the findings.
+    if [ -n "$_doc_d17_hint" ]; then
+        emit normal text \
+            "Drag the applets into the Dock, and the real app out of it. An applet's" \
+            "open --env line is the only thing that pins a config root; the app's own" \
+            "icon carries none, in the Dock or anywhere else." \
+            ""
+    fi
+
+    # ---- D18: the default app data directory ------------------------------
+    #
+    # The other half of an unpinned desktop launch, and the half that leaves
+    # something behind. --user-data-dir selects the app's own login, and
+    # without it the app uses one directory for every launch that had no
+    # applet in front of it (docs/FACTS.md F18 and F22). D01 finds the config
+    # roots such a launch writes to, but only once its embedded Claude Code
+    # has written a transcript; this finds the launch itself.
+    #
+    # A profile is allowed to claim that directory with --app-data, in which
+    # case it is somebody's profile rather than a stray, and D07 and D13 audit
+    # it like any other.
+    #
+    # doctor reads (D18):
+    #   On macOS, whether the default app data directory exists and holds any
+    #   entry at all (names only, nothing inside it is opened), the
+    #   directory's own modification time, and, when a state file is there,
+    #   the `oauthAccount` block of it: the account's email and organisation
+    #   id, the same identity `list` prints for a root.
+    if [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]; then
+        for _doc_agent in $KNOWN_AGENTS; do
+            _doc_appdata=$(agent_def "$_doc_agent" app_data_dflt)
+            [ -d "$_doc_appdata" ] || continue
+            dir_has_entries "$_doc_appdata" || continue
+
+            _doc_claimed=""
+            for _doc_name in $_doc_names; do
+                [ "$(reg_get "$_doc_name" app_data)" = "$_doc_appdata" ] && _doc_claimed=1
+            done
+            [ -n "$_doc_claimed" ] && continue
+
+            # Name the account when the app stores one the way a config root
+            # does. It is not known to, so this is the branch that reports the
+            # directory and when it was last written to instead.
+            _doc_app_acct=$(read_accounts "$(agent_def "$_doc_agent" state_base)" "$_doc_appdata" | cut -f2)
+            if [ -n "$_doc_app_acct" ] && [ "$_doc_app_acct" != "<unreadable>" ]; then
+                finding "D18" "the default $_doc_agent app data directory holds an account, so the app has been run unpinned" \
+                    "$_doc_appdata" \
+                    "account: $_doc_app_acct" \
+                    "This directory is what the app uses when no --user-data-dir selects" \
+                    "one, so an applet was not in front of this launch." \
+                    "Launch the app from an applet instead. Build one with:" \
+                    "$SELF app <profile>"
+            else
+                finding "D18" "the default $_doc_agent app data directory has been written to, so the app has been run unpinned" \
+                    "$_doc_appdata" \
+                    "last modified: $(dir_mtime "$_doc_appdata")" \
+                    "This directory is what the app uses when no --user-data-dir selects" \
+                    "one, so an applet was not in front of this launch. It holds that" \
+                    "launch's own login and its own copy of Claude Code, and no account" \
+                    "of this tool's kind is recorded in it, so the directory and its" \
+                    "timestamp are all this rule can name." \
+                    "Launch the app from an applet instead. Build one with:" \
+                    "$SELF app <profile>"
+            fi
+        done
+    else
+        emit data rule_status D18 not_run \
+            "the app data directory is at a macOS path, and this is $AGENT_PROFILE_PLATFORM"
+    fi
 
     # ---- D09: a deep-link handler that cannot carry a config root ---------
     #

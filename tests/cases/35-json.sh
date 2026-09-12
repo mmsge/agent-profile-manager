@@ -167,9 +167,9 @@ case_doctor_json_lists_every_rule() {
     json_two_profiles
     out=$("$AP" doctor --json 2>/dev/null)
     assert_json "$out" || return
-    assert_equals "16" "$(json_get "$out" 'len(d["rules"])')" || return
+    assert_equals "18" "$(json_get "$out" 'len(d["rules"])')" || return
     assert_equals "D01" "$(json_get "$out" 'd["rules"][0]["rule"]')" || return
-    assert_equals "D16" "$(json_get "$out" 'd["rules"][-1]["rule"]')" || return
+    assert_equals "D18" "$(json_get "$out" 'd["rules"][-1]["rule"]')" || return
     [ -n "$(json_get "$out" 'd["rules"][0]["title"]')" ] || fail "a rule has no title"
 }
 
