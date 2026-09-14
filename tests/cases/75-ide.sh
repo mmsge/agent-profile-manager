@@ -12,6 +12,23 @@ ide() {
     PATH="$HOME/fakebin:$PATH" AGENT_PROFILE_PLATFORM=Darwin USER=tester "$AP" "$@"
 }
 
+# fake_pgrep <dir> <running|quiet|broken>: a stand-in pgrep with a fixed
+# answer, so the three branches of ide_running can each be reached from a test.
+#
+# Defined above ide_fixture rather than beside the cases that vary it, because
+# case files run their cases as they are sourced: a helper the fixture calls
+# has to exist before the first run_case line, not merely somewhere in the file.
+fake_pgrep() {
+    mkdir -p "$1"
+    case "$2" in
+        running) printf '#!/bin/sh\nexit 0\n' > "$1/pgrep" ;;
+        quiet)   printf '#!/bin/sh\nexit 1\n' > "$1/pgrep" ;;
+        broken)  printf '#!/bin/sh\nexit 3\n' > "$1/pgrep" ;;
+        *) fail "fake_pgrep: unknown mode '$2'"; return 1 ;;
+    esac
+    chmod +x "$1/pgrep"
+}
+
 # ide_fixture: a throwaway HOME with one profile and an open that takes --env.
 # No extension is installed; each case that wants one installs it.
 #
@@ -20,9 +37,17 @@ ide() {
 # doctor and verify at the runner's own Keychain, so the same commit would pass
 # on Linux and behave differently on macOS. It is given bouvet's own service so
 # the Keychain-backed rules stay quiet and a D16 assertion is testing D16.
+#
+# The stand-in pgrep(1) is not optional either, and for the same shape of
+# reason. code and idea ask ide_running whether the editor is already up, and
+# without a stand-in that question goes to the host's real process table: on a
+# developer's Mac with VS Code open, every launch case was refused and failed,
+# while CI, with no editor running, passed. The fixture answers "not running"
+# itself; a case about a running editor overrides that with its own fake_pgrep.
 ide_fixture() {
     HOME=$(new_home); export HOME
     fake_open "$HOME/fakebin" env
+    fake_pgrep "$HOME/fakebin" quiet
     "$AP" new bouvet >/dev/null 2>&1
     fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
 }
@@ -374,17 +399,19 @@ run_case "help and completions name code and idea"    case_help_and_completions_
 # wrong profile. These drive the decision instead of the string.
 # ---------------------------------------------------------------------------
 
-# fake_pgrep <dir> <running|quiet|broken>: a stand-in pgrep with a fixed
-# answer, so the three branches of ide_running can each be reached from a test.
-fake_pgrep() {
-    mkdir -p "$1"
-    case "$2" in
-        running) printf '#!/bin/sh\nexit 0\n' > "$1/pgrep" ;;
-        quiet)   printf '#!/bin/sh\nexit 1\n' > "$1/pgrep" ;;
-        broken)  printf '#!/bin/sh\nexit 3\n' > "$1/pgrep" ;;
-        *) fail "fake_pgrep: unknown mode '$2'"; return 1 ;;
-    esac
-    chmod +x "$1/pgrep"
+# The host's process table is out of bounds. A pgrep that sits on PATH behind
+# the fixture's stand-in, answering "running" the way a developer's real pgrep
+# does with VS Code open, must not turn a launch into a refusal. This is the
+# case that would have failed on the Mac where the suite first met a running
+# editor, and it fails again if ide_fixture stops installing its own pgrep.
+case_the_fixture_never_asks_the_host_whether_an_editor_runs() {
+    ide_fixture
+    fake_pgrep "$HOME/hostbin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 PATH="$HOME/fakebin:$HOME/hostbin:$PATH" \
+        AGENT_PROFILE_PLATFORM=Darwin USER=tester "$AP" code bouvet /tmp/project 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_not_contains "$out" "already running" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet"
 }
 
 case_code_refuses_when_the_editor_is_running() {
@@ -474,6 +501,7 @@ case_idea_refuses_when_the_ide_is_running() {
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "already running"
 }
+run_case "the fixture never asks the host about an editor" case_the_fixture_never_asks_the_host_whether_an_editor_runs
 run_case "code refuses a running editor"              case_code_refuses_when_the_editor_is_running
 run_case "code launches when nothing is running"      case_code_launches_when_the_editor_is_not_running
 run_case "code refuses when it cannot tell"           case_code_refuses_when_it_cannot_tell
