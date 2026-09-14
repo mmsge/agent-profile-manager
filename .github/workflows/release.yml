@@ -16,11 +16,12 @@ name: Release
 # manual run started from the default branch therefore signed as
 # release.yml@refs/heads/hovud, while tools/install.sh,
 # tools/update-homebrew-formula.sh, the README and the notes written below all
-# demand @refs/tags/. v0.9.0 and v0.10.0 were published that way and cannot be
-# verified with the command the README prints. Building under the tag is the
-# fix; the verification step below, which checks the bundles just written
-# against the very defaults tools/install.sh reads, is what stops the same
-# thing being published quietly again.
+# demand @refs/tags/. v0.8.0, v0.9.0 and v0.10.0, which is every release
+# published so far, were signed that way and cannot be verified with the
+# command the README prints. Building under the tag is the fix; the
+# verification step below, which checks the bundles just written against the
+# very defaults tools/install.sh reads, is what stops the same thing being
+# published quietly again.
 on:
   push:
     tags: ["v*"]
@@ -160,6 +161,11 @@ jobs:
       # token names refs/tags/<tag>, so every bundle it writes carries the
       # identity tools/install.sh, tools/update-homebrew-formula.sh and the
       # README all ask for.
+      #
+      # The ref is written out in full rather than as the bare tag name, so
+      # that a branch of the same name could never be what runs. The workflow
+      # file is read at that ref, and it carries workflow_dispatch there
+      # because the tag was cut from the default branch a moment ago.
       - name: Start the release run under the tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -473,6 +479,16 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
+          # Only a release tag, and only one this workflow would have built.
+          # Somebody can start this workflow on any tag from the Actions tab,
+          # and a tag that is not a version is not this job's to delete.
+          case "$TAG" in
+            v*) ;;
+            *) echo "$TAG is not a release tag, so it stays where it is."; exit 0 ;;
+          esac
+          case "${TAG#v}" in
+            ''|*[!0-9.]*) echo "$TAG is not a version tag, so it stays where it is."; exit 0 ;;
+          esac
           # Never a tag anybody could already have installed from. The release
           # exists the moment 'gh release create' returns, so a failure after
           # that point leaves the tag exactly where it is and is fixed by hand.

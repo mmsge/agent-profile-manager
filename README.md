@@ -1433,9 +1433,11 @@ The tag is therefore created before the build rather than after it, which is
 the price of signing under it, and a failed run takes the tag back: when the
 run fails and no release exists for the tag yet, the workflow deletes it,
 rather than leaving a version number pointing at nothing anyone can install. A
-tag that does have a release is never deleted. Nothing is lost either way: the
-manual run recreates its tag, and a tag pushed from a checkout is still in your
-clone, so `git push origin v0.10.0` puts it back unchanged, signature and all.
+tag that does have a release is never deleted, and neither is a tag that is not
+a version, so pointing the workflow at some other tag by mistake cannot cost
+you that tag. Nothing is lost either way: the manual run recreates its tag, and
+a tag pushed from a checkout is still in your clone, so
+`git push origin v0.10.0` puts it back unchanged, signature and all.
 
 The tarball is built with fixed ownership, fixed order and the tagged commit's
 own timestamp, so anyone can check the tag out, rebuild it and get the same
