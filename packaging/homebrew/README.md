@@ -97,7 +97,7 @@ pushed and the job says so; open the pull request from that branch by hand.
 The workflow runs one script, and it is the same script from a checkout:
 
 ```sh
-tools/update-homebrew-formula.sh 0.9.0
+tools/update-homebrew-formula.sh 0.10.0
 ```
 
 It makes the same checks and writes the same three fields. It does not commit,
@@ -108,7 +108,7 @@ would rather not wait for another one.
 Or just the number, to check one by eye:
 
 ```sh
-tools/update-homebrew-formula.sh 0.9.0 --sum-only
+tools/update-homebrew-formula.sh 0.10.0 --sum-only
 ```
 
 Either way the formula cannot be updated before the release, because until it
@@ -121,7 +121,7 @@ The tap's copy is a deliberate act, so it is a hand-made commit:
 ```sh
 cd ../homebrew-agpin
 cp ../agent-profile-manager/packaging/homebrew/agpin.rb Formula/agpin.rb
-git commit -am "agpin 0.9.0"
+git commit -am "agpin 0.10.0"
 git push
 ```
 
