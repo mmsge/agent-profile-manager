@@ -340,7 +340,8 @@ case_verify_says_how_to_settle_f19_and_f20() {
     ide_fixture
     out=$(ide verify 2>&1)
     assert_contains "$out" "note      F19" || return
-    assert_contains "$out" "not from a session that ran" || return
+    assert_contains "$out" "Observed on 2026-09-14 for the VS Code extension" || return
+    assert_contains "$out" "Account & Usage panel" || return
     assert_contains "$out" "note      F20" || return
     assert_contains "$out" "a settings pin is not a launch pin"
 }

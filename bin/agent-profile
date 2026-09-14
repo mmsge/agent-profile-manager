@@ -3845,9 +3845,9 @@ Try: $SELF verify [--json] [--quiet] [--explain]" ;;
     # them rather than pretending it just did.
     # shellcheck disable=SC2016  # literal help text; the user types this
     vnote "F19" "the IDE extensions do take the config root from the IDE's process environment" \
-        "Read from the shipped extension and plugin, not from a session that ran." \
-        "Re-confirm with: $SELF code <name> <path>, start a session in the IDE," \
-        'then: find "$HOME"/.claude* -name "*.jsonl" -mmin -3'
+        "Observed on 2026-09-14 for the VS Code extension; the JetBrains plugin is read from its code." \
+        "Not checkable from here. Re-confirm with: $SELF code <name> <path>, then read the account" \
+        "in the extension's Account & Usage panel, using a profile the default root does not hold."
 
     vnote "F20" "a settings pin is not a launch pin, in either IDE family" \
         "VS Code's claudeCode.environmentVariables reaches the agent the extension" \
