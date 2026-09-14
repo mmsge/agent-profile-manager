@@ -565,24 +565,43 @@ That directory is the evidence the instance was genuinely separate: a forwarded
 launch writes nothing of its own. It also sits where `remove --purge` already
 deletes, so an offboarding takes that editor state with it.
 
-**Still not verified at runtime.** No Claude Code extension was installed on
-the machine that ran the test, so what remains unobserved is the extension
-reading the variable and a session landing in the pinned root. The environment
-arrives; that the extension consumes it is still read from the code above
-rather than watched.
+**Verified at runtime on 2026-09-14**, macOS 26.6.2, VS Code extension
+2.1.270, on a machine with two profiles and a default root that itself held
+the tide account (a stray `~/.claude.json`, reported by D02). That last detail
+is what makes the test mean something: a window launched with `code tide`
+showed the tide account in the extension's Account & Usage panel, which proves
+nothing, because the unpinned root would have shown the same. A window
+launched with `code highsoft` showed `markus@highsoft.com`, organisation
+Highsoft Tech, and highsoft is held by `.claude-highsoft` alone. The extension
+read the variable from the process environment `open --env` gave the IDE and
+opened the pinned root. Nothing was typed in either window.
 
-**How to re-check,** on a Mac with the IDE and the extension installed:
+Two things about that check, so the next one is done right:
+
+- **Opening the panel is not a launch.** `.claude-highsoft/.claude.json` kept
+  its three-day-old timestamp through the whole test, so the state file's
+  modification time cannot stand in for the account panel. Only a session that
+  runs the CLI writes there.
+- **Restricted Mode hides the extension entirely.** A folder VS Code has not
+  seen before opens untrusted, the extension does not activate, and the
+  command palette finds nothing named Claude. Trust the folder first, from the
+  banner or the Restricted Mode item in the status bar, and the commands and
+  the activity-bar icon appear.
+
+**How to re-check,** on a Mac with the IDE and the extension installed. Quit
+the editor first, or the command will refuse: see the defect above. Use a
+profile whose account the default root does not hold, or the answer is
+ambiguous.
 
 ```sh
-agent-profile code <name> ~/src/some-project   # or: agent-profile idea <name> ~/src/some-project
-# start a Claude Code session in the IDE, then
-find "$HOME"/.claude* -name '*.jsonl' -mmin -3
+agent-profile code <name> ~/src/some-project
 ```
 
-Quit the editor first, or the command will refuse: see the defect above. The
-path it prints is the root actually in use. Repeat the same test after
-launching the IDE from the Dock instead; the two answers should differ, and
-that difference is the whole reason D16 exists.
+Trust the folder, open the Claude Code panel, open Account & Usage, and read
+the email. For the JetBrains side the command is `agent-profile idea <name>
+~/src/some-project` and the panel is the plugin's own. Repeat the same test
+after launching the IDE from the Dock instead; the two answers should differ,
+and that difference is the whole reason D16 exists.
 
 ### F20 Does any of them expose a setting for the config root?
 
@@ -645,9 +664,13 @@ rather than sets it.
 ### F21 Where does each extension record its installed presence on disk?
 
 **Status:** `VERIFIED` 2026-09-09 for the JetBrains plugin directory name and
-for the VS Code extension id; `DOCUMENTED` for the VS Code extensions
-directory; `UNVERIFIED` for Cursor's extensions directory. This is what D16
-scans, so the mixed status matters.
+for the VS Code extension id; `VERIFIED` 2026-09-14 for the VS Code extensions
+directory, observed on macOS 26.6.2 as
+`~/.vscode/extensions/anthropic.claude-code-2.1.270-darwin-arm64`, with the
+previous build's `anthropic.claude-code-2.1.268-darwin-arm64` still beside it
+after an update, which is why D16 reported VS Code twice (#58); `UNVERIFIED`
+for Cursor's extensions directory. This is what D16 scans, so the mixed status
+matters.
 
 **The extension id is `anthropic.claude-code`.** The CLI hard-codes it in both
 directions, as the string it looks for and the one it installs:
