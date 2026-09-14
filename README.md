@@ -1312,9 +1312,10 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 400 tests, no dependencies
+tests/run.sh              # 403 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
+tests/run.sh 75-ide       # one case file, by any part of its name
 ```
 
 That count is generated, not typed by hand: after adding or removing tests,

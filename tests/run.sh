@@ -11,6 +11,14 @@
 # Every test gets its own throwaway HOME. Nothing here ever touches a real
 # config root: the script resolves every path it uses from HOME or from an
 # AGENT_PROFILE_* variable, and the harness redirects all of them.
+#
+# Usage: tests/run.sh [NAME...]
+#
+# With no NAME every case file under tests/cases/ runs, which is what CI and
+# tools/gen-test-count.sh rely on. With one or more, only the files whose name
+# contains a NAME run: "tests/run.sh 75-ide" or "tests/run.sh ide" reruns the
+# one file under repair in seconds instead of the whole suite in minutes. A
+# NAME that matches nothing is an error, never a silently green empty run.
 
 set -u
 
@@ -453,12 +461,42 @@ run_case() {
     [ "$TESTS_FAILED" -eq "$_before" ] && pass
 }
 
+# case_selected <file> [NAME...]: true when no NAME was given, or when one of
+# them is part of the file's name. ".sh" on a NAME is tolerated, so a path
+# pasted from a failure report works as it is.
+case_selected() {
+    _cs_name=$(basename "$1" .sh); shift
+    [ $# -gt 0 ] || return 0
+    for _cs_want in "$@"; do
+        _cs_want=$(basename "$_cs_want" .sh)
+        case "$_cs_name" in *"$_cs_want"*) return 0 ;; esac
+    done
+    return 1
+}
+
+# Refuse a NAME nothing matches before anything runs: a typo must not turn
+# into a run of zero tests that exits 0.
+for _want in "$@"; do
+    _hit=""
+    for _case in "$ROOT"/tests/cases/*.sh; do
+        [ -f "$_case" ] || continue
+        case_selected "$_case" "$_want" && { _hit=1; break; }
+    done
+    if [ -z "$_hit" ]; then
+        printf 'tests/run.sh: nothing under tests/cases/ matches "%s"\n' "$_want" >&2
+        exit 2
+    fi
+done
+
 printf 'agent-profile test suite\n'
 printf '  bash    %s\n' "$BASH_VERSION"
-printf '  script  %s\n\n' "$ROOT/bin/agent-profile"
+printf '  script  %s\n' "$ROOT/bin/agent-profile"
+[ $# -eq 0 ] || printf '  cases   %s\n' "$*"
+printf '\n'
 
 for _case in "$ROOT"/tests/cases/*.sh; do
     [ -f "$_case" ] || continue
+    case_selected "$_case" "$@" || continue
     printf '%s\n' "$(basename "$_case" .sh)"
     # shellcheck source=/dev/null
     . "$_case"
