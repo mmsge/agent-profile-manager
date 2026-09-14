@@ -605,9 +605,11 @@ and that difference is the whole reason D16 exists.
 
 ### F20 Does any of them expose a setting for the config root?
 
-**Status:** `VERIFIED` 2026-09-09 from the shipped artifacts. Answer: **both do,
-and they are not the same kind of setting.** The VS Code one pins the CLI. The
-JetBrains one pins nothing at all.
+**Status:** `VERIFIED` 2026-09-09 from the shipped artifacts, and `VERIFIED`
+2026-09-14 in the VS Code settings UI at extension 2.1.270 on macOS 26.6.2.
+Answer: **both do, and they are not the same kind of setting.** The VS Code one
+pins the CLI. The JetBrains one pins nothing at all. No setting in either names
+the config root itself.
 
 **VS Code and Cursor: `claudeCode.environmentVariables`.** Declared in the
 extension's `package.json` as an array of `{name, value}` objects at `machine`
@@ -629,6 +631,23 @@ There is also `claudeCode.claudeProcessWrapper`, "Executable path used to
 launch the Claude process", which replaces the bundled binary outright. Nothing
 in this tool touches it, and a wrapper is another way an installation can
 differ from what D16 assumes.
+
+**Observed in the settings UI on 2026-09-14**, with the filter
+`@ext:anthropic.claude-code`: sixteen settings at User scope, and none of them
+is a config directory, root or profile. Beside the two above they are Allow
+Dangerously Skip Permissions, Archive Inactive Sessions, Autosave, Disable
+Login Prompt, Enable New Conversation Shortcut, Enable Reopen Closed Session
+Shortcut, Focus View, Hide Onboarding, Initial Permission Mode, Preferred
+Location, Respect Git Ignore, Use Ctrl Enter To Send, Use Python Environment
+and Use Terminal. At Workspace scope the list drops to ten: Environment
+Variables, Claude Process Wrapper, Allow Dangerously Skip Permissions, Archive
+Inactive Sessions, Focus View and Initial Permission Mode are not offered
+there. That is the `machine` scope from the manifest, seen from the front, and
+it means a per-project pin through workspace settings is not possible even for
+the CLI half. The Environment Variables description now adds "Prefer setting
+environment variables in Claude's settings.json", which cannot set the root
+either: that file is read from inside the root, so a `CLAUDE_CONFIG_DIR` in it
+would be found only by a session already pinned there.
 
 **JetBrains: a `Config directory` setting that is not a pin.** The plugin's
 settings hold a `claudeConfigDir` string, shown as **Settings → Tools → Claude
@@ -655,8 +674,10 @@ terminal's `CLAUDE_CONFIG_DIR` says. The JetBrains documentation page does not
 list this setting at all, which makes the misreading likelier rather than less
 likely.
 
-**How to re-check:** in VS Code, Settings → Extensions → Claude Code, and
-confirm `claudeCode.environmentVariables` is still there and still applied
+**How to re-check:** in VS Code, open Settings with Cmd+comma and filter with
+`@ext:anthropic.claude-code`; confirm Environment Variables is still there,
+still absent at Workspace scope, and that nothing new names a directory or
+root; then confirm in the extension's `package.json` that it is still applied
 after `process.env`. In a JetBrains IDE, Settings → Tools → Claude Code [Beta],
 and confirm the Config directory comment still says it mirrors the variable
 rather than sets it.
