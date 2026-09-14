@@ -12,8 +12,8 @@
 class Agpin < Formula
   desc "Keep several AI agent accounts apart on one Mac, and audit that they stay apart"
   homepage "https://github.com/mmsge/agent-profile-manager"
-  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.9.0/agent-profile-0.9.0.tar.gz"
-  version "0.9.0"
+  url "https://github.com/mmsge/agent-profile-manager/releases/download/v0.10.0/agent-profile-0.10.0.tar.gz"
+  version "0.10.0"
 
   # The row for this tarball in the release's own SHA256SUMS, checked against
   # the tarball downloaded from that same release, and against the Sigstore
@@ -24,9 +24,9 @@ class Agpin < Formula
   # The check it cannot make is the one that matters most: rebuilding the
   # tarball from the tag on other hardware and getting this sum again. That
   # says the release is the tree the tag names, rather than merely intact and
-  # signed, and it is the reviewer's to make. v0.8.0 and v0.9.0 were each
-  # given it by hand.
-  sha256 "a2ac334040e810f3284cdf1ca7771ea06fb961f091695e4f4908f2feaf9f492a"
+  # signed, and it is the reviewer's to make. v0.8.0, v0.9.0 and v0.10.0
+  # were each given it by hand.
+  sha256 "dfd9b6b941ae702077b1ad439cd5ab297f34c66073fc2152b74c40a4f88d7ff4"
 
   # Homebrew audits for this, and it must match the LICENSE file at the
   # repository root.
