@@ -1,13 +1,26 @@
 name: Release
 
-# A tag is the release. Nothing is published from a branch, so every artifact
-# corresponds to a commit anyone can check out and rebuild.
+# A tag is the release. Nothing is built from a branch, so every artifact
+# corresponds to a commit anyone can check out and rebuild, and the Sigstore
+# certificate on every artifact names that tag.
 #
-# Two ways in, one path out. Pushing a v* tag is still the way to cut a
-# release, and nothing about it changes. The manual run exists because pushing
-# a tag needs git write access to this repository, and the person cutting the
-# release does not always have it from where they are sitting. It creates the
-# same tag, from the same commit, and then does the same thing.
+# Two ways in, and since issue #63 the second leads into the first rather than
+# running beside it. Pushing a v* tag builds, signs, verifies and publishes. A
+# manual run builds nothing at all: it checks the version, creates the tag, and
+# starts this same workflow again on refs/tags/<tag>, which then takes the
+# ordinary tag path. Two runs, and the second one is the release.
+#
+# Why the second run exists. Keyless signing is an OIDC token exchanged for a
+# short-lived certificate, and that token names the ref the run was started
+# from, not what the run checked out and not what it tagged afterwards. A
+# manual run started from the default branch therefore signed as
+# release.yml@refs/heads/hovud, while tools/install.sh,
+# tools/update-homebrew-formula.sh, the README and the notes written below all
+# demand @refs/tags/. v0.9.0 and v0.10.0 were published that way and cannot be
+# verified with the command the README prints. Building under the tag is the
+# fix; the verification step below, which checks the bundles just written
+# against the very defaults tools/install.sh reads, is what stops the same
+# thing being published quietly again.
 on:
   push:
     tags: ["v*"]
@@ -15,76 +28,77 @@ on:
     inputs:
       version:
         description: >-
-          Version to release, without the leading v, for example 0.8.0. It must
-          equal AGENT_PROFILE_VERSION on the branch this is run from, which is
-          checked before anything is built or tagged.
-        required: true
+          Version to release, without the leading v, for example 0.8.0. Give it
+          when running this from the default branch, which is where the tag is
+          created; it must equal AGENT_PROFILE_VERSION there. Leave it empty
+          when running from a tag, which names its version already.
+        # Optional, because the run this workflow starts on refs/tags/<tag>
+        # passes no inputs: the tag is the version. A required input would make
+        # that dispatch fail before it began.
+        required: false
         type: string
 
 permissions:
   contents: read
 
 jobs:
-  # The same matrix branches run, called rather than copied. A release that
-  # skipped a check would be worse than no release at all.
-  test:
-    uses: ./.github/workflows/ci.yml
-
-  publish:
-    needs: test
+  # The manual path, for whoever is cutting a release from somewhere without
+  # git write access to this repository: a borrowed machine, a phone, an agent
+  # working through an API scoped to branches. All it does is create the tag.
+  # The run it starts does everything else, under that tag.
+  tag:
+    # From a branch only. A manual run on a tag ref is either the run this job
+    # started or somebody rebuilding a tag by hand, and the tag exists in both
+    # cases.
+    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    outputs:
-      # What the formula job below needs to know, and the only thing it is
-      # told: which release to read.
-      tag: ${{ steps.v.outputs.tag }}
     permissions:
-      # Create the release and upload its assets.
+      # Push the tag.
       contents: write
-      # Mint the OIDC token cosign signs with. Keyless signing is exactly this
-      # token, exchanged for a short-lived certificate, so without it there is
-      # nothing to sign with.
-      id-token: write
+      # And start the run that builds it. A push made with GITHUB_TOKEN starts
+      # no workflow run, or every workflow could start itself, so the run has
+      # to be asked for by name. workflow_dispatch is the documented exception
+      # to that rule, and homebrew-formula.yml and the homebrew job below ask
+      # for their runs the same way.
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
         with:
-          # The manual path pushes a tag from here, and the default shallow
-          # clone has no ref to push. It also keeps the tarball's mtime step
-          # reading the same commit date either way.
+          # The tag is pushed from here, and the default shallow clone has no
+          # ref to push.
           fetch-depth: 0
 
-      # A tag that disagrees with the version the script reports is a release
-      # nobody can reason about: 'agpin version' would name one thing and the
-      # tarball another. Fail here rather than publish that.
-      #
-      # On a tag push the tag is the input. On a manual run the version is,
-      # and the tag is derived from it, so the two paths meet at the same
-      # comparison below rather than each having their own.
-      - name: Check the tag against the version in the script
+      # Everything that can refuse this release refuses it here, before a tag
+      # exists. A tag that disagrees with the version the script reports is a
+      # release nobody can reason about: 'agpin version' would name one thing
+      # and the tarball another.
+      - name: Check the version, and refuse to re-cut a tag
         id: v
         # Through the environment, never interpolated into the script. A
         # ${{ }} expansion is pasted in as text before the shell sees it, so a
         # crafted input would run as code in a job that holds contents: write
-        # and an OIDC signing token. This is the one place a person's typing
-        # reaches this workflow, so it goes in as data.
+        # and actions: write. This is the one place a person's typing reaches
+        # this workflow, so it goes in as data.
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -eu
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            version="$DISPATCH_VERSION"
-            # Typed by a person, so say what is wrong rather than failing later
-            # with a tag nobody meant to create.
-            case "$version" in
-              v*) echo "version is '$version'; give it without the leading v." >&2; exit 1 ;;
-              ''|*[!0-9.]*) echo "version '$version' is not digits and dots, like 0.8.0." >&2; exit 1 ;;
-            esac
-            tag="v$version"
-          else
-            tag="$GITHUB_REF_NAME"
-            version="${tag#v}"
+          version="$DISPATCH_VERSION"
+          # Typed by a person, so say what is wrong rather than failing later
+          # with a tag nobody meant to create.
+          if [ -z "$version" ]; then
+            echo "give the version to release, without the leading v, for example 0.8.0." >&2
+            echo "It is only optional so that this workflow can start itself on a tag," >&2
+            echo "where the tag names the version; from a branch it is required." >&2
+            exit 1
           fi
+          case "$version" in
+            v*) echo "version is '$version'; give it without the leading v." >&2; exit 1 ;;
+            *[!0-9.]*) echo "version '$version' is not digits and dots, like 0.8.0." >&2; exit 1 ;;
+          esac
+          tag="v$version"
           reported=$(sed -n 's/^AGENT_PROFILE_VERSION="\(.*\)"$/\1/p' bin/agent-profile | head -1)
           if [ -z "$reported" ]; then
             echo "could not read AGENT_PROFILE_VERSION from bin/agent-profile" >&2
@@ -95,70 +109,300 @@ jobs:
             echo "Bump AGENT_PROFILE_VERSION in the commit you tag." >&2
             exit 1
           fi
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            # A manual run can be pointed at any branch. A release built from
-            # an unmerged branch would carry code that never passed review, so
-            # only the default branch may be released from. A tag push is not
-            # checked this way: a tag already names one immutable commit.
-            if [ -z "$DEFAULT_BRANCH" ]; then
-              echo "could not read the repository's default branch, so the branch this" >&2
-              echo "run was started from cannot be checked. Refusing rather than guessing." >&2
-              exit 1
-            fi
-            if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
-              echo "manual releases run from $DEFAULT_BRANCH only, not $GITHUB_REF_NAME." >&2
-              exit 1
-            fi
-            # Never move a tag that exists. Whatever it points at has been
-            # published, downloaded and checksummed by somebody.
-            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-              echo "tag $tag already exists. Bump AGENT_PROFILE_VERSION instead of re-cutting it." >&2
-              exit 1
-            fi
+          # A manual run can be pointed at any branch. A release built from an
+          # unmerged branch would carry code that never passed review, so only
+          # the default branch may be released from. A tag push is not checked
+          # this way: a tag already names one immutable commit.
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "could not read the repository's default branch, so the branch this" >&2
+            echo "run was started from cannot be checked. Refusing rather than guessing." >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "manual releases run from $DEFAULT_BRANCH only, not $GITHUB_REF_NAME." >&2
+            exit 1
+          fi
+          # Never move a tag that exists. Whatever it points at has been
+          # published, downloaded and checksummed by somebody.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "tag $tag already exists. Bump AGENT_PROFILE_VERSION instead of re-cutting it." >&2
+            exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tarball=agent-profile-$version.tar.gz" >> "$GITHUB_OUTPUT"
+
+      # First, not last. This is the change issue #63 asked for: what signs the
+      # artifacts is the run's own ref, so the build has to happen under the
+      # tag, and the tag therefore has to exist before it. The cost is a tag
+      # that can outlive a failed build, and the cleanup job below is what pays
+      # it.
+      #
+      # This tag is annotated but not signed: the runner has no signing key,
+      # and putting one there would mean a release key living in repository
+      # secrets, which is worse than an unsigned tag. What identifies the
+      # release is the Sigstore certificate on the artifacts, which records
+      # this workflow, this repository and this tag. A tag cut by hand with
+      # 'git tag -s' still carries a human signature, and that path is
+      # unchanged.
+      - name: Create the tag
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "agent-profile $VERSION"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $(git rev-parse "$TAG^{commit}") as $TAG."
+
+      # The release itself, in a second run whose ref is the tag. Its OIDC
+      # token names refs/tags/<tag>, so every bundle it writes carries the
+      # identity tools/install.sh, tools/update-homebrew-formula.sh and the
+      # README all ask for.
+      - name: Start the release run under the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -eu
+          # Deliberately not deleting the tag if this fails. The tag is correct
+          # and points at the reviewed commit; what failed is starting a run,
+          # and a dispatch that errors here may still have reached GitHub, so
+          # deleting the ref could pull it out from under a run that did start.
+          # Say what to do instead.
+          if ! gh workflow run release.yml --ref "refs/tags/$TAG"; then
+            echo "could not start the release run for $TAG." >&2
+            echo "The tag is pushed and nothing is published. Start the run by hand:" >&2
+            echo "  gh workflow run release.yml --ref refs/tags/$TAG" >&2
+            echo "or from the Actions tab, choosing $TAG as the ref and leaving the" >&2
+            echo "version empty. To start over instead, delete the tag first:" >&2
+            echo "  git push --delete origin refs/tags/$TAG" >&2
+            exit 1
+          fi
+          echo "Asked release.yml to run on refs/tags/$TAG."
+          echo "That run builds, signs, verifies and publishes $TAG; this one is done."
+          echo "$GITHUB_SERVER_URL/$GH_REPO/actions/workflows/release.yml"
+
+  # The same matrix branches run, called rather than copied. A release that
+  # skipped a check would be worse than no release at all.
+  #
+  # The tag path only. A manual run from a branch creates the tag and stops,
+  # and the run it starts arrives back here with the tag as its ref.
+  test:
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    outputs:
+      # What the formula job below needs to know, and the only thing it is
+      # told: which release to read.
+      tag: ${{ steps.v.outputs.tag }}
+    permissions:
+      # Create the release and upload its assets.
+      contents: write
+      # Mint the OIDC token cosign signs with. Keyless signing is exactly this
+      # token, exchanged for a short-lived certificate, so without it there is
+      # nothing to sign with. The certificate names the ref this run was
+      # started from, which is why this job runs on tag refs and nothing else.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history. Nothing here pushes any more, but the tarball's
+          # mtime is read from the commit's own date, and this is the checkout
+          # every release so far was built from: the commit that moves the
+          # signing identity should not also change how the tarball is made.
+          fetch-depth: 0
+
+      # On both ways in the ref is the tag, so the tag is read from the ref and
+      # from nothing else. That is the whole of issue #63: the ref is what the
+      # signing certificate will name, so anything else read here could
+      # disagree with what the signature says.
+      - name: Check the tag against the version in the script
+        id: v
+        # Through the environment, never interpolated into the script, for the
+        # reason the tag job above gives. Empty on a tag push and on the
+        # dispatch that job makes; only a person running this workflow on a tag
+        # by hand can put anything in it, and then it is checked rather than
+        # used.
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          case "$GITHUB_REF" in
+            refs/tags/*) tag="${GITHUB_REF#refs/tags/}" ;;
+            *)
+              echo "this job builds and signs, so it must only ever run on a tag ref." >&2
+              echo "$GITHUB_REF is not one, and a run started from a branch signs under" >&2
+              echo "that branch, which is issue #63. The tag job is what a branch run does." >&2
+              exit 1
+              ;;
+          esac
+          case "$tag" in
+            v*) ;;
+            *) echo "'$tag' does not start with a v, so it is not a release tag." >&2; exit 1 ;;
+          esac
+          version="${tag#v}"
+          case "$version" in
+            ''|*[!0-9.]*) echo "'$tag' is not a version tag like v0.9.0." >&2; exit 1 ;;
+          esac
+          # The input is ignored on this path, so refuse rather than silently
+          # build one version while somebody was told another.
+          if [ -n "$DISPATCH_VERSION" ] && [ "$DISPATCH_VERSION" != "$version" ]; then
+            echo "this run is on $tag but was given version '$DISPATCH_VERSION'." >&2
+            echo "The tag decides what is built and what the signature names, so" >&2
+            echo "refusing rather than building one and calling it the other. Run this" >&2
+            echo "on the tag with the version left empty." >&2
+            exit 1
+          fi
+          # A tag that disagrees with the version the script reports is a
+          # release nobody can reason about: 'agpin version' would name one
+          # thing and the tarball another. Fail here rather than publish that.
+          reported=$(sed -n 's/^AGENT_PROFILE_VERSION="\(.*\)"$/\1/p' bin/agent-profile | head -1)
+          if [ -z "$reported" ]; then
+            echo "could not read AGENT_PROFILE_VERSION from bin/agent-profile" >&2
+            exit 1
+          fi
+          if [ "$version" != "$reported" ]; then
+            echo "tag $tag means version $version, but bin/agent-profile says $reported." >&2
+            echo "Bump AGENT_PROFILE_VERSION in the commit you tag." >&2
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "tarball=agent-profile-$version.tar.gz"
+          } >> "$GITHUB_OUTPUT"
+
+      # Read out of tools/install.sh rather than written here twice. What this
+      # release has to satisfy is whatever the installer will demand of it, and
+      # two copies of a regular expression in two files is exactly how they come
+      # to disagree. The release notes below quote the same two strings, so the
+      # command a reader is given is the command that was made to pass.
+      - name: Read the identity tools/install.sh will demand
+        id: promise
+        run: |
+          set -eu
+          f=tools/install.sh
+          # The ${...} in both expressions is install.sh's own text, matched
+          # literally, so the single quotes around them are the point rather
+          # than an oversight.
+          # shellcheck disable=SC2016
+          identity=$(sed -n 's/^: "${AGENT_PROFILE_COSIGN_IDENTITY:=\(.*\)}"$/\1/p' "$f" | head -1)
+          # shellcheck disable=SC2016
+          issuer=$(sed -n 's/^: "${AGENT_PROFILE_COSIGN_ISSUER:=\(.*\)}"$/\1/p' "$f" | head -1)
+          if [ -z "$identity" ] || [ -z "$issuer" ]; then
+            echo "could not read the cosign identity and issuer defaults from $f." >&2
+            echo "They are what this release is verified against below, so there is" >&2
+            echo "nothing to check it with. Refusing rather than publishing unchecked." >&2
+            exit 1
+          fi
+          # This workflow signs under a tag, and a default that no longer says
+          # so is either a mistake or a decision nobody should make by accident.
+          case "$identity" in
+            *'@refs/tags/'*) ;;
+            *)
+              echo "$f no longer expects a tag identity:" >&2
+              echo "  $identity" >&2
+              echo "This workflow builds and signs under the tag, so that default and" >&2
+              echo "this workflow have drifted apart. Fix one of them." >&2
+              exit 1
+              ;;
+          esac
+          echo "This release will be verified against:"
+          echo "  identity  $identity"
+          echo "  issuer    $issuer"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
 
       # Built with fixed ownership, fixed order and the commit's own timestamp,
       # so anyone who checks the tag out can rebuild the tarball and get the
       # same sha256. A checksum you cannot reproduce only proves the file did
       # not change in transit.
       - name: Build the tarball
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          TARBALL: ${{ steps.v.outputs.tarball }}
         run: |
           set -eu
-          version="${{ steps.v.outputs.version }}"
-          stage="dist/agent-profile-$version"
+          stage="dist/agent-profile-$VERSION"
           mkdir -p "$stage"
           cp -R bin tools docs "$stage/"
           cp README.md "$stage/"
           if [ -f LICENSE ]; then cp LICENSE "$stage/"; fi
           tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mtime="@$(git log -1 --format=%ct)" \
-              -czf "dist/${{ steps.v.outputs.tarball }}" -C dist "agent-profile-$version"
+              -czf "dist/$TARBALL" -C dist "agent-profile-$VERSION"
           rm -rf "$stage"
           cd dist
           # The same two-space format 'shasum -a 256 -c' reads on macOS, which
           # is what tools/install.sh verifies the download with.
-          sha256sum "${{ steps.v.outputs.tarball }}" > SHA256SUMS
+          sha256sum "$TARBALL" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       # Keyless: no private key exists to leak or to rotate. The certificate
-      # records the workflow, the repository and the tag, which is what
-      # tools/install.sh checks the bundle against.
+      # records the workflow, the repository and the ref the run was started
+      # from, which is a tag here and nowhere else.
       - name: Sign the tarball and the checksums
+        env:
+          TARBALL: ${{ steps.v.outputs.tarball }}
         run: |
           set -eu
           cd dist
-          for f in "${{ steps.v.outputs.tarball }}" SHA256SUMS; do
+          for f in "$TARBALL" SHA256SUMS; do
             cosign sign-blob --yes --bundle "$f.sigstore" "$f"
           done
           ls -l
 
+      # The check issue #63 was filed for. Signing cannot fail in a way that
+      # produces an unusable signature: it produces a perfectly valid one that
+      # names the wrong ref, and nothing noticed until a release was published
+      # and the Homebrew job could not verify it. So the bundles are checked
+      # here, with the same command, the same identity and the same issuer
+      # tools/install.sh will use on somebody's Mac, before anything is
+      # published under this tag.
+      - name: Verify the signatures the way tools/install.sh will
+        env:
+          TARBALL: ${{ steps.v.outputs.tarball }}
+          IDENTITY: ${{ steps.promise.outputs.identity }}
+          ISSUER: ${{ steps.promise.outputs.issuer }}
+        run: |
+          set -eu
+          cd dist
+          for f in "$TARBALL" SHA256SUMS; do
+            if ! cosign verify-blob \
+                --bundle "$f.sigstore" \
+                --certificate-identity-regexp "$IDENTITY" \
+                --certificate-oidc-issuer "$ISSUER" \
+                "$f"; then
+              echo "the signature on $f does not verify against the identity this" >&2
+              echo "project publishes:" >&2
+              echo "  identity  $IDENTITY" >&2
+              echo "  issuer    $ISSUER" >&2
+              echo "cosign prints the subject it did find just above. Nothing is" >&2
+              echo "published: a release whose signature fails the documented command" >&2
+              echo "is worse than no release, because the installer refuses it and the" >&2
+              echo "Homebrew job cannot pin it." >&2
+              exit 1
+            fi
+          done
+          echo "Both bundles verify as $IDENTITY issued by $ISSUER."
+
       - name: Write the release notes
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          TARBALL: ${{ steps.v.outputs.tarball }}
+          IDENTITY: ${{ steps.promise.outputs.identity }}
+          ISSUER: ${{ steps.promise.outputs.issuer }}
         run: |
           set -eu
           cat > dist/NOTES.md <<NOTES
@@ -169,61 +413,87 @@ jobs:
           That downloads this release, verifies it and installs a copy. To pin
           this version explicitly:
 
-              tools/install.sh --version ${{ steps.v.outputs.tag }}
+              tools/install.sh --version $TAG
 
           ## Verifying by hand
 
               shasum -a 256 -c SHA256SUMS
               cosign verify-blob \\
-                --bundle ${{ steps.v.outputs.tarball }}.sigstore \\
-                --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \\
-                --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-                ${{ steps.v.outputs.tarball }}
+                --bundle $TARBALL.sigstore \\
+                --certificate-identity-regexp '$IDENTITY' \\
+                --certificate-oidc-issuer $ISSUER \\
+                $TARBALL
 
           The signature is keyless Sigstore. There is no public key to fetch
           and no private key to steal: the certificate names the workflow, the
-          repository and the tag that produced the file.
+          repository and the tag that produced the file. That command was run
+          on the runner, against these files, before this release was created.
           NOTES
-
-      # Last, deliberately. Everything above can fail without leaving a trace;
-      # a tag cannot. Created here, a build that breaks or a signature that
-      # will not mint leaves the repository exactly as it was, and the run can
-      # simply be started again. Created earlier, every failed attempt would
-      # burn a version number.
-      #
-      # Skipped on a tag push, where the tag is what started the run.
-      #
-      # This tag is annotated but not signed: the runner has no signing key,
-      # and putting one there would mean a release key living in repository
-      # secrets, which is worse than an unsigned tag. What identifies the
-      # release is the Sigstore certificate on the artifacts below, which
-      # records this workflow, this repository and this tag, and the run this
-      # tag names. A tag cut by hand with 'git tag -s' still carries a human
-      # signature, and that path is unchanged.
-      - name: Create the tag
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          set -eu
-          tag="${{ steps.v.outputs.tag }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$tag" -m "agent-profile ${{ steps.v.outputs.version }}"
-          git push origin "refs/tags/$tag"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          TARBALL: ${{ steps.v.outputs.tarball }}
         run: |
           set -eu
-          gh release create "${{ steps.v.outputs.tag }}" \
+          gh release create "$TAG" \
             --verify-tag \
-            --title "${{ steps.v.outputs.tag }}" \
+            --title "$TAG" \
             --notes-file dist/NOTES.md \
             --generate-notes \
-            "dist/${{ steps.v.outputs.tarball }}" \
-            "dist/${{ steps.v.outputs.tarball }}.sigstore" \
+            "dist/$TARBALL" \
+            "dist/$TARBALL.sigstore" \
             dist/SHA256SUMS \
             dist/SHA256SUMS.sigstore
+
+  # The tag exists before the build now, which is what makes the certificate
+  # name it, so a build that fails has to take the tag back. Otherwise a failed
+  # run leaves a version number pointing at nothing anyone can install, and the
+  # next attempt at that version is refused because the tag is already there.
+  #
+  # Its own job rather than a step in publish, because the likeliest failure is
+  # a red test job, and publish never starts then: a step inside publish would
+  # not run in exactly the case it exists for. failure() makes this run when
+  # any job it needs failed, whether the other was skipped or not.
+  #
+  # A cancelled run is somebody's decision and is left alone, tag and all.
+  cleanup:
+    needs: [test, publish]
+    if: failure() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      # Delete the tag ref, and nothing else.
+      contents: write
+    steps:
+      - name: Delete the tag when nothing was published under it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          # Never a tag anybody could already have installed from. The release
+          # exists the moment 'gh release create' returns, so a failure after
+          # that point leaves the tag exactly where it is and is fixed by hand.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG has a release, so the tag stays where it is. Nothing deleted."
+            exit 0
+          fi
+          echo "This run failed and no release exists for $TAG, so the tag is being"
+          echo "deleted: it would otherwise name a version nobody can install, and"
+          echo "block the next attempt at that version. Nothing else is touched."
+          if gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null; then
+            echo "Deleted refs/tags/$TAG."
+            echo "Fix what failed and cut it again. The manual run recreates the tag;"
+            echo "a tag pushed from a checkout is still in your clone, so"
+            echo "'git push origin $TAG' puts it back unchanged, signature and all."
+          else
+            echo "could not delete refs/tags/$TAG, so it is still there with no" >&2
+            echo "release behind it. Delete it by hand:" >&2
+            echo "  git push --delete origin $TAG" >&2
+            exit 1
+          fi
 
   # The release exists, so the Homebrew formula can name it. That happens in
   # homebrew-formula.yml, which opens a pull request rather than pushing, and
