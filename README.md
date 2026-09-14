@@ -577,10 +577,12 @@ bash install.sh
 Everything after that first file is checked rather than trusted.
 
 **The tarball comes from a tag, not a branch.** A release is built by
-`.github/workflows/release.yml`, which runs the same tests a branch runs,
-refuses to publish when the tag and the version in `bin/agent-profile`
-disagree, and attaches the tarball, its `SHA256SUMS` and a Sigstore bundle for
-each.
+`.github/workflows/release.yml`, which runs under the tag itself, runs the same
+tests a branch runs, refuses to publish when the tag and the version in
+`bin/agent-profile` disagree, and attaches the tarball, its `SHA256SUMS` and a
+Sigstore bundle for each. It also runs the command below against those bundles,
+with this exact identity, before it creates the release, so a release that
+would fail the check you are about to read is not published at all.
 
 **The checksum is verified before anything is unpacked.** A mismatch stops the
 install and leaves nothing behind, so a truncated download or an altered
@@ -608,6 +610,26 @@ cosign verify-blob \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     agent-profile-0.10.0.tar.gz
 ```
+
+Every release published so far needs one thing more. v0.8.0, v0.9.0 and v0.10.0
+were all cut from the Actions tab before the workflow signed under the tag, so
+their certificates name `refs/heads/hovud` where every verifier here expects
+`refs/tags/`. Both bundles in each release, the tarball's and the
+`SHA256SUMS`, carry that same identity. The signatures are valid, and only this
+repository's release workflow running on its default branch could have made
+them; what they name is the branch rather than the tag. To check those three,
+say so explicitly:
+
+```sh
+AGENT_PROFILE_COSIGN_IDENTITY='^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/heads/hovud$' \
+    tools/install.sh --version v0.10.0
+```
+
+The same variable works for `tools/update-homebrew-formula.sh`, and the same
+string goes after `--certificate-identity-regexp` in the `cosign verify-blob`
+command above. Nothing after v0.10.0 needs it: releases are built and signed
+under the tag now, and the workflow verifies its own bundles against the
+unoverridden identity before it publishes them.
 
 ### Homebrew
 
@@ -1360,35 +1382,62 @@ the release, and the Sigstore bundle records what the workflow then built from
 it. Those answer different questions, so do both.
 
 **By hand, from the Actions tab.** Run the Release workflow on `hovud` and give
-it the version without the leading `v`, for example `0.10.0`. It creates the tag
-itself and carries on. This exists because pushing a tag needs git write access
-to this repository, and whoever is cutting the release does not always have it
-from where they are: a borrowed machine, a phone, an agent working through an
-API that is scoped to branches.
+it the version without the leading `v`, for example `0.10.0`. This exists
+because pushing a tag needs git write access to this repository, and whoever is
+cutting the release does not always have it from where they are: a borrowed
+machine, a phone, an agent working through an API that is scoped to branches.
+
+That run builds nothing. It checks the version, creates the tag, pushes it, and
+then asks for a second run of the same workflow on `refs/tags/<tag>`. The second
+run is the release: it appears in the Actions tab under the tag rather than
+under `hovud`, and it is the one to watch. A push made with `GITHUB_TOKEN`
+starts no workflow run, which is why the second run is asked for by name rather
+than following from the tag on its own.
+
+Two runs rather than one because of what signs the artifacts. Keyless Sigstore
+is an OIDC token exchanged for a short-lived certificate, and that token names
+the ref the run was started from, not what the run checked out and not what it
+tagged afterwards. A run started from `hovud` therefore signs as
+`release.yml@refs/heads/hovud`, whatever it does next, and every verifier here
+asks for `@refs/tags/`. Building under the tag is what makes the certificate
+name the tag, and the workflow now runs `cosign verify-blob` against its own
+bundles, with the identity and issuer `tools/install.sh` reads, before it
+publishes anything.
 
 What you give up by using it is the signed tag. The runner has no signing key,
 and the fix for that would be a release key sitting in repository secrets,
 which is a worse thing to own than an unsigned tag. So a manually cut tag is
 annotated, created by `github-actions[bot]`, and says only that this workflow
-made it. What the artifacts are is still established the same way, by the
-Sigstore certificate naming the workflow, the repository and the tag. What is
-missing is the separate record of which person decided to publish, and the
-Actions run log is where that lives instead.
+made it. What the artifacts are is established the same way as on the tag path,
+by the Sigstore certificate naming the workflow, the repository and the tag,
+because the build that signs them runs under that tag. What is missing is the
+separate record of which person decided to publish, and the Actions run log is
+where that lives instead.
 
-The manual path refuses to do three things. It will not run from any branch but
-the default one, because a release built from an unmerged branch would carry
-code that was never reviewed. It will not move a tag that already exists, since
-whatever that tag points at has already been downloaded and checksummed by
-somebody. And it will not accept a version that disagrees with
-`AGENT_PROFILE_VERSION`, which is the same check the tag path makes.
+The manual path refuses to do three things, all of them before the tag exists.
+It will not run from any branch but the default one, because a release built
+from an unmerged branch would carry code that was never reviewed. It will not
+move a tag that already exists, since whatever that tag points at has already
+been downloaded and checksummed by somebody. And it will not accept a version
+that disagrees with `AGENT_PROFILE_VERSION`, which is the same check the tag
+path makes.
 
-From either entry point `.github/workflows/release.yml` does the same work: it
-runs the same test matrix `ci.yml` runs, calling that workflow rather than
-copying it, refuses the tag if it disagrees with `AGENT_PROFILE_VERSION`,
-builds the tarball, writes `SHA256SUMS`, signs both with keyless Sigstore and
-publishes the release. On the manual path the tag is created last, after the
-build and the signatures have both succeeded, so a run that fails partway
-leaves the repository as it was rather than burning a version number.
+From either entry point the tag path in `.github/workflows/release.yml` does
+the same work: it runs the same test matrix `ci.yml` runs, calling that
+workflow rather than copying it, refuses the tag if it disagrees with
+`AGENT_PROFILE_VERSION`, builds the tarball, writes `SHA256SUMS`, signs both
+with keyless Sigstore, verifies both signatures against the identity this
+README publishes, and only then publishes the release.
+
+The tag is therefore created before the build rather than after it, which is
+the price of signing under it, and a failed run takes the tag back: when the
+run fails and no release exists for the tag yet, the workflow deletes it,
+rather than leaving a version number pointing at nothing anyone can install. A
+tag that does have a release is never deleted, and neither is a tag that is not
+a version, so pointing the workflow at some other tag by mistake cannot cost
+you that tag. Nothing is lost either way: the manual run recreates its tag, and
+a tag pushed from a checkout is still in your clone, so
+`git push origin v0.10.0` puts it back unchanged, signature and all.
 
 The tarball is built with fixed ownership, fixed order and the tagged commit's
 own timestamp, so anyone can check the tag out, rebuild it and get the same
