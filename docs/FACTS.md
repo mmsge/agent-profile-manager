@@ -1419,6 +1419,81 @@ the pinned figure above; update this section rather than adding a new one.
 
 ---
 
+## Release signing
+
+What a release artifact's Sigstore certificate names, which is what
+`tools/install.sh`, `tools/update-homebrew-formula.sh` and README.md all check
+it against. Issue #63.
+
+**Status:** `VERIFIED` 2026-09-14 for the three releases published so far, by
+reading the certificate out of each published bundle and by running `cosign
+verify-blob` 2.4.1 against both identities. `REASONED` for releases cut after
+that date: the mechanism is documented and the workflow now checks itself, but
+no release has been cut since the change.
+
+**What the published releases carry.** v0.8.0, v0.9.0 and v0.10.0, which is
+every release to date, name the branch and not the tag:
+
+```
+URI:https://github.com/mmsge/agent-profile-manager/.github/workflows/release.yml@refs/heads/hovud
+```
+
+Both bundles in each release, the tarball's and the one for `SHA256SUMS`, carry
+that same identity. `cosign verify-blob` against `@refs/tags/` fails on all of
+them with "none of the expected identities matched what was in the certificate,
+got subjects [...release.yml@refs/heads/hovud]", and against
+`@refs/heads/hovud$` prints `Verified OK`. So the signatures are sound and the
+identity they carry is not the one the project promised: anyone who followed
+the README's advice to install `cosign` could not install any release with the
+one-liner, and the Homebrew formula job failed for the same reason after
+v0.10.0.
+
+**Why.** Keyless signing is an OIDC token exchanged for a short-lived
+certificate, and the token names the ref the run was started from, not what the
+run checked out and not what it tagged afterwards. All three releases were cut
+from the Actions tab, where the run's ref was `refs/heads/hovud` and the tag was
+created at the end of the run.
+
+**What changed on 2026-09-14.** `.github/workflows/release.yml` no longer builds
+anything on a branch. A manual run validates, creates the tag, and starts the
+same workflow again on `refs/tags/<tag>`; that second run builds, signs and
+publishes, so the certificate names the tag. After signing and before
+publishing, the workflow verifies both bundles with the identity and issuer it
+reads out of `tools/install.sh`, and fails rather than publishing something the
+documented command would reject. The tag now exists before the build, so a
+failed run deletes it when no release exists for it yet.
+
+**How to re-check**, for any release, on a machine with `cosign`:
+
+```sh
+tag=v0.10.0
+version="${tag#v}"
+base=https://github.com/mmsge/agent-profile-manager/releases/download/$tag
+curl -fsSL -O "$base/agent-profile-$version.tar.gz"
+curl -fsSL -O "$base/agent-profile-$version.tar.gz.sigstore"
+cosign verify-blob \
+    --bundle "agent-profile-$version.tar.gz.sigstore" \
+    --certificate-identity-regexp '^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/tags/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    "agent-profile-$version.tar.gz"
+```
+
+For v0.8.0, v0.9.0 and v0.10.0 that fails, and the same command with
+`@refs/heads/hovud$` in place of `@refs/tags/` succeeds. For anything cut after
+2026-09-14 it should succeed as written; if it does not, the release workflow
+published something its own verification step should have stopped, and that is
+the thing to go and look at.
+
+Without `cosign`, the certificate can be read straight out of the bundle, which
+is how the three above were established:
+
+```sh
+jq -r .cert "agent-profile-$version.tar.gz.sigstore" | openssl base64 -d -A \
+    | openssl x509 -noout -text | grep -o 'URI:.*'
+```
+
+---
+
 ## After an agent update
 
 1. `agent-profile verify`

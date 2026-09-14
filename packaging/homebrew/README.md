@@ -65,6 +65,14 @@ opens a pull request setting `url`, `version` and `sha256` in this directory's
 tarball does not have fails the job rather than writing a formula nobody can
 install from.
 
+The signature check is the one `tools/install.sh` makes, with the same default
+identity: the release workflow in this repository, under the tag that published
+the release. That is what a release signs as since 2026-09-14. Before that, a
+release cut from the Actions tab was built on `hovud` and signed as the workflow
+on that branch, and this job failed on exactly that after v0.10.0, which is
+issue #63. v0.8.0, v0.9.0 and v0.10.0 all carry the branch identity, so the
+script has to be told about it for those three, below.
+
 A pull request, and never a push to `hovud`. The pin is worth having because
 somebody looked at the release before the tap trusted it, and a workflow that
 rewrote the default branch would take away exactly that. What is automated is
@@ -110,6 +118,19 @@ Or just the number, to check one by eye:
 ```sh
 tools/update-homebrew-formula.sh 0.10.0 --sum-only
 ```
+
+For v0.8.0, v0.9.0 and v0.10.0 the Sigstore check refuses the release, because
+those three name `hovud` where the script expects the tag. Say which identity
+to expect rather than skipping the check:
+
+```sh
+AGENT_PROFILE_COSIGN_IDENTITY='^https://github\.com/mmsge/agent-profile-manager/\.github/workflows/release\.yml@refs/heads/hovud$' \
+    tools/update-homebrew-formula.sh 0.10.0
+```
+
+Nothing cut after 2026-09-14 needs that, and the default is deliberately left
+strict so it stays that way. README.md's "Verifying by hand" has the same
+override for `tools/install.sh` and for `cosign verify-blob`.
 
 Either way the formula cannot be updated before the release, because until it
 exists there is no sum to pin.
