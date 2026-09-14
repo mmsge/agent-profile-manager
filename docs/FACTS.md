@@ -743,20 +743,22 @@ from any shell, so the app comes up with no `CLAUDE_CONFIG_DIR` and with its
 default data directory (F04 and F13 are the same mechanism seen from the other
 side). D17 and D18 are what report those two, and F22 is what they rest on.
 
-**Nothing in this section was observed on a Mac.** It was written on Linux on
-2026-09-12 from Apple's published behaviour and from the shape `defaults`
-prints, and the rules were exercised against a stand-in `defaults` in
-`tests/cases/32-desktop-audit.sh` rather than against a real Dock. The rest of
-this file's macOS facts were checked on **macOS 26.6.2**; this one has not
-been, on that version or any other. Read every status below accordingly, and
-settle them with the commands at the end.
+This section was written on Linux on 2026-09-12 from Apple's published
+behaviour and from the shape `defaults` prints, and the rules were exercised
+against a stand-in `defaults` in `tests/cases/32-desktop-audit.sh`. On
+2026-09-14 it was checked on **macOS 26.6.2**, against a real Dock, the real
+default data directory, and a real pinned launch, with the embedded Claude Code
+at 2.1.270. Each status below says which of those it rests on, and what is
+still open is listed as such.
 
 ### F22 How are the Dock and the login items read?
 
-**Status:** `UNVERIFIED` 2026-09-12 for the Dock, on no macOS version;
-`UNVERIFIED` 2026-09-12 for the login items, stated for macOS 13 Ventura and
-later, where Background Task Management owns that list. This is what D17
-reads, so the mixed status matters.
+**Status:** `VERIFIED` 2026-09-14 on macOS 26.6.2 for the Dock read, the key,
+the field and its encoding all observed; `VERIFIED` 2026-09-14 that the login
+items cannot be listed without a dialogue, from `sfltool` itself; `REASONED`
+for the other three ways in, which were not tried. This is what D17 reads.
+D17's finding has only been observed staying quiet on a Dock without the app
+in it; the firing branch has run against the stand-in only.
 
 **The Dock is read with one command, and one field of its answer.**
 
@@ -773,6 +775,17 @@ it, drops the `file://` prefix and the trailing slash, and compares the result
 against `agent_def app_bundle` (by default `/Applications/Claude.app`,
 overridable with `AGENT_PROFILE_APP_BUNDLE`). A match is the finding.
 
+**Observed on 26.6.2**, on a Dock with fourteen tiles: every tile carried the
+field, always quoted, always with the trailing slash, and always followed by
+`"_CFURLStringType" = 15;`. Spaces arrive as `%20`
+(`file:///Applications/Visual%20Studio%20Code.app/`) and a literal `+` stays a
+`+` (`file:///Applications/Bouvet%20Self%20Service+.app/`), which is why the
+decoder is `unquote` and not `unquote_plus`. System apps sit under
+`/System/Applications/`, and the two applets that machine keeps in its Dock
+appeared with their full paths on the Desktop, so a tile is reported wherever
+the bundle lives. `Claude.app` itself was not pinned, and D17 stayed quiet,
+which is the correct answer for that Dock.
+
 Three things about that reading are deliberate:
 
 - **The `book` blob beside it is never decoded.** Each tile also carries an
@@ -781,16 +794,16 @@ Three things about that reading are deliberate:
   the readable one is the right one to take.
 - **The value may be quoted or bare.** An old-style plist quotes a string only
   when it holds a character it could not take bare, so the parser accepts both
-  spellings rather than assuming the quoted one.
+  spellings rather than assuming the quoted one. Every value observed so far
+  was quoted; the bare spelling is still only a reading of the format.
 - **`defaults` failing is not an empty Dock.** A missing domain or key exits
   non-zero, and D17 reports itself as `not_run` in that case instead of
   reporting a clean Dock. An empty Dock exits zero with `( )` and is a pass.
 
-**What is not established:** that the key is still called `persistent-apps` and
-still holds `_CFURLString` on current macOS; that `defaults read` reflects a
-Dock the user has just changed, rather than a cached copy the Dock process has
-not yet written out; and whether `persistent-others` or `recent-apps` can hold
-an application tile that should count too. D17 reads `persistent-apps` alone.
+**What is still not established:** that `defaults read` reflects a Dock the
+user has just changed, rather than a cached copy the Dock process has not yet
+written out; and whether `persistent-others` or `recent-apps` can hold an
+application tile that should count too. D17 reads `persistent-apps` alone.
 
 **The login items are not read at all, and that is the honest answer.** On
 macOS 13 Ventura and later the list a user sees under System Settings →
@@ -799,21 +812,23 @@ enumerate it costs something this tool will not spend:
 
 | Way in | Why not |
 | --- | --- |
-| `sfltool dumpbtm` | Needs root. `doctor` is a read-only audit a user runs as themselves |
-| `osascript -e 'tell application "System Events" to get the path of every login item'` | Triggers an Automation consent dialogue the first time, is slow, and lists only the old LSSharedFileList-style items, not one registered through `SMAppService` |
-| `~/Library/Application Support/com.apple.backgroundtaskmanagementagent/BackgroundItems-v*.btm` | A private binary format, and unreadable without Full Disk Access |
-| `~/Library/LaunchAgents/*.plist` | A real login-start mechanism, but not the one an app's own "Open at Login" checkbox uses on current macOS |
+| `sfltool dumpbtm` | Asks for the `system.privilege.admin` right through an Authorization Services dialogue, and prints nothing when that is cancelled (observed 2026-09-14 on 26.6.2: `Error obtaining right system.privilege.admin ... errAuthorizationCanceled`). Not root in the `sudo` sense, but a prompt on every run, which `doctor` will not raise |
+| `osascript -e 'tell application "System Events" to get the path of every login item'` | Triggers an Automation consent dialogue the first time, is slow, and lists only the old LSSharedFileList-style items, not one registered through `SMAppService`. Not tried |
+| `~/Library/Application Support/com.apple.backgroundtaskmanagementagent/BackgroundItems-v*.btm` | A private binary format, and unreadable without Full Disk Access. Not tried |
+| `~/Library/LaunchAgents/*.plist` | A real login-start mechanism, but not the one an app's own "Open at Login" checkbox uses on current macOS. Not tried |
 
 So D17 checks the Dock, and reports itself as `limited` on macOS with the
 reason naming the login items, rather than passing on a question it never
 asked. If a no-privilege, no-prompt read of the Background Task Management
-list ever exists, this is the entry to change.
+list ever exists, this is the entry to change. Until then the login items are
+checked by eye, under System Settings → General → Login Items & Extensions.
 
 ### What a direct launch leaves behind
 
-**Status:** `REASONED` 2026-09-12 for the directory, from F17 and F18 plus
-Electron's documented default; `UNVERIFIED` 2026-09-12 for what is inside it.
-This is what D18 reads.
+**Status:** `VERIFIED` 2026-09-14 on macOS 26.6.2 for the directory, its
+contents by name, and the claim D18 rests on, that a pinned launch never
+touches it; the account branch was observed not to apply on that machine and
+stays `UNVERIFIED` as a possibility. This is what D18 reads.
 
 `--user-data-dir` selects the app's own data directory, and per-profile ones
 are at `~/Library/Application Support/Claude-<Name>` (F17, F18). With no
@@ -824,34 +839,71 @@ front of it therefore shares that one directory, and it is the only trace such
 a launch leaves before its embedded Claude Code has written a transcript for
 D01 to find.
 
+**Observed on 26.6.2:** the directory exists, mode 700, forty-five entries.
+Beside the Chromium profile (`Cookies`, `DIPS`, `Local Storage`, `Network
+Persistent State`, `Preferences`, `TransportSecurity` and their caches) it
+holds the app's own `config.json` and `claude_desktop_config.json`, a
+`claude-code` directory with one versioned copy of the embedded agent per
+update seen (`2.1.260`, `2.1.266`, `2.1.270`), `claude-code-sessions`,
+`local-agent-mode-sessions`, `claude-code-vm` and `vm_bundles`. There is no
+`.claude.json` at its top level, and `claude-code` is a store of binaries, not
+a config root, so D18's account branch did not apply and the timestamp branch
+fired, naming the directory and its modification time.
+
+**A pinned launch leaves it alone, at start, in use and at quit.** This is
+the claim D18 makes, and the one worth the experiment. On 2026-09-14 the
+unpinned instance was quit and the Tide applet clicked within the same second:
+the default directory's `Cookies`, `fcache`, `sentry`, `Network Persistent
+State`, `TransportSecurity` and `Cookies-journal` were stamped 13:38:52, and
+`ps -o lstart=` put the applet's process, running with
+`--user-data-dir=.../Claude-Tide`, at 13:38:53. From then on the pinned
+instance wrote to `Claude-Tide` (13:40 and later) while nothing in the default
+directory moved, through several minutes of use and twenty seconds after Cmd+Q.
+So the writes at 13:38:52 were the unpinned instance flushing its Chromium
+state on shutdown, and the directory's modification time is, in practice, when
+an unpinned instance last quit. D18's premise holds and its timestamp means
+what the finding says it means.
+
 D18 reports that directory when it exists and holds any entry at all. It reads
 names, never contents, with one exception: if a `.claude.json` is there it
 reads the `oauthAccount` block, which is the same email and organisation id
 `list` already prints for a root, so the finding can name the account rather
-than only a path.
+than only a path. The app is not known to store an account that way, and on the
+machine above it did not. Its own login is Electron state, in the Keychain and
+in the directory's cookie and local-storage files, none of which this tool will
+open. So the fallback is the one that fires: the directory and its modification
+time, and the finding says in as many words that this is the weaker answer.
+The account branch stays in case a future build writes a state file there.
 
-**The app is not known to store an account that way, and probably does not.**
-Its own login is Electron state, in the Keychain and in the directory's cookie
-and local-storage files, none of which this tool will open. So the fallback is
-the one that will normally fire: the directory and its modification time. That
-is a weaker answer than naming an account and the finding says so in as many
-words. Whether a `.claude.json` ever appears there is the `UNVERIFIED` half of
-this entry; the branch exists so the rule improves by itself if it does.
-
-**How to re-check, on a Mac:**
+**How to re-check, on a Mac.** One command per line; an interactive zsh does
+not take a trailing `#` comment.
 
 ```sh
 defaults read com.apple.dock persistent-apps | grep _CFURLString
-sfltool dumpbtm 2>&1 | head -5          # expect a permission error, not a list
+sfltool dumpbtm 2>&1 | head -3
 ls -la ~/Library/Application\ Support/Claude
 ls ~/Library/Application\ Support/Claude/.claude.json
 ```
 
-If the first prints no `_CFURLString`, D17 is reading a key that no longer
-exists and is silent on a Mac that does have the app in its Dock. If the
-second prints a list as an ordinary user, the login-item half of D17 can be
-written and this entry is out of date. If the last one finds a file, D18's
-account branch is live and should be marked `VERIFIED` here.
+The first should print one line per pinned application; none at all on a Dock
+that has applications in it means D17 is reading a key that no longer exists.
+The second should raise an authorisation dialogue and, cancelled, print an
+error rather than a list; a list as an ordinary user means the login-item half
+of D17 can be written and this entry is out of date. The last should fail; a
+file there means D18's account branch is live and should be marked `VERIFIED`.
+
+To re-check the pinned-launch claim, quit every Claude Desktop instance, open
+one from an applet, then compare the process start time against the default
+directory's newest files, to the second:
+
+```sh
+ps -axo pid,lstart,args | grep -i '[C]laude.app/Contents/MacOS/Claude'
+ls -lT ~/Library/Application\ Support/Claude | sort -k6,9 | tail -3
+```
+
+Only a process carrying `--user-data-dir` should be listed, and every file in
+the default directory should predate its start. Use the pinned instance, quit
+it, and list again; nothing should have moved.
 
 ---
 

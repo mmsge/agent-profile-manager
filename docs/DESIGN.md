@@ -145,8 +145,10 @@ earliest trace one leaves: D01 finds the sessions eventually, but only once the
 app's embedded Claude Code has written a transcript. It names an account if the
 directory holds one the way a config root does, and otherwise the directory and
 when it was last written to, which is the weaker answer and says so in the
-finding. `docs/FACTS.md` F22 records what both read, and how much of it has
-ever been checked on a Mac, which is none of it.
+finding. `docs/FACTS.md` F22 records what both read, and which parts have been
+checked on a Mac: on macOS 26.6.2 the Dock read, the default directory and
+the claim that a pinned launch never touches it; the login-item table by
+reasoning only.
 
 D16 is D09's shape applied to the IDEs: a launch path that exists, that this
 tool cannot pin unless the thing starting it was itself started pinned, and
