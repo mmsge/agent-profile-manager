@@ -22,6 +22,23 @@ as_name() {
     "${BASH:-/bin/bash}" "$HOME/named/$_an_name" "$@"
 }
 
+# The installer builds the sessions server's Python environment, which is a
+# download, so the suite runs it with AGENT_PROFILE_INSTALL_SERVER=no and this
+# pins that the skip is said out loud rather than silent, and that the flag
+# form is accepted. A tarball without server/ has nothing to build or skip.
+case_dev_install_says_it_skipped_the_server() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/bin"
+    out=$("${BASH:-/bin/bash}" "$INSTALLER" --dev --prefix "$HOME/bin" 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "Skipped building the sessions server (--no-server)" || return
+    [ -d "$ROOT/server/.venv" ] && [ -n "$(find "$ROOT/server/.venv" -newer "$HOME/bin" -maxdepth 0 2>/dev/null)" ] \
+        && fail "the suite built a real environment in the checkout"
+    out=$(AGENT_PROFILE_INSTALL_SERVER=yes "${BASH:-/bin/bash}" "$INSTALLER" --dev --prefix "$HOME/bin" --no-server 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "Skipped building the sessions server"
+}
+
 # A tool installed as 'agpin' must never tell the reader to run something
 # called 'agent-profile', because that may not be on their PATH at all.
 case_messages_use_the_name_it_was_invoked_as() {
@@ -628,6 +645,7 @@ case_version_refuses_an_unknown_option() {
     assert_contains "$out" "unknown option"
 }
 
+run_case "dev install says it skipped the server"     case_dev_install_says_it_skipped_the_server
 run_case "messages use the invoked name"          case_messages_use_the_name_it_was_invoked_as
 run_case "errors use the invoked name"            case_errors_use_the_name_it_was_invoked_as
 run_case "findings use the invoked name"          case_findings_use_the_name_it_was_invoked_as

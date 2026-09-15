@@ -36,10 +36,31 @@ class Agpin < Formula
   # --env and reads the macOS Keychain, and neither exists elsewhere.
   depends_on :macos
 
+  # The sessions server (server/) is a Python program. Its environment is
+  # built here, at install time, from the lockfile that ships in the tarball,
+  # so a session start never resolves or downloads anything. uv does the
+  # building because its lockfile carries a hash for every wheel, and
+  # Homebrew's own python is the interpreter, so a Mac with no developer tools
+  # never meets the Command Line Tools dialogue.
+  depends_on "python@3.13"
+  depends_on "uv"
+
   def install
     # The whole tree, so verify, doctor and the probe script can find the
     # documents they refer to. Only the two commands land on the PATH.
-    libexec.install "bin", "tools", "docs", "README.md"
+    libexec.install "bin", "tools", "docs", "server", "README.md"
+
+    # server/.venv is what `agpin mcp serve` execs. --frozen refuses to
+    # resolve anything the lockfile does not pin, and --no-install-project
+    # keeps the build to the pinned dependencies: the package itself is run
+    # from the source tree beside the environment, which the launcher puts on
+    # PYTHONPATH. The dependencies come from PyPI during this step, which is
+    # why this formula lives in a tap and not in homebrew-core.
+    ENV["UV_CACHE_DIR"] = buildpath/"uv-cache"
+    ENV["UV_PYTHON_DOWNLOADS"] = "never"
+    system "uv", "sync", "--frozen", "--no-dev", "--no-install-project",
+           "--python", Formula["python@3.13"].opt_bin/"python3.13",
+           "--project", libexec/"server"
 
     # Symlinks rather than copies, because the tool names itself by the name it
     # was invoked as. Installed this way, "agpin doctor" says agpin in every
@@ -69,5 +90,11 @@ class Agpin < Formula
     # The self-naming property is the one thing a packaging mistake breaks
     # quietly, so assert it rather than trust it.
     assert_match "agpin <command>", shell_output("#{bin}/agpin help")
+    # The launcher must refuse to start the sessions server unpinned, and it
+    # must find the environment this formula built: the refusal comes first,
+    # so a missing environment would surface as a different message.
+    refusal = shell_output("#{bin}/agpin mcp serve --root /nonexistent 2>&1", 1)
+    assert_match "refusing to start", refusal
+    assert_predicate libexec/"server/.venv/bin/python", :executable?
   end
 end

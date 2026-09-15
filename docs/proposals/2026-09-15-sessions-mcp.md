@@ -4,11 +4,18 @@
 > in its own profile's config root, through an MCP server that every profile
 > gets registered at `new` time and that `agpin mcp on|off|status` controls.
 
-**Status:** proposal. Nothing in this document is decided. It argues for one
-shape, states what that shape costs, and names the decisions that are
-Markus's to make. No code accompanies it, on purpose: the request collides
-with two rules this tool states everywhere, adds a runtime and adds a
-third-party dependency, and all of that is a decision before it is a patch.
+**Status:** decided and implemented. The note was written first, with no
+code, because the request collides with two rules this tool states
+everywhere, adds a runtime and adds a third-party dependency, and all of that
+was a decision before it was a patch. Markus took the recommendations in
+sections 4 and 5 (registration through `claude mcp add` with `agpin mcp
+serve` as the command, and the Python environment built at install time in
+the tool's own tree), and
+[#68](https://github.com/mmsge/agent-profile-manager/pull/68) implements
+them: `server/`, `agpin mcp on|off|status|serve`, `doctor` D19, the installer
+and formula changes, and the rewording in section 7. The argument below is
+kept as written, so the reasoning behind each choice stays readable next to
+the code that made it.
 
 Written on 2026-09-15 against Claude Code **2.1.272**, on Linux. Everything
 marked verified below was verified there, with a throwaway config root, and
@@ -91,7 +98,8 @@ numbers, and with the alternatives that lost.
 
 ## How it works, end to end
 
-Two profiles on one Mac, `bouvet` and `highsoft`, each with a session open.
+Two profiles on one Mac, `nordkraft` and `fjellbank` (two invented customers of
+the README's example user), each with a session open.
 Everything above the dotted line is code and is shared the way the bash
 script itself is shared. Everything below it is data, and nothing below the
 line is shared by anything.
@@ -102,14 +110,14 @@ line is shared by anything.
   |  /opt/homebrew/bin/agpin  ->  libexec/bin/agent-profile             |
   |  libexec/server/.venv/bin/python  (FastMCP, agent_profile_sessions) |
   +---------------------------------------------------------------------+
-  ~/.config/agent-profiles/{bouvet,highsoft}.conf    (root=, no server state)
+  ~/.config/agent-profiles/{nordkraft,fjellbank}.conf    (root=, no server state)
  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 
-  ~/.claude-bouvet/                       ~/.claude-highsoft/
+  ~/.claude-nordkraft/                       ~/.claude-fjellbank/
   |-- .claude.json                        |-- .claude.json
   |     mcpServers.sessions:              |     mcpServers.sessions:
   |       agpin mcp serve                 |       agpin mcp serve
-  |         --root ~/.claude-bouvet       |         --root ~/.claude-highsoft
+  |         --root ~/.claude-nordkraft       |         --root ~/.claude-fjellbank
   |-- .credentials.json  (never read)     |-- .credentials.json  (never read)
   |-- settings.json, skills/, ...         |-- settings.json, skills/, ...
   `-- projects/      <== the only         `-- projects/      <== the only
@@ -122,24 +130,164 @@ line is shared by anything.
   [python sessions server]                [python sessions server]
         ^ exec, after checking                  ^ exec, after checking
         |   CLAUDE_CONFIG_DIR == --root         |   CLAUDE_CONFIG_DIR == --root
-  [agpin mcp serve --root <bouvet>]       [agpin mcp serve --root <highsoft>]
+  [agpin mcp serve --root <nordkraft>]       [agpin mcp serve --root <fjellbank>]
         ^ stdio child, inherits the             ^ stdio child, inherits the
         |   parent's environment (F24)          |   parent's environment (F24)
-  [claude, CLAUDE_CONFIG_DIR=<bouvet>]    [claude, CLAUDE_CONFIG_DIR=<highsoft>]
+  [claude, CLAUDE_CONFIG_DIR=<nordkraft>]    [claude, CLAUDE_CONFIG_DIR=<fjellbank>]
         ^                                       ^
-  agpin run bouvet, agpin shell bouvet    agpin run highsoft, a desktop applet
+  agpin run nordkraft, agpin shell nordkraft    agpin run fjellbank, a desktop applet
+```
+
+### The same picture, as diagrams
+
+GitHub renders these; a terminal reader has the text picture above and the
+prose below.
+
+#### The pieces, and what talks to what
+
+```mermaid
+flowchart TB
+    subgraph tree["Install tree: one copy, code only, no data"]
+        agpin["agpin launcher<br/>(bin/agent-profile)"]
+        venv["server/.venv/bin/python<br/>FastMCP + agent_profile_sessions"]
+    end
+    registry["~/.config/agent-profiles/*.conf<br/>root=, app_data= (no server state)"]
+
+    subgraph nordkraft["~/.claude-nordkraft (config root)"]
+        bstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-nordkraft"]
+        bproj["projects/<br/>transcripts and subagents"]
+        bcred[".credentials.json<br/>never read"]
+    end
+    subgraph fjellbank["~/.claude-fjellbank (config root)"]
+        hstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-fjellbank"]
+        hproj["projects/"]
+        hcred[".credentials.json<br/>never read"]
+    end
+
+    bclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-nordkraft"]
+    hclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-fjellbank"]
+    bserver["sessions server (python)<br/>root = ~/.claude-nordkraft"]
+    hserver["sessions server (python)<br/>root = ~/.claude-fjellbank"]
+
+    bclaude -- "reads registration" --> bstate
+    hclaude -- "reads registration" --> hstate
+    bclaude -- "stdio child, inherits env" --> agpin
+    hclaude -- "stdio child, inherits env" --> agpin
+    agpin -- "exec, after CLAUDE_CONFIG_DIR == --root" --> venv
+    venv -. "runs as" .-> bserver
+    venv -. "runs as" .-> hserver
+    bserver -- "reads only" --> bproj
+    hserver -- "reads only" --> hproj
+    agpin -. "list, mcp status, doctor D19:<br/>read mcpServers only" .-> bstate
+    agpin -. "same" .-> hstate
+```
+
+Above the install tree there is one copy of the code, the same way there is one copy of the bash script. Below it, each root owns its own registration, its own transcripts and its own server process. No line crosses from one root to the other.
+
+#### A session starting
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as agpin run nordkraft
+    participant C as claude (pinned)
+    participant S as ~/.claude-nordkraft/.claude.json
+    participant L as agpin mcp serve
+    participant P as python server
+    participant T as ~/.claude-nordkraft/projects/
+
+    U->>C: exec with CLAUDE_CONFIG_DIR=~/.claude-nordkraft
+    C->>S: read mcpServers.sessions
+    C->>L: spawn stdio child with its own environment (F24)
+    L->>L: CLAUDE_CONFIG_DIR == --root ? else exit 1, one line on stderr
+    L->>L: resolve own path through the installed symlink, find server/.venv
+    L->>P: exec python -m agent_profile_sessions --root ~/.claude-nordkraft
+    P->>P: realpath(CLAUDE_CONFIG_DIR) == realpath(--root) ? else exit 2
+    C->>P: initialize, tools/list
+    P-->>C: six tools, about 1 s after spawn
+    Note over C,P: the model calls list_sessions, search, get_session ...
+    C->>P: tools/call get_session(session_id, start, limit)
+    P->>T: open <enc>/<sid>.jsonl, confined to projects/, cached by size+mtime
+    T-->>P: records
+    P-->>C: messages, capped at 2,000 chars each and 40,000 per reply
+    Note over C,P: session ends, pipe closes, server exits. Nothing was written.
+```
+
+#### What `new`, `mcp on` and `mcp off` do to a root
+
+```mermaid
+flowchart TD
+    start([agpin new NAME, or agpin mcp on NAME]) --> reg{claude on PATH?}
+    reg -- no --> none["print: not registered, run agpin mcp on NAME later<br/>profile still created, exit 0"]
+    reg -- yes --> read["read mcpServers.sessions from ROOT/.claude.json"]
+    read --> state{state}
+    state -- none --> add
+    state -- on --> already["print: already registered<br/>write nothing"]
+    state -- stale --> rm["claude mcp remove --scope user sessions<br/>(pinned to ROOT)"] --> add
+    state -- foreign --> leave["print: not this tool's entry, left alone<br/>exit 1 for mcp on, profile still created for new"]
+    add["claude mcp add --scope user sessions --<br/>/abs/path/agpin mcp serve --root ROOT<br/>(pinned to ROOT)"] --> verify["read the file back"]
+    verify --> ok{state == on?}
+    ok -- yes --> done["print: Sessions server: on (registered in ROOT/.claude.json)"]
+    ok -- no --> fail["print what the CLI said, and the mcp on line to retry"]
+
+    off([agpin mcp off NAME]) --> read2["read mcpServers.sessions"]
+    read2 --> s2{state}
+    s2 -- none --> off_already["print: off (nothing registered)"]
+    s2 -- foreign --> off_leave["print: yours to remove, exit 1"]
+    s2 -- on or stale --> off_rm["claude mcp remove --scope user sessions (pinned)"] --> off_verify["read back: entry gone?"]
+    off_verify -- yes --> off_done["print: off (removed from ROOT/.claude.json)"]
+    off_verify -- no --> off_fail["print: still on, exit 1"]
+```
+
+Every write goes through Claude Code's own CLI, pinned to the root, and every claim is read back from the file before it is printed. `mcp status`, `list` and `doctor` read the same block and write nothing.
+
+#### What the launcher decides
+
+```mermaid
+flowchart TD
+    A([claude starts: agpin mcp serve --root ROOT]) --> B{CLAUDE_CONFIG_DIR set<br/>and equal to ROOT?}
+    B -- no --> R1["stderr: refusing to start: CLAUDE_CONFIG_DIR is X, --root is ROOT<br/>exit 1, shows as failed in /mcp"]
+    B -- yes --> C{AGENT_PROFILE_SERVER_PYTHON<br/>set?}
+    C -- yes --> E
+    C -- no --> D["resolve $0 through symlinks,<br/>tree = dirname/.., python = tree/server/.venv/bin/python"]
+    D --> E{interpreter executable?}
+    E -- no --> R2["stderr: the sessions server is not installed<br/>run tools/install.sh again, exit 1"]
+    E -- yes --> F["PYTHONPATH=tree/server exec python -m agent_profile_sessions --root ROOT"]
+    F --> G{python: realpath(CLAUDE_CONFIG_DIR)<br/>== realpath(ROOT)?}
+    G -- no --> R3["stderr: refusing to start, exit 2"]
+    G -- yes --> H["serve over stdio, reading ROOT/projects only"]
+```
+
+The pin and the server's scope are the same variable in the same process tree. A registration copied into another root fails at the first diamond; a state file restored into the wrong place fails there too; a missing environment fails at the third, with the command that fixes it.
+
+#### How doctor sees it
+
+```mermaid
+flowchart LR
+    subgraph roots["each registered root"]
+        rs[".claude.json → mcpServers.sessions"]
+    end
+    stray["~/.claude.json (stray, outside every root)"]
+    D19{{"D19"}}
+    rs -- "args name another root" --> D19
+    rs -- "command missing or not executable" --> D19
+    rs -- "type not stdio, or a url" --> D19
+    rs -- "no entry (off)" --> quiet["no finding: off is a choice, list shows it"]
+    rs -- "foreign entry" --> quiet2["no finding: not this tool's, never touched"]
+    stray -- "any entry shaped like ours" --> D19
+    D19 --> fix["Fix with: agpin mcp on NAME<br/>or, for the stray file: claude mcp remove --scope user sessions, unpinned"]
 ```
 
 ### What happens at session start
 
-1. `agpin run bouvet` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-bouvet`
+1. `agpin run nordkraft` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-nordkraft`
    in its environment, exactly as today. Nothing about the launch changes.
 2. Claude Code reads its own state file, which because of the variable is
-   `~/.claude-bouvet/.claude.json` (F10), finds `mcpServers.sessions` there,
+   `~/.claude-nordkraft/.claude.json` (F10), finds `mcpServers.sessions` there,
    and spawns it as a child process over stdio. The child gets the parent's
-   environment, so it arrives with `CLAUDE_CONFIG_DIR=~/.claude-bouvet` set
+   environment, so it arrives with `CLAUDE_CONFIG_DIR=~/.claude-nordkraft` set
    (F24).
-3. The child is `agpin mcp serve --root ~/.claude-bouvet`. It compares the
+3. The child is `agpin mcp serve --root ~/.claude-nordkraft`. It compares the
    variable with `--root`. They agree, so it locates the server's interpreter
    in its own install tree and execs it. Had they disagreed, or had the
    variable been unset, it would have exited with one line on stderr and
@@ -173,8 +321,8 @@ Separation is not one mechanism, it is five, and each one holds on its own.
 
 1. **The registration lives inside the root.** It is one key in
    `<root>/.claude.json`, the state file that moves under `CLAUDE_CONFIG_DIR`
-   (F10). A Claude Code pinned to `bouvet` reads bouvet's state file and can
-   only ever find bouvet's registration. There is no global list of servers
+   (F10). A Claude Code pinned to `nordkraft` reads nordkraft's state file and can
+   only ever find nordkraft's registration. There is no global list of servers
    that both profiles read.
 2. **The server is told its root by the same variable that pinned the
    session.** Claude Code spawns stdio servers with its own environment
@@ -195,8 +343,8 @@ Separation is not one mechanism, it is five, and each one holds on its own.
    history are unreachable by construction, not by policy.
 5. **stdio only, one server per session.** The server is a child process
    with a pipe to exactly one Claude Code. There is no port, no socket and
-   no HTTP transport compiled in, so a session in `highsoft` has no way to
-   reach bouvet's server even if it wanted to. Two sessions in the same
+   no HTTP transport compiled in, so a session in `fjellbank` has no way to
+   reach nordkraft's server even if it wanted to. Two sessions in the same
    profile get two servers, each read-only, with no shared cache between
    them.
 
@@ -221,13 +369,13 @@ been observed and is listed as unverified below.
 
 | Moment | What happens | What is written, and where |
 | --- | --- | --- |
-| `agpin new bouvet` | Creates the root, then runs `claude mcp add --scope user sessions -- <agpin> mcp serve --root <root>` pinned to it. On an adopted root, checks first that no other `sessions` entry is there. Without `claude` on `PATH`, registers nothing and prints the `mcp on` line to run later | `<root>/.claude.json`, by Claude Code's own CLI, plus what a first CLI run leaves in a root (F23) |
-| `agpin mcp status bouvet`, `agpin list` | Reads `mcpServers.sessions` back and prints `on`, `off` or `stale` | Nothing |
-| `agpin mcp off bouvet` | `claude mcp remove --scope user sessions` pinned to the root, then reads the file back to confirm the entry is gone | `<root>/.claude.json`, by the CLI |
-| `agpin mcp on bouvet` | The same `add` as `new` runs. Idempotent | The same |
+| `agpin new nordkraft` | Creates the root, then runs `claude mcp add --scope user sessions -- <agpin> mcp serve --root <root>` pinned to it. On an adopted root, checks first that no other `sessions` entry is there. Without `claude` on `PATH`, registers nothing and prints the `mcp on` line to run later | `<root>/.claude.json`, by Claude Code's own CLI, plus what a first CLI run leaves in a root (F23) |
+| `agpin mcp status nordkraft`, `agpin list` | Reads `mcpServers.sessions` back and prints `on`, `off` or `stale` | Nothing |
+| `agpin mcp off nordkraft` | `claude mcp remove --scope user sessions` pinned to the root, then reads the file back to confirm the entry is gone | `<root>/.claude.json`, by the CLI |
+| `agpin mcp on nordkraft` | The same `add` as `new` runs. Idempotent | The same |
 | `brew upgrade agpin`, or `tools/install.sh` again | Rebuilds the Python environment in the new version's tree. The launcher link keeps its path, so every registration stays valid untouched | The install tree only |
 | `agpin doctor` | The new rule reports a registration whose `--root` is another profile's, whose command is missing or not this tool's, whose transport is not stdio, or one sitting in the stray state file | Nothing |
-| `agpin remove bouvet --purge` | Deletes the root, and the registration with it. Nothing else to clean, because nothing else was written | The root, as today |
+| `agpin remove nordkraft --purge` | Deletes the root, and the registration with it. Nothing else to clean, because nothing else was written | The root, as today |
 
 ### When it fails
 
@@ -480,14 +628,14 @@ surface already has.
 `new` runs, pinned to the root it just created or adopted:
 
 ```sh
-CLAUDE_CONFIG_DIR=/Users/alex/.claude-bouvet claude mcp add --scope user sessions -- /opt/homebrew/bin/agpin mcp serve --root /Users/alex/.claude-bouvet
+CLAUDE_CONFIG_DIR=/Users/alex/.claude-nordkraft claude mcp add --scope user sessions -- /opt/homebrew/bin/agpin mcp serve --root /Users/alex/.claude-nordkraft
 ```
 
 Verified (F23): that writes one entry into `<root>/.claude.json`,
 
 ```json
 {"mcpServers": {"sessions": {"type": "stdio", "command": "/opt/homebrew/bin/agpin",
-                              "args": ["mcp", "serve", "--root", "/Users/alex/.claude-bouvet"],
+                              "args": ["mcp", "serve", "--root", "/Users/alex/.claude-nordkraft"],
                               "env": {}}}}
 ```
 
@@ -853,7 +1001,7 @@ adopted-root message gains one line naming what was added to `.claude.json`.
 | the registry lives outside every root | Passes unchanged. No registry key is added |
 | the source never copies between roots | Passes unchanged. `new` calls a binary; it runs no `cp`, `ln -s`, `rsync` or `install -m` |
 | the source never reads credentials | Passes unchanged |
-| no command writes the agent state file | Passes unchanged as written, since it runs `list`, `doctor`, `verify` and `explain` after `new`. It should grow: `mcp status` added to that list, and a new case that `mcp on bouvet` leaves `.claude-highsoft/.claude.json` byte-identical |
+| no command writes the agent state file | Passes unchanged as written, since it runs `list`, `doctor`, `verify` and `explain` after `new`. It should grow: `mcp status` added to that list, and a new case that `mcp on nordkraft` leaves `.claude-fjellbank/.claude.json` byte-identical |
 | no document carries a credential | Extend it: `mcp status --json` and the D19 finding join the documents checked for the canary |
 
 New cases belong in `10-profiles.sh` for `new` with and without `claude` on

@@ -54,15 +54,24 @@ Created profile bouvet
   root      /Users/alex/.claude-bouvet
   app data  /Users/alex/Library/Application Support/Claude-Bouvet
 
-The root is empty, which is the point: nothing is shared between profiles.
-That also means it has no settings, no hooks and none of the guardrails your
-other profiles may have. Set those up here directly; do not copy them across.
+Sessions server: on (registered in /Users/alex/.claude-bouvet/.claude.json)
+
+The root holds nothing from any other profile, which is the point: nothing is
+shared between profiles. That also means it has no settings, no hooks and
+none of the guardrails your other profiles may have. Set those up here
+directly; do not copy them across.
 
 Next: agent-profile run bouvet   (it will ask you to log in)
 ```
 
 Do that once per account, for example `agpin new highsoft`. Then sign in to
 each: `agpin run bouvet`, `agpin run highsoft`.
+
+The sessions server line is the one thing `new` writes into a root: a
+registration, made by Claude Code's own CLI, for a small read-only server over
+that profile's own transcripts. [The sessions server](#the-sessions-server)
+says what it does and how to turn it off. If `claude` was not on your `PATH`
+yet, `new` says so and `agpin mcp on bouvet` does it later.
 
 **3. Add these to your shell rc file.**
 
@@ -505,7 +514,10 @@ transcripts, auto memory, commands, skills, agents, plugins, plans, backups, the
 credential and the state file. Two profiles therefore share no file at all.
 Nothing is ever shared between two config roots, on purpose and without
 exception; the reasoning is in
-[Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared).
+[Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared). The one thing
+this tool puts into a root is the registration for that root's own
+[sessions server](#the-sessions-server), which names the root and nothing
+outside it.
 
 ## Install
 
@@ -552,15 +564,32 @@ end
 See [Refusing to run unpinned](#refusing-to-run-unpinned) and
 [Completions](#completions) for what each line does.
 
-No dependencies beyond a stock macOS. It is one bash script, written to bash
-3.2 because that is what `/bin/bash` is on macOS, and it uses `python3` from the
-Command Line Tools only to read JSON. No Homebrew, no `jq`.
+No dependencies beyond a stock macOS for the tool itself. It is one bash
+script, written to bash 3.2 because that is what `/bin/bash` is on macOS, and
+it uses `python3` from the Command Line Tools only to read JSON. No Homebrew,
+no `jq`.
 
 Installing adds nothing to that: `curl`, `shasum` and `tar` are on every Mac,
 and neither `tools/install.sh` nor `agpin version --check` calls `python3`,
 because on a fresh Mac that opens the Command Line Tools dialog and an
 installer is the worst place to meet it. `cosign` is the one optional piece,
 and the only thing that goes unchecked without it is the signature.
+
+**The sessions server is the exception, and the installer says so before it
+touches it.** [That server](#the-sessions-server) is Python, and its
+environment is built at install time into `server/.venv` beside the installed
+tree, from `server/uv.lock` when `uv` is installed and otherwise from
+`server/requirements.txt` with `python3 -m venv` and `pip install
+--require-hashes`. Both files ship inside the signed tarball, so every
+dependency byte is pinned by the release even though the bytes come from
+PyPI. `uv` brings its own Python and needs no developer tools;
+`brew install uv` is the lighter path on a fresh Mac. Without `uv`, the
+`python3` that builds the environment is the one that opens the Command Line
+Tools dialogue, and the installer prints that before it happens. A failed
+build costs the server and nothing else: the tool is installed and linked, the
+failure is printed in full, the installer exits 1, and `agpin mcp serve` says
+the server is not installed until the installer is run again.
+`tools/install.sh --no-server` skips the build on purpose.
 
 ### What you are trusting, step by step
 
@@ -644,6 +673,12 @@ is an improvement and not the end of it: whoever can push to the tap can change
 the URL and the sum together. The Sigstore check is the one that survives that.
 See [`packaging/homebrew/README.md`](packaging/homebrew/README.md).
 
+The formula depends on Homebrew's `python@3.13` and `uv`, and builds the
+sessions server's environment into its own `libexec/server/.venv` during
+`brew install`, from the lockfile in the tarball. That step downloads the
+pinned dependencies from PyPI, which is fine for a tap and is why this formula
+is not a homebrew-core candidate.
+
 ### Options
 
 ```sh
@@ -652,6 +687,7 @@ tools/install.sh --prefix ~/bin     # where the two links go
 tools/install.sh --name apx         # a different short command name
 tools/install.sh --uninstall        # remove the links, and nothing else
 tools/install.sh --dev              # link a git checkout instead
+tools/install.sh --no-server        # do not build the sessions server's environment
 ```
 
 `--version` never asks the API which release is newest, so it is what you want
@@ -709,7 +745,9 @@ agent-profile run bouvet          # the same thing, spelled out
 agent-profile shell bouvet        # a subshell pinned to that profile
 eval "$(agent-profile env bouvet)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
-agent-profile list                # every profile, its account and session count
+agent-profile list                # every profile, its account, sessions and server state
+agent-profile mcp status          # is each profile's sessions server on, off or stale?
+agent-profile mcp off bouvet      # turn one off; mcp on turns it back on
 agent-profile doctor              # is the separation actually holding?
 agent-profile doctor --json       # the same audit, as one JSON document
 agent-profile doctor --report audit  # audit.json and audit.md, dated, to hand over
@@ -813,6 +851,58 @@ than `"$?"`. With no `--shell`, `guard` reads `$SHELL` and chooses the bash and
 zsh form unless it ends in `fish`, so `eval "$(agpin guard)"` and
 `agpin guard --shell fish | source` both do the right thing without you having
 to say which shell you are in.
+
+### The sessions server
+
+Every profile's root holds a month or more of transcripts, and the only way
+back into them used to be `claude --resume`, one session at a time. So each
+profile gets a small MCP server over its own `projects/` directory, and a
+session can ask what an earlier one did without leaving Claude Code:
+
+```
+list_projects       one row per working directory, with counts and the retention window
+list_sessions       identity columns and a 200-character first-prompt preview, filterable
+                    by project, date range, branch and a substring, paged
+session_summary     last reply, tool histogram, files touched, subagents; no conversation
+get_session         messages by record range, 2,000 characters each, tool results and
+                    thinking left out unless asked for, 40,000 characters per call at most
+get_message         one message whole, up to a hard cap
+search              substring or regex over prompts and replies, returning pointers
+```
+
+`new` registers it, in the root's own state file and through `claude mcp add
+--scope user` pinned to that root, which is why the root is no longer
+strictly empty after `new` (docs/FACTS.md F23). The registered command is
+`agpin mcp serve --root <root>`: this tool's own launcher, at its installed
+path, which finds the server's Python environment beside itself and refuses
+to start unless `CLAUDE_CONFIG_DIR` names that same root. Claude Code hands a
+stdio server its own environment (F24), so the pin and the server's scope are
+the same variable in the same process tree, and a registration copied into
+another root fails visibly in `/mcp` instead of serving the wrong account's
+transcripts. The server itself opens `projects/` and nothing else: never the
+credential, never the account block of the state file, never `history.jsonl`
+or the paste cache. It is stdio only, one per session, with no port.
+
+```sh
+agpin mcp status              # on, off or stale, per profile, read-only
+agpin mcp off bouvet          # gone from the state file, and read back to check
+agpin mcp on bouvet           # the same registration new makes
+```
+
+`list` shows the same state, `doctor` reports a registration that names
+another root or a command that is gone as D19, and a `sessions` entry that
+is somebody else's is shown as `foreign` and never touched. Off means the
+next session in that root starts no server; a server already running inside
+an open session lives until that session exits.
+
+The server runs on Python and the framework FastMCP. Its environment is built
+once, at install time, beside the installed tree, from a lockfile that ships
+inside the signed release: [Install](#install) says how, and what it costs on
+a Mac with no developer tools. A session start then takes about one second
+longer and touches no network. The design, the measurements behind it and
+what it renegotiates in [Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared)
+are in [the proposal](docs/proposals/2026-09-15-sessions-mcp.md); the server's
+own README is [`server/README.md`](server/README.md).
 
 ## Completions
 
@@ -1061,6 +1151,7 @@ Keychain query it makes, and which external command it runs, if any.
 | D16 | Directory names one level under `~/.vscode/extensions` and `~/.cursor/extensions`, and one level under `~/Library/Application Support/JetBrains`, `~/Library/Application Support` and `~/Library/Application Support/Google` for a `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in an extension is ever opened, and the IDE's own `--list-extensions` is deliberately not run. |
 | D17 | On macOS, the `persistent-apps` key of the `com.apple.dock` preference domain, via `defaults read com.apple.dock persistent-apps`, and from each tile in it only the `_CFURLString` file URL, which is the path of the pinned application. Nothing is read for the login items: that half of the rule is reported as unchecked, because every way to list them needs root or a consent dialogue. |
 | D18 | On macOS, whether the default app data directory exists and holds any entry at all (names only, nothing inside it is opened), the directory's own modification time, and, when a state file is there, the `oauthAccount` block of it: the account's email and organisation id, the same identity `list` prints for a root. |
+| D19 | The `mcpServers` block of each registered root's state file, and of the stray state file beside the default root: the `sessions` entry's command and arguments only, never the `oauthAccount` block or any other key. |
 <!-- END GENERATED: what doctor reads -->
 
 No rule ever reads a credential value. The two Keychain queries above,
@@ -1334,11 +1425,22 @@ the desktop and an IDE.
 ## Development
 
 ```sh
-tests/run.sh              # 404 tests, no dependencies
+tests/run.sh              # 438 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 tests/run.sh 75-ide       # one case file, by any part of its name
 ```
+
+The sessions server under `server/` has its own tests, in Python, against
+generated fixtures that contain no real transcript:
+
+```sh
+cd server && uv sync --frozen --group dev && uv run --frozen --group dev pytest -q
+```
+
+Its dependencies are pinned in `server/uv.lock`, and `server/requirements.txt`
+is exported from it with hashes for the installer path that has no `uv`; run
+the two commands at the end of `server/README.md` after changing either.
 
 That count is generated, not typed by hand: after adding or removing tests,
 run `tools/gen-test-count.sh` and commit the README.md change it makes. `tools/gen-test-count.sh --check` is what CI runs; it fails, naming

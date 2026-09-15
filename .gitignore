@@ -1,0 +1,7 @@
+# The sessions server's environment is built by the installer or by uv, never
+# committed; see server/README.md.
+server/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/

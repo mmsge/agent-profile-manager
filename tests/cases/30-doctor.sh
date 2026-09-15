@@ -180,6 +180,114 @@ case_d02_quiet_when_the_state_file_is_inside_a_root() {
     assert_not_contains "$("$AP" doctor 2>&1)" "D02"
 }
 
+# ---------------------------------------------------------------------------
+# D19: the sessions server registration
+# ---------------------------------------------------------------------------
+
+case_d19_quiet_on_a_clean_machine() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    doctor_out
+    assert_not_contains "$DOUT" "D19"
+}
+
+case_d19_quiet_when_a_profile_is_simply_off() {
+    # Off is a choice, not a finding. list and mcp status show it.
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    "$AP" mcp off bouvet >/dev/null 2>&1
+    doctor_out
+    assert_status 0 "$DSTATUS" "$DOUT" || return
+    assert_not_contains "$DOUT" "D19"
+}
+
+case_d19_registration_naming_another_root() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    # A state file restored into the wrong root: highsoft's file now carries
+    # bouvet's registration.
+    cp "$HOME/.claude-bouvet/.claude.json" "$HOME/.claude-highsoft/.claude.json"
+    doctor_out
+    assert_status 2 "$DSTATUS" || return
+    assert_contains "$DOUT" "D19" || return
+    assert_contains "$DOUT" "highsoft is stale" || return
+    assert_contains "$DOUT" "names another root" || return
+    assert_contains "$DOUT" "Fix with: agent-profile mcp on highsoft"
+}
+
+case_d19_fix_line_run_as_printed_quiets_it() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    cp "$HOME/.claude-bouvet/.claude.json" "$HOME/.claude-highsoft/.claude.json"
+    doctor_out
+    assert_contains "$DOUT" "D19" || return
+    "$AP" mcp on highsoft >/dev/null 2>&1
+    doctor_out
+    assert_not_contains "$DOUT" "D19" || return
+    assert_status 0 "$DSTATUS" "$DOUT"
+}
+
+case_d19_registration_whose_command_is_gone() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    python3 - "$HOME/.claude-bouvet/.claude.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["mcpServers"]["sessions"]["command"] = "/no/such/agpin"
+json.dump(d, open(p, "w"))
+PY
+    doctor_out
+    assert_status 2 "$DSTATUS" || return
+    assert_contains "$DOUT" "D19" || return
+    assert_contains "$DOUT" "missing or not executable"
+}
+
+case_d19_leaves_a_foreign_sessions_entry_alone() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    printf '{"oauthAccount":{"emailAddress":"m@bouvet.no","organizationUuid":"org-b"},"mcpServers":{"sessions":{"type":"stdio","command":"/usr/bin/theirs","args":["--serve"]}}}\n' \
+        > "$HOME/.claude-bouvet/.claude.json"
+    doctor_out
+    assert_not_contains "$DOUT" "D19"
+}
+
+case_d19_registration_in_the_stray_state_file() {
+    # An unpinned run given a sessions server: the stray file beside the
+    # default root carries the registration, and no profile owns that file.
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    cp "$HOME/.claude-bouvet/.claude.json" "$HOME/.claude.json"
+    doctor_out
+    assert_status 2 "$DSTATUS" || return
+    assert_contains "$DOUT" "D19" || return
+    assert_contains "$DOUT" "stray claude state file" || return
+    assert_contains "$DOUT" "claude mcp remove --scope user sessions"
+}
+
+case_d19_reads_only_the_mcp_servers_block() {
+    # The finding names the command and its arguments and nothing else from
+    # the file: a canary in every other key must not surface.
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    python3 - "$HOME/.claude-bouvet/.claude.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["mcpServers"]["sessions"]["args"][3] = "/somewhere/else"
+d["oauthAccount"]["emailAddress"] = "CANARY-EMAIL"
+d["projects"] = {"/x": {"allowedTools": ["CANARY-TOOL"]}}
+json.dump(d, open(p, "w"))
+PY
+    doctor_out
+    assert_contains "$DOUT" "D19" || return
+    assert_not_contains "$DOUT" "CANARY-TOOL" || return
+    # The account line list prints is a different reader; D19's own text
+    # must not carry the email.
+    d19=$(printf '%s\n' "$DOUT" | awk '/^D19/{f=1} f && /^$/{f=0} f')
+    assert_not_contains "$d19" "CANARY-EMAIL"
+}
+
 run_case "a clean machine exits 0"                    case_clean_exits_zero
 run_case "D01 the default root holds sessions"        case_d01_unpinned_default_root
 run_case "D02 a stray state file"                     case_d02_stray_state_file
@@ -196,3 +304,11 @@ run_case "D08 a project dir that is not a path"       case_d08_project_dir_that_
 run_case "no profiles is not a finding"               case_doctor_with_no_profiles_is_not_a_finding
 run_case "D02 fires though the default root is claimed" case_d02_fires_even_when_the_default_root_is_claimed
 run_case "D02 quiet when the state file is in a root"   case_d02_quiet_when_the_state_file_is_inside_a_root
+run_case "D19 is quiet on a clean machine"               case_d19_quiet_on_a_clean_machine
+run_case "D19 is quiet when a profile is simply off"     case_d19_quiet_when_a_profile_is_simply_off
+run_case "D19 registration naming another root"          case_d19_registration_naming_another_root
+run_case "D19's fix line, run as printed, quiets it"     case_d19_fix_line_run_as_printed_quiets_it
+run_case "D19 registration whose command is gone"        case_d19_registration_whose_command_is_gone
+run_case "D19 leaves a foreign sessions entry alone"     case_d19_leaves_a_foreign_sessions_entry_alone
+run_case "D19 registration in the stray state file"      case_d19_registration_in_the_stray_state_file
+run_case "D19 reads only the mcpServers block"           case_d19_reads_only_the_mcp_servers_block
