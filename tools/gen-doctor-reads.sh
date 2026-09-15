@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# gen-doctor-reads.sh: generate README.md's "What doctor reads" table from
-# bin/agent-profile instead of maintaining it by hand.
+# gen-doctor-reads.sh: generate the "What doctor reads" table in
+# docs/AUDIT.md from bin/agent-profile instead of maintaining it by hand.
 #
 # That table is what a consultant reads before running this tool on a machine
 # holding a customer's data, and it was written by hand. A hand-written
@@ -29,24 +29,25 @@
 # is not one ends the declaration, so ordinary prose under a bare "#" can
 # follow without being swallowed. A declaration is a comment, and a comment
 # can be left behind by a change to the code under it. This narrows the gap
-# between the document and the code; it does not close it, and the README says
-# so rather than claiming the table is derived from behaviour.
+# between the document and the code; it does not close it, and docs/AUDIT.md
+# says so rather than claiming the table is derived from behaviour.
 #
 # Usage:
-#   tools/gen-doctor-reads.sh           # rewrite the table in README.md
+#   tools/gen-doctor-reads.sh           # rewrite the table in docs/AUDIT.md
 #   tools/gen-doctor-reads.sh --check   # fail if the table is stale, write
 #                                       # nothing
 #
-# Run the plain form after changing what a rule reads, and commit the README
-# change it makes. CI runs the --check form, which names the rule that differs
-# rather than printing a whole-file diff.
+# Run the plain form after changing what a rule reads, and commit the change
+# it makes to docs/AUDIT.md. CI runs the --check form, which names the rule
+# that differs rather than printing a whole-file diff.
 
 set -u
 
 SELF=$(basename "$0")
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SOURCE="$ROOT/bin/agent-profile"
-README="$ROOT/README.md"
+README="$ROOT/docs/AUDIT.md"
+README_NAME="docs/AUDIT.md"
 
 BEGIN_MARK='<!-- BEGIN GENERATED: what doctor reads (tools/gen-doctor-reads.sh) -->'
 END_MARK='<!-- END GENERATED: what doctor reads -->'
@@ -213,11 +214,11 @@ done
     printf '%s\n' "$END_MARK"
 } > "$_tmp_block"
 
-# ---- the README -----------------------------------------------------------
+# ---- the document ---------------------------------------------------------
 _begins=$(grep -c -F -x -- "$BEGIN_MARK" "$README")
 _ends=$(grep -c -F -x -- "$END_MARK" "$README")
 if [ "$_begins" -ne 1 ] || [ "$_ends" -ne 1 ]; then
-    die "README.md does not hold exactly one generated block for this table" \
+    die "$README_NAME does not hold exactly one generated block for this table" \
         "Expected these two lines around it, once each:" \
         "$BEGIN_MARK" \
         "$END_MARK"
@@ -233,10 +234,10 @@ awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
 
 if cmp -s "$_tmp_block" "$_tmp_current"; then
     if [ "$MODE" = check ]; then
-        printf '%s: README.md agrees with bin/agent-profile: %s rules\n' \
-            "$SELF" "$(printf '%s\n' "$RULES" | grep -c .)"
+        printf '%s: %s agrees with bin/agent-profile: %s rules\n' \
+            "$SELF" "$README_NAME" "$(printf '%s\n' "$RULES" | grep -c .)"
     else
-        printf '%s: README.md is already up to date, nothing to do\n' "$SELF"
+        printf '%s: %s is already up to date, nothing to do\n' "$SELF" "$README_NAME"
     fi
     exit 0
 fi
@@ -250,13 +251,13 @@ if [ "$MODE" = check ]; then
             index($0, "| " r " ") == 1 || index($0, "| " r ",") == 1 { print; exit }
         ' "$_tmp_current")
         if [ -z "$_cur" ]; then
-            printf '%s: README.md has no row for %s\n' "$SELF" "$_rule" >&2
+            printf '%s: %s has no row for %s\n' "$SELF" "$README_NAME" "$_rule" >&2
             printf '  expected: %s\n' "$_row" >&2
             _reported=$((_reported + 1))
         elif [ "$_cur" != "$_row" ]; then
-            printf "%s: README.md's row for %s is not what bin/agent-profile declares\n" \
-                "$SELF" "$_rule" >&2
-            printf '  README.md:         %s\n' "$_cur" >&2
+            printf "%s: %s's row for %s is not what bin/agent-profile declares\n" \
+                "$SELF" "$README_NAME" "$_rule" >&2
+            printf '  %s:     %s\n' "$README_NAME" "$_cur" >&2
             printf '  bin/agent-profile: %s\n' "$_row" >&2
             _reported=$((_reported + 1))
         fi
@@ -273,18 +274,18 @@ if [ "$MODE" = check ]; then
         _id=$(printf '%s' "$_line" | sed -n 's/^| *\([A-Za-z0-9][A-Za-z0-9]*\).*/\1/p')
         [ -n "$_id" ] || continue
         if ! grep -q "^$_id$TAB" "$_tmp_rows"; then
-            printf '%s: README.md has a row for %s, which is not a rule in bin/agent-profile\n' \
-                "$SELF" "$_id" >&2
+            printf '%s: %s has a row for %s, which is not a rule in bin/agent-profile\n' \
+                "$SELF" "$README_NAME" "$_id" >&2
             _reported=$((_reported + 1))
         fi
     done < "$_tmp_current"
 
     if [ "$_reported" -eq 0 ]; then
-        printf '%s: the generated block in README.md differs from a regenerated one\n' "$SELF" >&2
+        printf '%s: the generated block in %s differs from a regenerated one\n' "$SELF" "$README_NAME" >&2
         printf '  Every row matches, so the difference is in the order of the rows or in\n' >&2
         printf '  the table header.\n' >&2
     fi
-    printf '%s: run tools/gen-doctor-reads.sh and commit README.md\n' "$SELF" >&2
+    printf '%s: run tools/gen-doctor-reads.sh and commit %s\n' "$SELF" "$README_NAME" >&2
     exit 1
 fi
 
@@ -297,13 +298,13 @@ awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v f="$_tmp_block" '
     { print }
 ' "$README" > "$_tmp_readme"
 
-# Never leave a truncated README behind: a rewrite that lost the table would
-# be worse than a stale one.
+# Never leave a truncated document behind: a rewrite that lost the table
+# would be worse than a stale one.
 if ! grep -q -F -x -- "$END_MARK" "$_tmp_readme"; then
-    die "the rewritten README.md lost its generated block, so nothing was written"
+    die "the rewritten $README_NAME lost its generated block, so nothing was written"
 fi
 
 cat "$_tmp_readme" > "$README"
 rm -f "$_tmp_readme"
 _tmp_readme=""
-printf '%s: README.md updated: %s rules\n' "$SELF" "$(printf '%s\n' "$RULES" | grep -c .)"
+printf '%s: %s updated: %s rules\n' "$SELF" "$README_NAME" "$(printf '%s\n' "$RULES" | grep -c .)"

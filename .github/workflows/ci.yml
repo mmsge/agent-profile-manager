@@ -93,6 +93,15 @@ jobs:
         run: |
           "${{ steps.sh.outputs.path }}" tools/gen-test-count.sh --check --from /tmp/test-output.txt
 
+      # Every command example the documentation shows is generated from a
+      # real run of the tool in a throwaway HOME, and this fails naming the
+      # example that no longer matches what the tool prints. It runs on every
+      # leg, so an output that differs between bash 3.2 and a modern bash, or
+      # between macOS and Linux, is caught here rather than read by someone.
+      - name: Documented examples match the tool
+        run: |
+          "${{ steps.sh.outputs.path }}" tools/gen-doc-examples.sh --check
+
   # The sessions server under server/ is Python, tested with pytest against
   # generated fixtures. It runs on both platforms the tool ships to, from the
   # lockfile the release ships, so a dependency that resolves differently on a
@@ -141,4 +150,4 @@ jobs:
         run: shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 
       - name: Refuse bash 4 constructs
-        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/gen-doctor-reads.sh tools/update-homebrew-formula.sh tests/run.sh
+        run: ./tools/lint-bash32.sh bin/agent-profile tools/probe-claude-desktop.sh tools/gen-test-count.sh tools/gen-doctor-reads.sh tools/gen-doc-examples.sh tools/update-homebrew-formula.sh tests/run.sh

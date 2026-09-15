@@ -30,7 +30,7 @@ lowers it to `detail`. Either way the record stream itself, and therefore
 every document below, is captured in full regardless of the threshold: a
 level governs what `report_shows` lets reach the terminal as prose, never
 what reaches `--json` or `--report FILE`. See
-[Output levels](../README.md#output-levels) for what `--quiet` and
+[Output levels](USE.md#output-levels) for what `--quiet` and
 `--explain` do on the terminal.
 
 ## Common fields

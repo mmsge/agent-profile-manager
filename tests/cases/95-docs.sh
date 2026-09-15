@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
 #
-# The generated documentation. README.md's "What doctor reads" table is the
-# document a security review reads first, and it used to be written by hand.
+# The generated documentation. The "What doctor reads" table in docs/AUDIT.md
+# is the document a security review reads first, and it used to be written
+# by hand.
 # These cases are what stops it going quiet: the first one fails when the
 # checked-in table and a regenerated one differ, and the rest pin the failures
 # that must name a rule rather than dropping a row.
@@ -16,10 +17,10 @@ GEN_READS="tools/gen-doctor-reads.sh"
 # without touching this one.
 docs_fixture() {
     _df=$(mktemp -d "${TMPDIR:-/tmp}/agent-profile-docs.XXXXXX")
-    mkdir -p "$_df/bin" "$_df/tools"
+    mkdir -p "$_df/bin" "$_df/tools" "$_df/docs"
     cp "$ROOT/bin/agent-profile" "$_df/bin/agent-profile"
     cp "$ROOT/$GEN_READS" "$_df/$GEN_READS"
-    cp "$ROOT/README.md" "$_df/README.md"
+    cp "$ROOT/docs/AUDIT.md" "$_df/docs/AUDIT.md"
     printf '%s\n' "$_df"
 }
 
@@ -52,7 +53,7 @@ docs_drop_declaration() {
     ' "$1" > "$1.edited" && mv "$1.edited" "$1"
 }
 
-# docs_table_rules <readme>: the rule ids in the generated table, in order.
+# docs_table_rules <file>: the rule ids in the generated table, in order.
 docs_table_rules() {
     awk '
         index($0, "<!-- BEGIN GENERATED: what doctor reads") == 1 { inblock = 1; next }
@@ -71,7 +72,7 @@ case_table_matches_the_source() {
 
 case_a_hand_edited_row_fails_by_name() {
     _d=$(docs_fixture)
-    docs_edit "$_d/README.md" 's/^| D07 | The file mode.*/| D07 | Nothing worth mentioning. |/'
+    docs_edit "$_d/docs/AUDIT.md" 's/^| D07 | The file mode.*/| D07 | Nothing worth mentioning. |/'
     gen_reads "$_d" --check
     assert_status 1 "$GRSTATUS" "$GROUT" || return
     assert_contains "$GROUT" "row for D07" || return
@@ -113,7 +114,7 @@ case_an_unparseable_declaration_fails_by_name() {
 }
 
 case_a_rule_the_table_does_not_have_fails() {
-    # A new rule in the catalogue, declared but never added to the README.
+    # A new rule in the catalogue, declared but never added to the table.
     # This is the one that stops a rule being added without saying what it
     # reads.
     _d=$(docs_fixture)
@@ -155,18 +156,18 @@ case_a_declaration_for_no_rule_fails() {
 
 case_check_writes_nothing() {
     _d=$(docs_fixture)
-    docs_edit "$_d/README.md" 's/^| D15 | The registry only.*/| D15 | Everything. |/'
-    cp "$_d/README.md" "$_d/README.before"
+    docs_edit "$_d/docs/AUDIT.md" 's/^| D15 | The registry only.*/| D15 | Everything. |/'
+    cp "$_d/docs/AUDIT.md" "$_d/AUDIT.before"
     gen_reads "$_d" --check
     assert_status 1 "$GRSTATUS" "$GROUT" || return
-    cmp -s "$_d/README.before" "$_d/README.md" || fail "--check rewrote README.md"
+    cmp -s "$_d/AUDIT.before" "$_d/docs/AUDIT.md" || fail "--check rewrote docs/AUDIT.md"
     rm -rf "$_d"
 }
 
 case_writing_restores_the_table() {
     _d=$(docs_fixture)
-    cp "$_d/README.md" "$_d/README.before"
-    docs_edit "$_d/README.md" 's/^| D15 | The registry only.*/| D15 | Everything. |/'
+    cp "$_d/docs/AUDIT.md" "$_d/AUDIT.before"
+    docs_edit "$_d/docs/AUDIT.md" 's/^| D15 | The registry only.*/| D15 | Everything. |/'
     gen_reads "$_d"
     assert_status 0 "$GRSTATUS" "$GROUT" || return
     assert_contains "$GROUT" "updated" || return
@@ -174,7 +175,7 @@ case_writing_restores_the_table() {
     assert_status 0 "$GRSTATUS" "$GROUT" || return
     # Only the row inside the generated block comes back: the rest of the file
     # is left exactly as it was.
-    cmp -s "$_d/README.before" "$_d/README.md" || fail "the rewrite changed more than the table"
+    cmp -s "$_d/AUDIT.before" "$_d/docs/AUDIT.md" || fail "the rewrite changed more than the table"
     rm -rf "$_d"
 }
 
@@ -188,7 +189,7 @@ case_the_table_lists_the_rules_doctor_reports() {
 import json, sys
 print(" ".join(r["rule"] for r in json.load(sys.stdin)["rules"]) + " ")
 ')
-    assert_equals "$docs_reported" "$(docs_table_rules "$ROOT/README.md")"
+    assert_equals "$docs_reported" "$(docs_table_rules "$ROOT/docs/AUDIT.md")"
 }
 
 run_case "the table matches the source"                 case_table_matches_the_source
