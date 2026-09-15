@@ -18,13 +18,15 @@ signed_in_profile() {
 case_cred_hash_matches_the_verified_values() {
     # The three values confirmed against real Keychain entries on the target
     # machine. If this breaks, the naming in docs/FACTS.md F03 is wrong and
-    # D05 will report false findings.
+    # D05 will report false findings. These paths are the record, not an
+    # example: the hash covers the literal string, so they stay as F03 has
+    # them.
     assert_equals "Claude Code-credentials-1c128223" \
         "$(cred_service_for /Users/markus.mg/.claude)" || return
     assert_equals "Claude Code-credentials-2241c977" \
-        "$(cred_service_for /Users/markus.mg/.claude-brygga)" || return
+        "$(cred_service_for /Users/markus.mg/.claude-bouvet)" || return
     assert_equals "Claude Code-credentials-4c36052e" \
-        "$(cred_service_for /Users/markus.mg/.claude-torg)"
+        "$(cred_service_for /Users/markus.mg/.claude-tide)"
 }
 
 case_a_trailing_slash_is_a_different_credential() {
