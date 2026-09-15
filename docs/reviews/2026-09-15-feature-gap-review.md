@@ -388,6 +388,20 @@ documents. Numbers for new rules and facts are "the next free one" rather
 than fixed here, because D19 and F25 are the last taken and several
 suggestions each add one.
 
+Every suggestion was accepted and filed. Suggestions 1 to 10 are issues
+[#73](https://github.com/mmsge/agent-profile-manager/issues/73) to
+[#82](https://github.com/mmsge/agent-profile-manager/issues/82) in order;
+suggestion 11 is a comment on
+[#22](https://github.com/mmsge/agent-profile-manager/issues/22);
+suggestions 12 to 20 are
+[#83](https://github.com/mmsge/agent-profile-manager/issues/83) to
+[#91](https://github.com/mmsge/agent-profile-manager/issues/91) in order,
+with suggestion 18's additions to the rewrite as a comment on
+[#15](https://github.com/mmsge/agent-profile-manager/issues/15).
+[#58](https://github.com/mmsge/agent-profile-manager/issues/58) folds into
+#77 and [#61](https://github.com/mmsge/agent-profile-manager/issues/61)
+into #74.
+
 ### 1. Bind directories to profiles, and refuse a pin that disagrees
 
 **Why this matters:** The pin is per shell and the work is per directory.
