@@ -99,6 +99,7 @@ case_doctor_json_carries_the_profile_inventory() {
     assert_equals "org-b" "$(json_get "$out" 'd["profiles"][0]["organization"]')" || return
     assert_equals "1" "$(json_get "$out" 'd["profiles"][0]["sessions"]')" || return
     assert_contains "$(json_get "$out" 'd["profiles"][0]["app_data"]')" "Claude-Bouvet" || return
+    assert_equals "on" "$(json_get "$out" 'd["profiles"][0]["sessions_server"]')" || return
     # A profile that is not signed in is null, not a sentence.
     assert_equals "" "$(json_get "$out" 'd["profiles"][1]["account"]')"
 }
@@ -167,9 +168,9 @@ case_doctor_json_lists_every_rule() {
     json_two_profiles
     out=$("$AP" doctor --json 2>/dev/null)
     assert_json "$out" || return
-    assert_equals "18" "$(json_get "$out" 'len(d["rules"])')" || return
+    assert_equals "19" "$(json_get "$out" 'len(d["rules"])')" || return
     assert_equals "D01" "$(json_get "$out" 'd["rules"][0]["rule"]')" || return
-    assert_equals "D18" "$(json_get "$out" 'd["rules"][-1]["rule"]')" || return
+    assert_equals "D19" "$(json_get "$out" 'd["rules"][-1]["rule"]')" || return
     [ -n "$(json_get "$out" 'd["rules"][0]["title"]')" ] || fail "a rule has no title"
 }
 

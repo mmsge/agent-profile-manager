@@ -46,6 +46,92 @@ trap 'rm -rf "$AP_SHIM_DIR"' EXIT INT TERM
 AGENT_PROFILE_PLATFORM=test-not-darwin
 export AGENT_PROFILE_PLATFORM
 
+# Stand in for the agent's CLI as the registrar of the sessions server. new
+# registers the server in every root it creates or adopts, through
+# `claude mcp add --scope user` pinned to the root (docs/FACTS.md F23), so
+# without this every case that runs new would start the real agent, on a
+# machine that has one, against a fixture root. The stand-in edits
+# $CLAUDE_CONFIG_DIR/.claude.json the way the CLI does, and refuses the same
+# things: adding a name that exists, removing one that does not. Cases that
+# want the "claude is not installed" path point the variable at a path that
+# does not exist; nothing here ever consults PATH for it.
+fake_registrar() {
+    cat > "$1" <<'REGEOF'
+#!/bin/sh
+state="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+printf '%s\n' "$*" >> "${FAKE_REGISTRAR_LOG:-/dev/null}"
+[ "${1:-}" = "mcp" ] || { echo "stand-in claude: only mcp is implemented" >&2; exit 64; }
+shift
+op="${1:-}"; shift
+scope="local"; name=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --scope|-s) shift; scope="$1" ;;
+        --) shift; break ;;
+        *) [ -n "$name" ] || name="$1" ;;
+    esac
+    shift
+done
+[ "$scope" = "user" ] || { echo "stand-in claude: scope $scope is not what the tool should use" >&2; exit 65; }
+export state name op
+python3 - "$@" <<'PY'
+import json, os, sys
+state, name, op = os.environ["state"], os.environ["name"], os.environ["op"]
+data = {}
+if os.path.isfile(state):
+    with open(state) as fh:
+        data = json.load(fh)
+servers = data.setdefault("mcpServers", {})
+if op == "add":
+    if name in servers:
+        print("MCP server %s already exists in user config" % name)
+        sys.exit(1)
+    servers[name] = {"type": "stdio", "command": sys.argv[1], "args": sys.argv[2:], "env": {}}
+    print("Added stdio MCP server %s with command: %s to user config" % (name, " ".join(sys.argv[1:])))
+elif op == "remove":
+    if name not in servers:
+        print('No MCP server named "%s" in user scope' % name)
+        sys.exit(1)
+    del servers[name]
+    print("Removed MCP server %s from user config" % name)
+elif op == "get":
+    print(json.dumps(servers.get(name)))
+    sys.exit(0)
+else:
+    print("stand-in claude: mcp %s is not implemented" % op)
+    sys.exit(66)
+with open(state, "w") as fh:
+    json.dump(data, fh)
+print("File modified: %s" % state)
+PY
+REGEOF
+    chmod +x "$1"
+}
+fake_registrar "$AP_SHIM_DIR/claude"
+AGENT_PROFILE_MCP_REGISTRAR="$AP_SHIM_DIR/claude"
+export AGENT_PROFILE_MCP_REGISTRAR
+
+# mcp serve must never start a real interpreter from a test, so it is pointed
+# at a script that records its argv and exits. Cases that want the "server not
+# installed" branch point this at a path that does not exist.
+fake_server_python() {
+    cat > "$1" <<'PYEOF2'
+#!/bin/sh
+printf 'server python: %s\n' "$*"
+printf 'PYTHONPATH=%s\n' "${PYTHONPATH:-}"
+printf 'CLAUDE_CONFIG_DIR=%s\n' "${CLAUDE_CONFIG_DIR:-}"
+PYEOF2
+    chmod +x "$1"
+}
+fake_server_python "$AP_SHIM_DIR/server-python"
+AGENT_PROFILE_SERVER_PYTHON="$AP_SHIM_DIR/server-python"
+export AGENT_PROFILE_SERVER_PYTHON
+
+# The installer builds the sessions server's Python environment, which is a
+# download. No test does that; the cases that install exercise the skip.
+AGENT_PROFILE_INSTALL_SERVER=no
+export AGENT_PROFILE_INSTALL_SERVER
+
 TESTS_RUN=0
 TESTS_FAILED=0
 CURRENT=""
@@ -174,10 +260,27 @@ reg_root_of() {
     sed -n 's/^root=//p' "$HOME/.config/agent-profiles/$1.conf" | head -1
 }
 
-# fixture_account <root> <email> <org>
+# fixture_account <root> <email> <org>: the account block in a root's state
+# file. Merged into a file that already exists rather than replacing it, the
+# way a login lands in a real root, so the sessions server registration new
+# wrote there survives the fixture.
 fixture_account() {
-    printf '{"oauthAccount":{"emailAddress":"%s","organizationUuid":"%s"}}\n' "$2" "$3" \
-        > "$1/.claude.json"
+    mkdir -p "$1"
+    python3 - "$1/.claude.json" "$2" "$3" <<'PY'
+import json, os, sys
+path, email, org = sys.argv[1:4]
+data = {}
+if os.path.isfile(path):
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except ValueError:
+        data = {}
+data["oauthAccount"] = {"emailAddress": email, "organizationUuid": org}
+with open(path, "w") as fh:
+    json.dump(data, fh)
+    fh.write("\n")
+PY
 }
 
 # fake_osa <bindir>: stand-in osacompile and osadecompile.

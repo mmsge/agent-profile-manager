@@ -3,18 +3,32 @@
 # shellcheck disable=SC2317  # every case is invoked indirectly by run_case
 # new, list, path, env: profile lifecycle.
 
-case_new_creates_empty_root() {
+case_new_creates_a_root_holding_only_its_registration() {
     HOME=$(new_home); export HOME
     out=$("$AP" new bouvet 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     [ -d "$HOME/.claude-bouvet" ] || { fail "root was not created"; return; }
-    # The root must be EMPTY. Nothing is ever seeded or copied into it.
+    # Nothing is ever seeded or copied into the root. The one thing in it is
+    # the state file the agent's CLI wrote the sessions server registration
+    # into (docs/FACTS.md F23), and that is the whole listing.
+    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-bouvet" 2>/dev/null)" || return
+    assert_contains "$out" "Sessions server: on" || return
+    [ -d "$HOME/Library/Application Support/Claude-Bouvet" ] || \
+        fail "app data dir was not created"
+}
+
+# Without the agent on PATH there is nothing to register with, and the root
+# is then genuinely empty. new still succeeds, and says what to run later.
+case_new_creates_an_empty_root_when_the_agent_is_absent() {
+    HOME=$(new_home); export HOME
+    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" new bouvet 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
     if [ -n "$(ls -A "$HOME/.claude-bouvet" 2>/dev/null)" ]; then
         fail "root is not empty" "$(ls -A "$HOME/.claude-bouvet")"
         return
     fi
-    [ -d "$HOME/Library/Application Support/Claude-Bouvet" ] || \
-        fail "app data dir was not created"
+    assert_contains "$out" "not registered, because claude is not on PATH" || return
+    assert_contains "$out" "agent-profile mcp on bouvet"
 }
 
 case_new_sets_mode_700() {
@@ -177,15 +191,37 @@ case_new_adopts_a_populated_root_without_touching_it() {
     printf '{"model":"opus","hooks":{"Stop":[]}}\n' > "$HOME/.claude-tide/settings.json"
     before=$(find "$HOME/.claude-tide" -type f | sort)
 
-    out=$("$AP" new tide 2>&1); status=$?
+    out=$("$AP" new tide --explain 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "adopted rather than created" || return
     assert_contains "$out" "1 session(s)" || return
 
-    # The claim in that message has to be true.
+    # The claim in that message has to be true: the same files, the settings
+    # byte for byte, and the one addition named as such, inside a file that
+    # was already there.
     assert_equals "$before" "$(find "$HOME/.claude-tide" -type f | sort)" || return
     assert_equals '{"model":"opus","hooks":{"Stop":[]}}' \
-        "$(cat "$HOME/.claude-tide/settings.json")"
+        "$(cat "$HOME/.claude-tide/settings.json")" || return
+    assert_contains "$out" "The one line added is the sessions server registration" || return
+    assert_contains "$out" "Sessions server: on" || return
+    # The account the adopted root already had is still there beside it.
+    assert_contains "$("$AP" list 2>&1)" "m@tide.no"
+}
+
+# An adopted root may already carry a "sessions" server of its owner's own.
+# That entry is not this tool's, so new leaves it alone and says so, and the
+# adoption still succeeds.
+case_new_leaves_a_foreign_sessions_entry_alone() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/.claude-tide"
+    printf '{"oauthAccount":{"emailAddress":"m@tide.no"},"mcpServers":{"sessions":{"type":"stdio","command":"/usr/bin/theirs","args":["--serve"]}}}\n' \
+        > "$HOME/.claude-tide/.claude.json"
+    before=$(cat "$HOME/.claude-tide/.claude.json")
+    out=$("$AP" new tide 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "not this tool's" || return
+    assert_contains "$out" "left alone" || return
+    assert_equals "$before" "$(cat "$HOME/.claude-tide/.claude.json")"
 }
 
 # Telling someone their live root "is empty" is false and alarming, and the
@@ -211,21 +247,21 @@ case_new_reports_tightening_the_mode_on_adoption() {
     assert_equals "700" "$(file_mode "$HOME/.claude-tide")"
 }
 
-# An empty root is still created, not adopted, so the guardrails warning that
+# A fresh root is still created, not adopted, so the guardrails warning that
 # matters for a fresh profile does not go missing under --explain.
-case_new_still_explains_an_empty_root() {
+case_new_still_explains_a_fresh_root() {
     HOME=$(new_home); export HOME
     out=$("$AP" new fresh --explain 2>&1)
-    assert_contains "$out" "The root is empty" || return
+    assert_contains "$out" "The root holds nothing from any other profile" || return
     assert_not_contains "$out" "adopted rather than created"
 }
 
-# The short default form still says the root is empty, without the paragraph
-# of rationale --explain restores.
-case_new_short_form_still_names_an_empty_root() {
+# The short default form leaves that paragraph out, and still says what to
+# run next.
+case_new_short_form_still_names_a_fresh_root() {
     HOME=$(new_home); export HOME
     out=$("$AP" new fresh 2>&1)
-    assert_not_contains "$out" "The root is empty" || return
+    assert_not_contains "$out" "The root holds nothing" || return
     assert_contains "$out" "Next: agent-profile run fresh"
 }
 
@@ -290,7 +326,8 @@ case_neither_a_command_nor_a_profile_names_both() {
     assert_contains "$out" "list for profiles"
 }
 
-run_case "new creates an empty root"                  case_new_creates_empty_root
+run_case "new creates a root holding only its registration" case_new_creates_a_root_holding_only_its_registration
+run_case "new creates an empty root when the agent is absent" case_new_creates_an_empty_root_when_the_agent_is_absent
 run_case "new sets mode 700"                          case_new_sets_mode_700
 run_case "new sets mode 700 on the app data dir"      case_new_sets_mode_700_on_the_app_data_dir
 run_case "new reports tightening the app data mode"   case_new_reports_tightening_the_app_data_mode
@@ -309,10 +346,11 @@ run_case "a spaced root works end to end"            case_a_spaced_root_works_en
 run_case "an unknown profile exits 1"                 case_unknown_profile_exits_1
 run_case "an unknown agent= is a hard error"          case_unknown_agent_in_registry_is_hard_error
 run_case "new adopts a populated root untouched"   case_new_adopts_a_populated_root_without_touching_it
+run_case "new leaves a foreign sessions entry alone" case_new_leaves_a_foreign_sessions_entry_alone
 run_case "new does not call a populated root empty" case_new_does_not_call_a_populated_root_empty
 run_case "new reports tightening the mode"         case_new_reports_tightening_the_mode_on_adoption
-run_case "new still explains an empty root"        case_new_still_explains_an_empty_root
-run_case "new's short form still names an empty root"  case_new_short_form_still_names_an_empty_root
+run_case "new still explains a fresh root"         case_new_still_explains_a_fresh_root
+run_case "new's short form still names a fresh root"   case_new_short_form_still_names_a_fresh_root
 run_case "new warns about the default root"       case_new_warns_when_a_profile_claims_the_default_root
 run_case "new's short form still names the default root" case_new_short_form_still_names_the_default_root
 run_case "new is silent for an ordinary root"     case_new_is_silent_about_it_for_an_ordinary_root
