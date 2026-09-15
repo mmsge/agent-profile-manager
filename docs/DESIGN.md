@@ -9,14 +9,24 @@ whole story.
 
 **No exceptions.** No symlinks, no shared parent directory, no copying common
 commands into every root, no seeding a new root from an existing one, no
-template of default settings. `new` creates an empty root.
+template of default settings. `new` copies nothing into a root from anywhere.
+The one thing it adds is a registration for the root's own sessions server,
+written by Claude Code's own CLI into the root's state file. It names this
+tool and this root and nothing else, it is the same shape in every root, and
+it points at nothing outside the root, so two roots still share no file and
+no content. `agpin mcp off` takes it out again. How the server works, and
+why the registration is written by the CLI rather than by this tool, is in
+[the sessions server proposal](proposals/2026-09-15-sessions-mcp.md).
 
 The cost is real and worth stating: a fresh root has no settings, no hooks and
 none of the guardrails your other profiles have. Set those up in the new root
 directly. Do not copy them across, because a copied file is a file that drifts.
 
 The tool also never touches credentials beyond checking that one exists, never
-edits the agent's own state files, and never migrates data between roots.
+edits the agent's own state files by hand, and never migrates data between
+roots. The one change it makes to a state file, the sessions server
+registration, goes through `claude mcp add` and `claude mcp remove` pinned to
+the root, so the file is only ever written by the program that owns it.
 
 ## A prompt that cannot lie
 
