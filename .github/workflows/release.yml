@@ -339,9 +339,14 @@ jobs:
           set -eu
           stage="dist/agent-profile-$VERSION"
           mkdir -p "$stage"
-          cp -R bin tools docs "$stage/"
+          cp -R bin tools docs server "$stage/"
           cp README.md "$stage/"
           if [ -f LICENSE ]; then cp LICENSE "$stage/"; fi
+          # The sessions server ships as source plus its lockfile and hashed
+          # requirements; the installer builds the environment on the Mac.
+          # Its tests, and anything a local run left behind, stay out.
+          rm -rf "$stage/server/tests" "$stage/server/.venv"
+          find "$stage/server" -name '__pycache__' -type d -prune -exec rm -rf {} +
           tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mtime="@$(git log -1 --format=%ct)" \
               -czf "dist/$TARBALL" -C dist "agent-profile-$VERSION"
