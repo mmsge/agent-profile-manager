@@ -1021,9 +1021,10 @@ matters to you.
 
 ### F24 Does a stdio MCP server inherit `CLAUDE_CONFIG_DIR` from the pinned process?
 
-**Status:** `VERIFIED` 2026-09-15 on Linux against 2.1.272. Answer: **yes**,
-together with the rest of the parent's environment. `UNVERIFIED` on macOS and
-for the desktop app's embedded copy.
+**Status:** `VERIFIED` 2026-09-15 on Linux against 2.1.272, and `VERIFIED`
+2026-09-15 on macOS for the desktop app's embedded copy, Claude Code 2.1.270,
+in a Code tab session. Answer: **yes**, together with the rest of the parent's
+environment, on both.
 
 A server registered as in F23, whose command was `sh -c 'env > <file>'`, was
 started by `claude mcp list` run with `CLAUDE_CONFIG_DIR` pointed at the
@@ -1042,6 +1043,27 @@ serve the wrong one. The same inheritance also means a stdio server sees
 every other variable in the session's environment, which is a reason for the
 server to read exactly one of them.
 
+**The desktop app does the same, from the pinned root's state file.** The
+documentation says the app "re-delivers stdio servers from `~/.claude.json`
+to the embedded CLI in local sessions"
+([desktop](https://code.claude.com/docs/en/desktop)), which left open whether
+it reads the literal home path or the pinned root. Observed on 2026-09-15 on
+the macOS machine the 2026-09-14 checks in this file were made on, with the
+app launched through a profile's applet and its embedded Claude Code at
+2.1.270: a Code tab session's MCP panel listed the sessions server as
+"Connected, 6 tools", and a probe registered only in the profile's own
+`<root>/.claude.json`, `sh -c 'env > /tmp/envprobe-profile.txt'`, was started
+too, appearing as "Failed to connect: Connection closed", which is a server
+that wrote its file and exited. That file held
+`CLAUDE_CONFIG_DIR=<the profile's root>`. Both entries were labelled
+"Configured in your Claude Code user settings (~/.claude.json)" in the panel;
+that wording is the app's name for the user scope, not the path it read,
+because nothing was registered in the home directory's file at the time. Two
+things about that session are worth knowing: servers connect at session
+start, so a session opened before `mcp on` never shows the server, and the
+app has to have been launched pinned, since a running instance keeps the
+environment it started with (F19 records the same trap for VS Code).
+
 **How to re-check.** `claude mcp list` starts every registered server, so no
 login is needed. Pin the variable to a throwaway root, register a server that
 writes its environment to a file, list, and read the file. One command per
@@ -1057,6 +1079,22 @@ grep '^CLAUDE_CONFIG_DIR=' "$CLAUDE_CONFIG_DIR/env.txt"
 The `list` reports the probe as failed to connect, which is expected: it
 exits without speaking the protocol. The `grep` should print the throwaway
 path. Then `rm -rf "$CLAUDE_CONFIG_DIR"` and `unset CLAUDE_CONFIG_DIR`.
+
+For the desktop, register the same probe pinned to a real profile's root,
+quit the app, relaunch it through that profile's applet, open a new Code tab
+session and send one message, then read the file and remove the probe. One
+command per line.
+
+```sh
+R="$HOME/.claude-brygga"
+CLAUDE_CONFIG_DIR="$R" claude mcp add --scope user envprobe -- sh -c 'env > /tmp/envprobe-profile.txt'
+grep CLAUDE_CONFIG_DIR /tmp/envprobe-profile.txt
+CLAUDE_CONFIG_DIR="$R" claude mcp remove --scope user envprobe
+```
+
+The `grep` printing that profile's root is the fact. A file that never
+appears means the app is no longer delivering user-scope servers from the
+pinned root, and the sessions server has stopped working in the desktop.
 
 ### F25 Where do subagent transcripts live, and how are they tied to their session?
 

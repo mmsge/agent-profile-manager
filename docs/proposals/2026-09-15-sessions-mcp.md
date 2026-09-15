@@ -1034,10 +1034,11 @@ Not verified, and needing a Mac:
 - Whether `claude mcp add` on a Mac, before any login, fetches
   `policy-limits.json` and `remote-settings.json` over the network, and
   whether it writes an `oauthAccount` block. F23 says what to look for.
-- Whether the desktop app's embedded Claude Code starts the same
-  `mcpServers` entries from `<root>/.claude.json` as the CLI does. F01 and
-  F17 make it likely, and the desktop is where a slow server start is most
-  visible.
+- Settled on 2026-09-15, on a Mac: the desktop app's embedded Claude Code,
+  2.1.270, starts the `mcpServers` entries from the pinned root's
+  `.claude.json` in Code tab sessions and hands them the pin, exactly as
+  the CLI does. The session's MCP panel showed the server connected with
+  six tools. F24 records the probe.
 - Where the generated session title lives on disk.
 - The Homebrew resource build under `brew audit`, and `uv`'s managed Python
   download on a Mac with no developer tools.
