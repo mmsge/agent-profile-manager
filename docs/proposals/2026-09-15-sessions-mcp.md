@@ -137,6 +137,146 @@ line is shared by anything.
   agpin run bouvet, agpin shell bouvet    agpin run highsoft, a desktop applet
 ```
 
+### The same picture, as diagrams
+
+GitHub renders these; a terminal reader has the text picture above and the
+prose below.
+
+#### The pieces, and what talks to what
+
+```mermaid
+flowchart TB
+    subgraph tree["Install tree: one copy, code only, no data"]
+        agpin["agpin launcher<br/>(bin/agent-profile)"]
+        venv["server/.venv/bin/python<br/>FastMCP + agent_profile_sessions"]
+    end
+    registry["~/.config/agent-profiles/*.conf<br/>root=, app_data= (no server state)"]
+
+    subgraph bouvet["~/.claude-bouvet (config root)"]
+        bstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-bouvet"]
+        bproj["projects/<br/>transcripts and subagents"]
+        bcred[".credentials.json<br/>never read"]
+    end
+    subgraph highsoft["~/.claude-highsoft (config root)"]
+        hstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-highsoft"]
+        hproj["projects/"]
+        hcred[".credentials.json<br/>never read"]
+    end
+
+    bclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-bouvet"]
+    hclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-highsoft"]
+    bserver["sessions server (python)<br/>root = ~/.claude-bouvet"]
+    hserver["sessions server (python)<br/>root = ~/.claude-highsoft"]
+
+    bclaude -- "reads registration" --> bstate
+    hclaude -- "reads registration" --> hstate
+    bclaude -- "stdio child, inherits env" --> agpin
+    hclaude -- "stdio child, inherits env" --> agpin
+    agpin -- "exec, after CLAUDE_CONFIG_DIR == --root" --> venv
+    venv -. "runs as" .-> bserver
+    venv -. "runs as" .-> hserver
+    bserver -- "reads only" --> bproj
+    hserver -- "reads only" --> hproj
+    agpin -. "list, mcp status, doctor D19:<br/>read mcpServers only" .-> bstate
+    agpin -. "same" .-> hstate
+```
+
+Above the install tree there is one copy of the code, the same way there is one copy of the bash script. Below it, each root owns its own registration, its own transcripts and its own server process. No line crosses from one root to the other.
+
+#### A session starting
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as agpin run bouvet
+    participant C as claude (pinned)
+    participant S as ~/.claude-bouvet/.claude.json
+    participant L as agpin mcp serve
+    participant P as python server
+    participant T as ~/.claude-bouvet/projects/
+
+    U->>C: exec with CLAUDE_CONFIG_DIR=~/.claude-bouvet
+    C->>S: read mcpServers.sessions
+    C->>L: spawn stdio child with its own environment (F24)
+    L->>L: CLAUDE_CONFIG_DIR == --root ? else exit 1, one line on stderr
+    L->>L: resolve own path through the installed symlink, find server/.venv
+    L->>P: exec python -m agent_profile_sessions --root ~/.claude-bouvet
+    P->>P: realpath(CLAUDE_CONFIG_DIR) == realpath(--root) ? else exit 2
+    C->>P: initialize, tools/list
+    P-->>C: six tools, about 1 s after spawn
+    Note over C,P: the model calls list_sessions, search, get_session ...
+    C->>P: tools/call get_session(session_id, start, limit)
+    P->>T: open <enc>/<sid>.jsonl, confined to projects/, cached by size+mtime
+    T-->>P: records
+    P-->>C: messages, capped at 2,000 chars each and 40,000 per reply
+    Note over C,P: session ends, pipe closes, server exits. Nothing was written.
+```
+
+#### What `new`, `mcp on` and `mcp off` do to a root
+
+```mermaid
+flowchart TD
+    start([agpin new NAME, or agpin mcp on NAME]) --> reg{claude on PATH?}
+    reg -- no --> none["print: not registered, run agpin mcp on NAME later<br/>profile still created, exit 0"]
+    reg -- yes --> read["read mcpServers.sessions from ROOT/.claude.json"]
+    read --> state{state}
+    state -- none --> add
+    state -- on --> already["print: already registered<br/>write nothing"]
+    state -- stale --> rm["claude mcp remove --scope user sessions<br/>(pinned to ROOT)"] --> add
+    state -- foreign --> leave["print: not this tool's entry, left alone<br/>exit 1 for mcp on, profile still created for new"]
+    add["claude mcp add --scope user sessions --<br/>/abs/path/agpin mcp serve --root ROOT<br/>(pinned to ROOT)"] --> verify["read the file back"]
+    verify --> ok{state == on?}
+    ok -- yes --> done["print: Sessions server: on (registered in ROOT/.claude.json)"]
+    ok -- no --> fail["print what the CLI said, and the mcp on line to retry"]
+
+    off([agpin mcp off NAME]) --> read2["read mcpServers.sessions"]
+    read2 --> s2{state}
+    s2 -- none --> off_already["print: off (nothing registered)"]
+    s2 -- foreign --> off_leave["print: yours to remove, exit 1"]
+    s2 -- on or stale --> off_rm["claude mcp remove --scope user sessions (pinned)"] --> off_verify["read back: entry gone?"]
+    off_verify -- yes --> off_done["print: off (removed from ROOT/.claude.json)"]
+    off_verify -- no --> off_fail["print: still on, exit 1"]
+```
+
+Every write goes through Claude Code's own CLI, pinned to the root, and every claim is read back from the file before it is printed. `mcp status`, `list` and `doctor` read the same block and write nothing.
+
+#### What the launcher decides
+
+```mermaid
+flowchart TD
+    A([claude starts: agpin mcp serve --root ROOT]) --> B{CLAUDE_CONFIG_DIR set<br/>and equal to ROOT?}
+    B -- no --> R1["stderr: refusing to start: CLAUDE_CONFIG_DIR is X, --root is ROOT<br/>exit 1, shows as failed in /mcp"]
+    B -- yes --> C{AGENT_PROFILE_SERVER_PYTHON<br/>set?}
+    C -- yes --> E
+    C -- no --> D["resolve $0 through symlinks,<br/>tree = dirname/.., python = tree/server/.venv/bin/python"]
+    D --> E{interpreter executable?}
+    E -- no --> R2["stderr: the sessions server is not installed<br/>run tools/install.sh again, exit 1"]
+    E -- yes --> F["PYTHONPATH=tree/server exec python -m agent_profile_sessions --root ROOT"]
+    F --> G{python: realpath(CLAUDE_CONFIG_DIR)<br/>== realpath(ROOT)?}
+    G -- no --> R3["stderr: refusing to start, exit 2"]
+    G -- yes --> H["serve over stdio, reading ROOT/projects only"]
+```
+
+The pin and the server's scope are the same variable in the same process tree. A registration copied into another root fails at the first diamond; a state file restored into the wrong place fails there too; a missing environment fails at the third, with the command that fixes it.
+
+#### How doctor sees it
+
+```mermaid
+flowchart LR
+    subgraph roots["each registered root"]
+        rs[".claude.json → mcpServers.sessions"]
+    end
+    stray["~/.claude.json (stray, outside every root)"]
+    D19{{"D19"}}
+    rs -- "args name another root" --> D19
+    rs -- "command missing or not executable" --> D19
+    rs -- "type not stdio, or a url" --> D19
+    rs -- "no entry (off)" --> quiet["no finding: off is a choice, list shows it"]
+    rs -- "foreign entry" --> quiet2["no finding: not this tool's, never touched"]
+    stray -- "any entry shaped like ours" --> D19
+    D19 --> fix["Fix with: agpin mcp on NAME<br/>or, for the stray file: claude mcp remove --scope user sessions, unpinned"]
+```
+
 ### What happens at session start
 
 1. `agpin run bouvet` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-bouvet`
