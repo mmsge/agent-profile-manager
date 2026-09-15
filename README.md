@@ -45,33 +45,33 @@ saying so instead. See [Install](#install) for `--prefix` and `--name`.
 **2. Create one profile per account.**
 
 ```sh
-agpin new bouvet
+agpin new brygga
 ```
 
 ```
-Created profile bouvet
+Created profile brygga
   agent     claude
-  root      /Users/alex/.claude-bouvet
-  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+  root      /Users/alex/.claude-brygga
+  app data  /Users/alex/Library/Application Support/Claude-Brygga
 
-Sessions server: on (registered in /Users/alex/.claude-bouvet/.claude.json)
+Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
 
 The root holds nothing from any other profile, which is the point: nothing is
 shared between profiles. That also means it has no settings, no hooks and
 none of the guardrails your other profiles may have. Set those up here
 directly; do not copy them across.
 
-Next: agent-profile run bouvet   (it will ask you to log in)
+Next: agent-profile run brygga   (it will ask you to log in)
 ```
 
-Do that once per account, for example `agpin new highsoft`. Then sign in to
-each: `agpin run bouvet`, `agpin run highsoft`.
+Do that once per account, for example `agpin new havnelab`. Then sign in to
+each: `agpin run brygga`, `agpin run havnelab`.
 
 The sessions server line is the one thing `new` writes into a root: a
 registration, made by Claude Code's own CLI, for a small read-only server over
 that profile's own transcripts. [The sessions server](#the-sessions-server)
 says what it does and how to turn it off. If `claude` was not on your `PATH`
-yet, `new` says so and `agpin mcp on bouvet` does it later.
+yet, `new` says so and `agpin mcp on brygga` does it later.
 
 **3. Add these to your shell rc file.**
 
@@ -107,13 +107,13 @@ itself is not obvious.
 **5. Pin the desktop app.**
 
 ```sh
-agpin app bouvet
+agpin app brygga
 ```
 
 ```
-Created /Users/alex/Applications/Claude-Bouvet.app
-  pins      CLAUDE_CONFIG_DIR=/Users/alex/.claude-bouvet
-  app data  /Users/alex/Library/Application Support/Claude-Bouvet
+Created /Users/alex/Applications/Claude-Brygga.app
+  pins      CLAUDE_CONFIG_DIR=/Users/alex/.claude-brygga
+  app data  /Users/alex/Library/Application Support/Claude-Brygga
 
 Confirm it actually pins, by starting a Code session in the app and running:
   find "$HOME"/.claude* -name "*.jsonl" -mmin -3
@@ -141,8 +141,8 @@ seeded or removed; the only change is that the root and its app data directory
 become mode 700. Point it at what you already have:
 
 ```sh
-agent-profile new tide --root ~/.claude-tide \
-    --app-data ~/Library/Application\ Support/Claude-Tide
+agent-profile new torg --root ~/.claude-torg \
+    --app-data ~/Library/Application\ Support/Claude-Torg
 ```
 
 It says which of the two it did, and reports the session count it found, so
@@ -154,7 +154,7 @@ before trusting `doctor`.
 enough to make `doctor` start reporting the residue of the old, unpinned use,
 because it can now compare what it finds against a registry instead of finding
 nothing to compare against. On a machine that has run unpinned for months, a
-first run commonly looks like this, once one new account (`bouvet`) is
+first run commonly looks like this, once one new account (`brygga`) is
 registered:
 
 ```
@@ -172,16 +172,16 @@ D02  a stray claude state file sits outside every profile root
      account last ran unpinned, which need not be any profile here.
 
 D06  a claude config root exists that no profile claims
-     /Users/alex/.claude-tide
+     /Users/alex/.claude-torg
      Register it, or remove it if it is left over.
      Unregistered roots are invisible to every other check here.
 
-D14  a desktop launcher for profile 'bouvet' is not registered
+D14  a desktop launcher for profile 'brygga' is not registered
      /Users/alex/Desktop/Claude Work.app
-     It pins /Users/alex/.claude-bouvet, which profile 'bouvet' owns, but no profile
+     It pins /Users/alex/.claude-brygga, which profile 'brygga' owns, but no profile
      names this applet, so the launcher audit has never read it.
      An unregistered launcher is invisible to every other check here.
-     Fix with: agent-profile app bouvet --applet '/Users/alex/Desktop/Claude Work.app'
+     Fix with: agent-profile app brygga --applet '/Users/alex/Desktop/Claude Work.app'
 
 D09  a claude-cli:// handler is installed and cannot be pinned
      /Users/alex/Applications/Claude Code URL Handler.app
@@ -194,13 +194,13 @@ D09  a claude-cli:// handler is installed and cannot be pinned
 
 Five different kinds of residue, and each is resolved differently:
 
-- **D06**, the leftover `~/.claude-tide` root, is resolved exactly as in the
-  first step above: `agent-profile new tide --root ~/.claude-tide` adopts it.
+- **D06**, the leftover `~/.claude-torg` root, is resolved exactly as in the
+  first step above: `agent-profile new torg --root ~/.claude-torg` adopts it.
   Once a profile claims it, D06 stops reporting it.
 
 - **D14**, the launcher already sitting on the Desktop from before this tool
   existed, is resolved by pointing the profile at it instead of building a
-  second one: `agent-profile app bouvet --applet '~/Desktop/Claude Work.app'`.
+  second one: `agent-profile app brygga --applet '~/Desktop/Claude Work.app'`.
   `app` finds this launcher on its own the next time it runs without
   `--applet`, since it searches `~/Desktop` as well as `~/Applications` for
   exactly this reason; see [D14](#the-audit).
@@ -356,7 +356,7 @@ under whichever account last logged in there.
 Name one to use it, for example: claude <profile> [args...]
 
 Profiles on this machine:
-  bouvet
+  brygga
 
 Or pin the shell: eval "$(agpin env <profile>)"
 Override:         command claude [args...]
@@ -365,8 +365,8 @@ Override:         command claude [args...]
 Cause: nothing is pinned in this shell, and the `guard` function from
 `eval "$(agpin guard)"` caught it before `claude` ran unpinned.
 
-Fix: name a profile (`claude bouvet`), pin the shell first
-(`eval "$(agpin env bouvet)"`), or use `command claude` if you genuinely mean
+Fix: name a profile (`claude brygga`), pin the shell first
+(`eval "$(agpin env brygga)"`), or use `command claude` if you genuinely mean
 to run unpinned once.
 
 **"no such profile '\<name\>' (try: agent-profile list)"**
@@ -395,9 +395,9 @@ Fix: install Claude Code, or fix `PATH`.
 repoint it..."**
 
 ```
-agent-profile: profile 'bouvet' is already registered with root '/Users/alex/.claude-bouvet'.
+agent-profile: profile 'brygga' is already registered with root '/Users/alex/.claude-brygga'.
 Refusing to repoint it: credentials are keyed to the root path, so changing it
-would invalidate that profile's login. Remove /Users/alex/.config/agent-profiles/bouvet.conf by hand
+would invalidate that profile's login. Remove /Users/alex/.config/agent-profiles/brygga.conf by hand
 if you really mean to start over.
 ```
 
@@ -449,10 +449,10 @@ Fix: none from this tool. Run `agent-profile verify` to confirm; see
 **"N launchers already pin profile '\<name\>': ..."**
 
 ```
-agent-profile: 2 launchers already pin profile 'bouvet':
+agent-profile: 2 launchers already pin profile 'brygga':
 
-  /Users/alex/Applications/Claude-Bouvet.app
-  /Users/alex/Desktop/Bouvet2.app
+  /Users/alex/Applications/Claude-Brygga.app
+  /Users/alex/Desktop/Brygga2.app
 
 Refusing to guess which one is canonical, because repairing the wrong one
 rewrites a file you did not name. Say which with --applet, and remove or
@@ -739,25 +739,25 @@ making. The installer says as much when you use it, and refuses to combine
 
 ```sh
 agent-profile                     # ask which profile, and terminal or desktop
-agent-profile new bouvet          # create root, app data dir and registry entry
-agent-profile bouvet              # run Claude Code pinned to that profile
-agent-profile run bouvet          # the same thing, spelled out
-agent-profile shell bouvet        # a subshell pinned to that profile
-eval "$(agent-profile env bouvet)"  # pin the shell you are already in
+agent-profile new brygga          # create root, app data dir and registry entry
+agent-profile brygga              # run Claude Code pinned to that profile
+agent-profile run brygga          # the same thing, spelled out
+agent-profile shell brygga        # a subshell pinned to that profile
+eval "$(agent-profile env brygga)"  # pin the shell you are already in
 agent-profile which               # what am I pinned to?
 agent-profile list                # every profile, its account, sessions and server state
 agent-profile mcp status          # is each profile's sessions server on, off or stale?
-agent-profile mcp off bouvet      # turn one off; mcp on turns it back on
+agent-profile mcp off brygga      # turn one off; mcp on turns it back on
 agent-profile doctor              # is the separation actually holding?
 agent-profile doctor --json       # the same audit, as one JSON document
 agent-profile doctor --report audit  # audit.json and audit.md, dated, to hand over
 agent-profile version --check     # am I running the newest release?
-agent-profile desktop bouvet      # launch the desktop app pinned
-agent-profile app bouvet          # build its Dock launcher
-agent-profile code bouvet ~/src/x   # launch VS Code pinned, --app Cursor for Cursor
-agent-profile idea bouvet ~/src/x   # the same for the JetBrains IDEs
+agent-profile desktop brygga      # launch the desktop app pinned
+agent-profile app brygga          # build its Dock launcher
+agent-profile code brygga ~/src/x   # launch VS Code pinned, --app Cursor for Cursor
+agent-profile idea brygga ~/src/x   # the same for the JetBrains IDEs
 eval "$(agent-profile guard)"     # refuse to run the agent unpinned
-claude bouvet                     # with the guard on, this pins and runs
+claude brygga                     # with the guard on, this pins and runs
 eval "$(agent-profile completion bash)"  # tab-complete commands and profiles
 ```
 
@@ -769,9 +769,9 @@ Run it with no arguments and it asks:
 
 ```
 Which profile?
-  1) bouvet
-  2) highsoft
-  3) tide
+  1) brygga
+  2) havnelab
+  3) torg
 
 Profile [1-3, Return to cancel]: 2
 
@@ -783,9 +783,9 @@ Where?
 Open [1-3, Return to cancel]: 1
 ```
 
-Five characters and two keystrokes, which beats `agpin desktop highsoft` when
+Five characters and two keystrokes, which beats `agpin desktop havnelab` when
 you open pinned apps all day. "subshell" is the third surface: a pinned
-interactive shell, the same one `agpin shell highsoft` opens, for when you
+interactive shell, the same one `agpin shell havnelab` opens, for when you
 want more than one command against that profile without leaving the terminal.
 
 An empty answer cancels rather than defaulting to the first profile: silently
@@ -813,12 +813,12 @@ beats one people find by deleting the guard from their rc file.
 it:
 
 ```sh
-claude bouvet              # runs pinned to bouvet
-claude tide --continue     # arguments after the name are passed straight on
+claude brygga              # runs pinned to brygga
+claude torg --continue     # arguments after the name are passed straight on
 ```
 
-The tool takes the same shortcut, so `agpin bouvet` is short for
-`agpin run bouvet`. There a subcommand always wins: every command is matched
+The tool takes the same shortcut, so `agpin brygga` is short for
+`agpin run brygga`. There a subcommand always wins: every command is matched
 before the fallback, so a profile named `doctor` or `app` cannot shadow one,
 and the worst case is that it needs the explicit `run` form.
 
@@ -885,8 +885,8 @@ or the paste cache. It is stdio only, one per session, with no port.
 
 ```sh
 agpin mcp status              # on, off or stale, per profile, read-only
-agpin mcp off bouvet          # gone from the state file, and read back to check
-agpin mcp on bouvet           # the same registration new makes
+agpin mcp off brygga          # gone from the state file, and read back to check
+agpin mcp on brygga           # the same registration new makes
 ```
 
 `list` shows the same state, `doctor` reports a registration that names
@@ -929,8 +929,8 @@ The desktop app takes its config root from its process environment, and macOS
 
 ```sh
 open -n -a /Applications/Claude.app \
-    --env CLAUDE_CONFIG_DIR=~/.claude-bouvet \
-    --args --user-data-dir=~/Library/Application\ Support/Claude-Bouvet
+    --env CLAUDE_CONFIG_DIR=~/.claude-brygga \
+    --args --user-data-dir=~/Library/Application\ Support/Claude-Brygga
 ```
 
 **`--env` must come before `--args`.** Everything after `--args` is handed to
@@ -939,9 +939,9 @@ produces a launch line that reads correctly, contains every right string, and
 pins nothing.
 
 ```sh
-agent-profile desktop bouvet          # launch it pinned, once
-agent-profile app bouvet              # or build a launcher you can keep
-agent-profile app bouvet --icon ~/icons/bouvet.png
+agent-profile desktop brygga          # launch it pinned, once
+agent-profile app brygga              # or build a launcher you can keep
+agent-profile app brygga --icon ~/icons/brygga.png
 ```
 
 `app` puts that command inside an AppleScript applet, so the profile has a Dock
@@ -979,10 +979,10 @@ whatever the IDE's own process environment holds, and an IDE opened from the
 Dock, Spotlight, Launchpad or a login item holds no `CLAUDE_CONFIG_DIR` at all.
 
 ```sh
-agent-profile code bouvet ~/src/some-project      # VS Code
-agent-profile code bouvet ~/src/x --app Cursor    # Cursor, same family
-agent-profile idea bouvet ~/src/some-project      # IntelliJ IDEA
-agent-profile idea bouvet --app PyCharm           # any JetBrains IDE
+agent-profile code brygga ~/src/some-project      # VS Code
+agent-profile code brygga ~/src/x --app Cursor    # Cursor, same family
+agent-profile idea brygga ~/src/some-project      # IntelliJ IDEA
+agent-profile idea brygga --app PyCharm           # any JetBrains IDE
 ```
 
 These are the same mechanism as `desktop`, `open --env` in front of `--args`,
@@ -1003,10 +1003,10 @@ Two ways past it:
 
 ```sh
 # quit the editor, then launch as normal
-agent-profile code bouvet ~/src/some-project
+agent-profile code brygga ~/src/some-project
 
 # or start a genuinely separate instance, which can be pinned whatever is open
-agent-profile code bouvet ~/src/some-project --new-instance
+agent-profile code brygga ~/src/some-project --new-instance
 ```
 
 `--new-instance` gives that instance its own `--user-data-dir`, which is what
@@ -1205,23 +1205,23 @@ transcript survives on a machine for another two years.
 else, and prints every remaining piece with the command that deletes it:
 
 ```sh
-agpin remove bouvet
+agpin remove brygga
 ```
 
 ```
-Unregistered bouvet
+Unregistered brygga
 
 Left on this machine:
 
-  config root  /Users/alex/.claude-bouvet
+  config root  /Users/alex/.claude-brygga
                412 session(s)
-               rm -rf '/Users/alex/.claude-bouvet'
+               rm -rf '/Users/alex/.claude-brygga'
 
-  app data     /Users/alex/Library/Application Support/Claude-Bouvet
-               rm -rf '/Users/alex/Library/Application Support/Claude-Bouvet'
+  app data     /Users/alex/Library/Application Support/Claude-Brygga
+               rm -rf '/Users/alex/Library/Application Support/Claude-Brygga'
 
-  launcher     /Users/alex/Applications/Claude-Bouvet.app
-               rm -rf '/Users/alex/Applications/Claude-Bouvet.app'
+  launcher     /Users/alex/Applications/Claude-Brygga.app
+               rm -rf '/Users/alex/Applications/Claude-Brygga.app'
 
   credential   Claude Code-credentials-1715f9d2
                This tool never touches credentials, so this one is yours to delete.
@@ -1240,7 +1240,7 @@ both go quiet once those paths are gone.
 the launcher:
 
 ```sh
-agpin remove bouvet --purge
+agpin remove brygga --purge
 ```
 
 It lists what it is about to delete, then asks you to type the profile name
@@ -1282,11 +1282,11 @@ longer work for, sitting in your Keychain.
 Then, if the customer wants it in writing:
 
 ```sh
-agpin doctor --report ~/audits/bouvet-2026-09-08
+agpin doctor --report ~/audits/brygga-2026-09-08
 ```
 
-That writes a dated audit of the machine twice, `bouvet-2026-09-08.json` and
-`bouvet-2026-09-08.md`, from one run. The Markdown is the one to send: it names
+That writes a dated audit of the machine twice, `brygga-2026-09-08.json` and
+`brygga-2026-09-08.md`, from one run. The Markdown is the one to send: it names
 the host, the user, the tool version, the agent version and the time, lists
 every profile still on the machine, and gives all fifteen rules with a status
 each, including the ones that did not run and why. It is the answer to a

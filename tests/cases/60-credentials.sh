@@ -10,15 +10,17 @@ mac() {
 }
 
 signed_in_profile() {
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-U-m-b" "/U/m/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-U-m-b" "/U/m/b"
 }
 
 case_cred_hash_matches_the_verified_values() {
     # The three values confirmed against real Keychain entries on the target
     # machine. If this breaks, the naming in docs/FACTS.md F03 is wrong and
-    # D05 will report false findings.
+    # D05 will report false findings. These paths are the record, not an
+    # example: the hash covers the literal string, so they stay as F03 has
+    # them.
     assert_equals "Claude Code-credentials-1c128223" \
         "$(cred_service_for /Users/markus.mg/.claude)" || return
     assert_equals "Claude Code-credentials-2241c977" \
@@ -28,8 +30,8 @@ case_cred_hash_matches_the_verified_values() {
 }
 
 case_a_trailing_slash_is_a_different_credential() {
-    a=$(cred_service_for /Users/markus.mg/.claude-bouvet)
-    b=$(cred_service_for /Users/markus.mg/.claude-bouvet/)
+    a=$(cred_service_for /Users/markus.mg/.claude-brygga)
+    b=$(cred_service_for /Users/markus.mg/.claude-brygga/)
     if [ "$a" = "$b" ]; then
         fail "a trailing slash must key a different credential" "both were $a"
     fi
@@ -38,7 +40,7 @@ case_a_trailing_slash_is_a_different_credential() {
 case_d05_quiet_when_the_keychain_has_the_entry() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     assert_not_contains "$(mac doctor 2>&1)" "D05"
 }
 
@@ -54,7 +56,7 @@ case_d05_fires_when_the_keychain_lacks_the_entry() {
 case_d09_reports_the_url_handler() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     mkdir -p "$HOME/Applications/Claude Code URL Handler.app"
     out=$(mac doctor 2>&1)
     assert_contains "$out" "D09" || return
@@ -64,7 +66,7 @@ case_d09_reports_the_url_handler() {
 case_d09_quiet_without_a_handler() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     assert_not_contains "$(mac doctor 2>&1)" "D09"
 }
 
@@ -86,7 +88,7 @@ case_d11_reports_a_credential_for_the_default_root() {
     HOME=$(new_home); export HOME
     signed_in_profile
     fake_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
+        "$(cred_service_for "$HOME/.claude-brygga")" \
         "$(cred_service_for "$HOME/.claude")"
     out=$(mac doctor 2>&1)
     assert_contains "$out" "D11" || return
@@ -96,7 +98,7 @@ case_d11_reports_a_credential_for_the_default_root() {
 case_d11_quiet_without_that_entry() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     assert_not_contains "$(mac doctor 2>&1)" "D11"
 }
 
@@ -104,7 +106,7 @@ case_d12_counts_orphaned_entries() {
     HOME=$(new_home); export HOME
     signed_in_profile
     fake_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
+        "$(cred_service_for "$HOME/.claude-brygga")" \
         "Claude Code-credentials-deadbeef" \
         "Claude Code-credentials-cafef00d"
     out=$(mac doctor --keychain-scan 2>&1)
@@ -115,7 +117,7 @@ case_d12_counts_orphaned_entries() {
 case_d12_quiet_when_every_entry_is_known() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     assert_not_contains "$(mac doctor --keychain-scan 2>&1)" "D12"
 }
 
@@ -126,7 +128,7 @@ case_d12_not_checked_without_the_flag() {
     HOME=$(new_home); export HOME
     signed_in_profile
     fake_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
+        "$(cred_service_for "$HOME/.claude-brygga")" \
         "Claude Code-credentials-deadbeef"
     out=$(mac doctor 2>&1)
     assert_not_contains "$out" "belong to no known root" || return
@@ -144,7 +146,7 @@ case_doctor_rejects_an_unknown_option() {
 case_verify_checks_the_keychain_naming() {
     HOME=$(new_home); export HOME
     signed_in_profile
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
     assert_contains "$(mac verify 2>&1)" "ok        F03"
 }
 

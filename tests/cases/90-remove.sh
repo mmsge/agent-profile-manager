@@ -96,45 +96,45 @@ rm_doctor_mac() {
 
 case_remove_unregisters_the_profile() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(plain bouvet); status=$?
+    retiring_profile brygga
+    out=$(plain brygga); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "Unregistered bouvet" || return
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] && fail "the registry entry survived"
+    assert_contains "$out" "Unregistered brygga" || return
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] && fail "the registry entry survived"
 }
 
 # The whole promise of the flagless form: it removes the record and nothing
 # else. Anything it deleted here would be data nobody asked it to touch.
 case_remove_leaves_every_path_alone() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
-    plain bouvet >/dev/null
-    [ -d "$HOME/.claude-bouvet" ] || { fail "the root was deleted"; return; }
-    [ -f "$HOME/.claude-bouvet/projects/-U-m-bouvet/s1.jsonl" ] || \
+    retiring_profile brygga
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    plain brygga >/dev/null
+    [ -d "$HOME/.claude-brygga" ] || { fail "the root was deleted"; return; }
+    [ -f "$HOME/.claude-brygga/projects/-U-m-brygga/s1.jsonl" ] || \
         { fail "the sessions were deleted"; return; }
-    [ -d "$HOME/Library/Application Support/Claude-Bouvet" ] || \
+    [ -d "$HOME/Library/Application Support/Claude-Brygga" ] || \
         { fail "the app data directory was deleted"; return; }
-    [ -d "$HOME/Applications/Claude-Bouvet.app" ] || fail "the launcher was deleted"
+    [ -d "$HOME/Applications/Claude-Brygga.app" ] || fail "the launcher was deleted"
 }
 
 case_remove_names_the_root_with_its_session_count() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    fixture_transcript "$HOME/.claude-bouvet" "-U-m-second" "/U/m/second"
-    out=$(plain bouvet)
-    assert_contains "$out" "$HOME/.claude-bouvet" || return
+    retiring_profile brygga
+    fixture_transcript "$HOME/.claude-brygga" "-U-m-second" "/U/m/second"
+    out=$(plain brygga)
+    assert_contains "$out" "$HOME/.claude-brygga" || return
     assert_contains "$out" "2 session(s)" || return
-    assert_contains "$out" "rm -rf '$HOME/.claude-bouvet'"
+    assert_contains "$out" "rm -rf '$HOME/.claude-brygga'"
 }
 
 # The order is part of the answer: root, app data, launcher, credential, which
 # is the order they matter in and the order they are deleted in.
 case_remove_lists_everything_left_in_order() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
-    out=$(plain bouvet)
+    retiring_profile brygga
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    out=$(plain brygga)
     # grep -E for the alternation and cut for the label column, because BSD sed
     # has no \| and would quietly match nothing on the platform this targets.
     got=$(printf '%s\n' "$out" \
@@ -145,42 +145,42 @@ case_remove_lists_everything_left_in_order() {
 
 case_remove_prints_the_delete_command_for_each_path() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
-    out=$(plain bouvet)
-    assert_contains "$out" "rm -rf '$HOME/.claude-bouvet'" || return
-    assert_contains "$out" "rm -rf '$HOME/Library/Application Support/Claude-Bouvet'" || return
-    assert_contains "$out" "rm -rf '$HOME/Applications/Claude-Bouvet.app'"
+    retiring_profile brygga
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    out=$(plain brygga)
+    assert_contains "$out" "rm -rf '$HOME/.claude-brygga'" || return
+    assert_contains "$out" "rm -rf '$HOME/Library/Application Support/Claude-Brygga'" || return
+    assert_contains "$out" "rm -rf '$HOME/Applications/Claude-Brygga.app'"
 }
 
 # The service name has to be the one cred_info derives, or the command printed
 # deletes nothing and the reader believes the credential is gone.
 case_remove_names_the_keychain_service_cred_info_derives() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(plain bouvet)
+    retiring_profile brygga
+    out=$(plain brygga)
     assert_contains "$out" \
-        "security delete-generic-password -s '$(cred_service_for "$HOME/.claude-bouvet")' -a 'tester'"
+        "security delete-generic-password -s '$(cred_service_for "$HOME/.claude-brygga")' -a 'tester'"
 }
 
 # The tool never touches credentials, and an offboarding command is the last
 # place to make an exception. It prints the command and does not run it.
 case_remove_never_calls_security() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
+    retiring_profile brygga
     recording_security "$HOME/fakebin"
-    plain bouvet >/dev/null
+    plain brygga >/dev/null
     [ -f "$HOME/security-was-called" ] && \
         fail "security was called" "$(cat "$HOME/security-was-called")"
 }
 
 case_remove_rejects_an_unknown_profile() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
+    retiring_profile brygga
     out=$(plain nosuch); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "no such profile 'nosuch'" || return
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "it removed something else"
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "it removed something else"
 }
 
 case_remove_needs_a_profile_name() {
@@ -192,11 +192,11 @@ case_remove_needs_a_profile_name() {
 
 case_remove_rejects_an_unknown_option() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(plain bouvet --wipe); status=$?
+    retiring_profile brygga
+    out=$(plain brygga --wipe); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "unknown option '--wipe'" || return
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "it acted before reading the flags"
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "it acted before reading the flags"
 }
 
 # ---------------------------------------------------------------------------
@@ -207,54 +207,54 @@ case_remove_rejects_an_unknown_option() {
 # mechanism, and a prompt nobody can answer is not one.
 case_purge_refuses_when_stdin_is_not_a_terminal() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(printf 'bouvet\n' | USER=tester "$AP" remove bouvet --purge 2>&1); status=$?
+    retiring_profile brygga
+    out=$(printf 'brygga\n' | USER=tester "$AP" remove brygga --purge 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "--purge needs a terminal" || return
-    [ -d "$HOME/.claude-bouvet" ] || { fail "it deleted the root anyway"; return; }
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "it removed the registry entry anyway"
+    [ -d "$HOME/.claude-brygga" ] || { fail "it deleted the root anyway"; return; }
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "it removed the registry entry anyway"
 }
 
 case_purge_aborts_on_a_mistyped_name() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(purge "bouvett" bouvet); status=$?
+    retiring_profile brygga
+    out=$(purge "bryggaa" brygga); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "Aborted" || return
     assert_not_contains "$out" "Deleted" || return
-    [ -d "$HOME/.claude-bouvet" ] || { fail "it deleted the root"; return; }
-    [ -d "$HOME/Library/Application Support/Claude-Bouvet" ] || \
+    [ -d "$HOME/.claude-brygga" ] || { fail "it deleted the root"; return; }
+    [ -d "$HOME/Library/Application Support/Claude-Brygga" ] || \
         { fail "it deleted the app data directory"; return; }
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "it removed the registry entry"
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "it removed the registry entry"
 }
 
 # A prefix is not the name. Accepting one would mean the confirmation is
 # testing that somebody typed roughly the right thing.
 case_purge_aborts_on_a_prefix_of_the_name() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(purge "bouve" bouvet); status=$?
+    retiring_profile brygga
+    out=$(purge "bouve" brygga); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "Aborted" || return
-    [ -d "$HOME/.claude-bouvet" ] || fail "it deleted the root"
+    [ -d "$HOME/.claude-brygga" ] || fail "it deleted the root"
 }
 
 case_purge_aborts_on_a_different_case() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(purge "Bouvet" bouvet); status=$?
+    retiring_profile brygga
+    out=$(purge "Brygga" brygga); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "Aborted" || return
-    [ -d "$HOME/.claude-bouvet" ] || fail "it deleted the root"
+    [ -d "$HOME/.claude-brygga" ] || fail "it deleted the root"
 }
 
 case_purge_aborts_on_an_empty_answer() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    out=$(purge "" bouvet); status=$?
+    retiring_profile brygga
+    out=$(purge "" brygga); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "Aborted" || return
-    [ -d "$HOME/.claude-bouvet" ] || fail "it deleted the root"
+    [ -d "$HOME/.claude-brygga" ] || fail "it deleted the root"
 }
 
 # A symlink is refused rather than followed. Deleting it would either take the
@@ -316,14 +316,14 @@ case_purge_refuses_a_root_that_is_not_a_directory() {
 # is deleting a bundle nobody registered, which could be anybody's.
 case_purge_leaves_a_launcher_the_registry_does_not_name() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    fixture_applet "$HOME/Applications/Claude-Bouvet.app" \
-        "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-bouvet" "$HOME/x")"
-    out=$(purge "bouvet" bouvet); status=$?
+    retiring_profile brygga
+    fixture_applet "$HOME/Applications/Claude-Brygga.app" \
+        "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-brygga" "$HOME/x")"
+    out=$(purge "brygga" brygga); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "the registry entry does not name it" || return
-    [ -d "$HOME/Applications/Claude-Bouvet.app" ] || { fail "it deleted an unregistered launcher"; return; }
-    assert_contains "$out" "rm -rf '$HOME/Applications/Claude-Bouvet.app'"
+    [ -d "$HOME/Applications/Claude-Brygga.app" ] || { fail "it deleted an unregistered launcher"; return; }
+    assert_contains "$out" "rm -rf '$HOME/Applications/Claude-Brygga.app'"
 }
 
 # ---------------------------------------------------------------------------
@@ -332,24 +332,24 @@ case_purge_leaves_a_launcher_the_registry_does_not_name() {
 
 case_purge_deletes_the_root_the_app_data_and_the_launcher() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
-    out=$(purge "bouvet" bouvet); status=$?
+    retiring_profile brygga
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    out=$(purge "brygga" brygga); status=$?
     assert_status 0 "$status" "$out" || return
-    [ -e "$HOME/.claude-bouvet" ] && { fail "the root survived"; return; }
-    [ -e "$HOME/Library/Application Support/Claude-Bouvet" ] && \
+    [ -e "$HOME/.claude-brygga" ] && { fail "the root survived"; return; }
+    [ -e "$HOME/Library/Application Support/Claude-Brygga" ] && \
         { fail "the app data directory survived"; return; }
-    [ -e "$HOME/Applications/Claude-Bouvet.app" ] && { fail "the launcher survived"; return; }
-    [ -e "$HOME/.config/agent-profiles/bouvet.conf" ] && { fail "the registry entry survived"; return; }
-    assert_contains "$out" "Unregistered bouvet"
+    [ -e "$HOME/Applications/Claude-Brygga.app" ] && { fail "the launcher survived"; return; }
+    [ -e "$HOME/.config/agent-profiles/brygga.conf" ] && { fail "the registry entry survived"; return; }
+    assert_contains "$out" "Unregistered brygga"
 }
 
 # Nothing is left behind beside the deleted path either. The item is moved
 # into a scratch directory before it is deleted, and that has to go too.
 case_purge_leaves_nothing_beside_the_root() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    purge "bouvet" bouvet >/dev/null
+    retiring_profile brygga
+    purge "brygga" brygga >/dev/null
     for leftover in "$HOME"/.agent-profile-removing.*; do
         [ -e "$leftover" ] && fail "a scratch directory was left beside the root" "$leftover"
     done
@@ -357,25 +357,25 @@ case_purge_leaves_nothing_beside_the_root() {
 
 case_purge_leaves_another_profile_untouched() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
-    retiring_profile tide
-    purge "bouvet" bouvet >/dev/null
-    [ -d "$HOME/.claude-tide" ] || { fail "it deleted the other root"; return; }
-    [ -f "$HOME/.claude-tide/projects/-U-m-tide/s1.jsonl" ] || \
+    retiring_profile brygga
+    retiring_profile torg
+    purge "brygga" brygga >/dev/null
+    [ -d "$HOME/.claude-torg" ] || { fail "it deleted the other root"; return; }
+    [ -f "$HOME/.claude-torg/projects/-U-m-torg/s1.jsonl" ] || \
         { fail "it deleted the other profile's sessions"; return; }
-    [ -d "$HOME/Library/Application Support/Claude-Tide" ] || \
+    [ -d "$HOME/Library/Application Support/Claude-Torg" ] || \
         { fail "it deleted the other app data directory"; return; }
-    [ -f "$HOME/.config/agent-profiles/tide.conf" ] || fail "it removed the other registry entry"
+    [ -f "$HOME/.config/agent-profiles/torg.conf" ] || fail "it removed the other registry entry"
 }
 
 # Even here the credential is only ever printed. This is the case that would
 # catch --purge quietly growing a security(1) call.
 case_purge_only_prints_the_credential_command() {
     HOME=$(new_home); export HOME
-    retiring_profile bouvet
+    retiring_profile brygga
     recording_security "$HOME/fakebin"
-    service=$(cred_service_for "$HOME/.claude-bouvet")
-    out=$(purge "bouvet" bouvet)
+    service=$(cred_service_for "$HOME/.claude-brygga")
+    out=$(purge "brygga" brygga)
     assert_contains "$out" "security delete-generic-password -s '$service' -a 'tester'" || return
     [ -f "$HOME/security-was-called" ] && \
         fail "security was called" "$(cat "$HOME/security-was-called")"
@@ -391,12 +391,12 @@ case_purge_only_prints_the_credential_command() {
 case_doctor_reports_what_a_bare_remove_leaves() {
     HOME=$(new_home); export HOME
     fake_osa "$HOME/fakebin"
-    retiring_profile bouvet
-    retiring_profile tide
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
+    retiring_profile brygga
+    retiring_profile torg
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
     before=$(rm_doctor); status=$?
     assert_status 0 "$status" "$before" || return
-    plain bouvet >/dev/null
+    plain brygga >/dev/null
     out=$(rm_doctor); status=$?
     assert_status 2 "$status" || return
     assert_contains "$out" "D06" || return
@@ -408,10 +408,10 @@ case_doctor_reports_what_a_bare_remove_leaves() {
 case_doctor_is_quiet_after_a_purge() {
     HOME=$(new_home); export HOME
     fake_osa "$HOME/fakebin"
-    retiring_profile bouvet
-    retiring_profile tide
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
-    purge "bouvet" bouvet >/dev/null
+    retiring_profile brygga
+    retiring_profile torg
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    purge "brygga" brygga >/dev/null
     out=$(rm_doctor); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "No isolation problems found across 1 profile(s)."
@@ -423,13 +423,13 @@ case_doctor_is_quiet_after_a_purge() {
 case_doctor_still_reports_the_purged_keychain_entry() {
     HOME=$(new_home); export HOME
     fake_osa "$HOME/fakebin"
-    retiring_profile bouvet
-    retiring_profile tide
-    register_applet bouvet "$HOME/Applications/Claude-Bouvet.app"
+    retiring_profile brygga
+    retiring_profile torg
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
     fake_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
-        "$(cred_service_for "$HOME/.claude-tide")"
-    purge "bouvet" bouvet >/dev/null
+        "$(cred_service_for "$HOME/.claude-brygga")" \
+        "$(cred_service_for "$HOME/.claude-torg")"
+    purge "brygga" brygga >/dev/null
     out=$(rm_doctor_mac); status=$?
     assert_status 2 "$status" "$out" || return
     assert_contains "$out" "D12" || return

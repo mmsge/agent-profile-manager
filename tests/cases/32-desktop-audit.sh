@@ -39,16 +39,16 @@ audit_elsewhere() {
 #
 # The stand-in security(1) is not optional. These cases pin the platform to
 # Darwin, and on a real Mac that would send doctor at the runner's own
-# Keychain. It is given tide's own service, so the Keychain-backed rules are
+# Keychain. It is given torg's own service, so the Keychain-backed rules are
 # quiet and a D17 assertion is testing D17.
 audit_fixture() {
     HOME=$(new_home); export HOME
     AUDIT_BUNDLE=""
     mkdir -p "$HOME/Claude.app"
     fake_osa "$HOME/fakebin"
-    "$AP" new tide >/dev/null 2>&1
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-tide")"
+    "$AP" new torg >/dev/null 2>&1
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-torg")"
     fake_defaults "$HOME/fakebin" "${1:-applets}"
 }
 
@@ -233,7 +233,7 @@ case_d18_quiet_when_a_profile_claims_the_directory() {
     "$AP" new desk --app-data "$(default_app_data)" >/dev/null 2>&1
     fixture_account "$HOME/.claude-desk" "m@desk.no" "org-d"
     fake_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-tide")" \
+        "$(cred_service_for "$HOME/.claude-torg")" \
         "$(cred_service_for "$HOME/.claude-desk")"
     out=$(audit doctor 2>&1)
     assert_not_contains "$out" "D18"

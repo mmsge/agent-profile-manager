@@ -29,10 +29,10 @@ print(json.dumps(d.get("mcpServers", {}).get("sessions")))
 
 case_new_registers_the_launcher_pinned_to_the_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    reg=$(registration_of "$HOME/.claude-bouvet")
+    "$AP" new brygga >/dev/null 2>&1
+    reg=$(registration_of "$HOME/.claude-brygga")
     assert_contains "$reg" '"type": "stdio"' || return
-    assert_contains "$reg" "\"args\": [\"mcp\", \"serve\", \"--root\", \"$HOME/.claude-bouvet\"]" || return
+    assert_contains "$reg" "\"args\": [\"mcp\", \"serve\", \"--root\", \"$HOME/.claude-brygga\"]" || return
     # The command is an absolute path to this tool, never a relative name.
     cmd=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["command"])' "$reg")
     case "$cmd" in
@@ -49,59 +49,59 @@ case_the_registrar_is_run_pinned_and_at_user_scope() {
     # CLAUDE_CONFIG_DIR named that root.
     HOME=$(new_home); export HOME
     FAKE_REGISTRAR_LOG="$HOME/registrar.log"; export FAKE_REGISTRAR_LOG
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     assert_contains "$(cat "$HOME/registrar.log")" "mcp add --scope user sessions --" || return
-    [ -f "$HOME/.claude-bouvet/.claude.json" ] || fail "the registration did not land in the root"
+    [ -f "$HOME/.claude-brygga/.claude.json" ] || fail "the registration did not land in the root"
     [ -f "$HOME/.claude.json" ] && fail "something wrote the stray state file"
     unset FAKE_REGISTRAR_LOG
 }
 
 case_status_reports_on_off_and_stale() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
-    "$AP" mcp off highsoft >/dev/null 2>&1
-    cp "$HOME/.claude-bouvet/.claude.json" "$HOME/.claude-tide/.claude.json"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
+    "$AP" mcp off havnelab >/dev/null 2>&1
+    cp "$HOME/.claude-brygga/.claude.json" "$HOME/.claude-torg/.claude.json"
     out=$("$AP" mcp status 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "bouvet         on" || return
-    assert_contains "$out" "highsoft       off" || return
-    assert_contains "$out" "tide           stale" || return
-    assert_contains "$out" "names another root: $HOME/.claude-bouvet"
+    assert_contains "$out" "brygga         on" || return
+    assert_contains "$out" "havnelab       off" || return
+    assert_contains "$out" "torg           stale" || return
+    assert_contains "$out" "names another root: $HOME/.claude-brygga"
 }
 
 case_status_for_one_profile() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    out=$("$AP" mcp status highsoft 2>&1)
-    assert_contains "$out" "highsoft" || return
-    assert_not_contains "$out" "bouvet"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    out=$("$AP" mcp status havnelab 2>&1)
+    assert_contains "$out" "havnelab" || return
+    assert_not_contains "$out" "brygga"
 }
 
 case_off_then_on_round_trips() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    before=$(registration_of "$HOME/.claude-bouvet")
-    out=$("$AP" mcp off bouvet 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    before=$(registration_of "$HOME/.claude-brygga")
+    out=$("$AP" mcp off brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "Sessions server: off (removed from" || return
-    assert_equals "null" "$(registration_of "$HOME/.claude-bouvet")" || return
-    out=$("$AP" mcp on bouvet 2>&1); status=$?
+    assert_equals "null" "$(registration_of "$HOME/.claude-brygga")" || return
+    out=$("$AP" mcp on brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "Sessions server: on (registered in" || return
-    assert_equals "$before" "$(registration_of "$HOME/.claude-bouvet")"
+    assert_equals "$before" "$(registration_of "$HOME/.claude-brygga")"
 }
 
 case_on_and_off_are_idempotent() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$("$AP" mcp on bouvet 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    out=$("$AP" mcp on brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "already registered" || return
-    "$AP" mcp off bouvet >/dev/null 2>&1
-    out=$("$AP" mcp off bouvet 2>&1); status=$?
+    "$AP" mcp off brygga >/dev/null 2>&1
+    out=$("$AP" mcp off brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "nothing registered"
 }
@@ -110,38 +110,38 @@ case_on_replaces_a_stale_registration() {
     # The CLI refuses to add a name that exists, so on has to take the stale
     # entry out first, and the result has to be a clean registration.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
-    good=$(registration_of "$HOME/.claude-tide")
-    cp "$HOME/.claude-bouvet/.claude.json" "$HOME/.claude-tide/.claude.json"
-    out=$("$AP" mcp on tide 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
+    good=$(registration_of "$HOME/.claude-torg")
+    cp "$HOME/.claude-brygga/.claude.json" "$HOME/.claude-torg/.claude.json"
+    out=$("$AP" mcp on torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_equals "$good" "$(registration_of "$HOME/.claude-tide")"
+    assert_equals "$good" "$(registration_of "$HOME/.claude-torg")"
 }
 
 case_on_and_off_refuse_a_foreign_entry() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     printf '{"mcpServers":{"sessions":{"type":"stdio","command":"/usr/bin/theirs","args":["--serve"]}}}\n' \
-        > "$HOME/.claude-bouvet/.claude.json"
-    before=$(cat "$HOME/.claude-bouvet/.claude.json")
-    out=$("$AP" mcp on bouvet 2>&1); status=$?
+        > "$HOME/.claude-brygga/.claude.json"
+    before=$(cat "$HOME/.claude-brygga/.claude.json")
+    out=$("$AP" mcp on brygga 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "not this tool's" || return
-    out=$("$AP" mcp off bouvet 2>&1); status=$?
+    out=$("$AP" mcp off brygga 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "yours to remove" || return
-    assert_equals "$before" "$(cat "$HOME/.claude-bouvet/.claude.json")" || return
-    assert_contains "$("$AP" mcp status bouvet 2>&1)" "foreign"
+    assert_equals "$before" "$(cat "$HOME/.claude-brygga/.claude.json")" || return
+    assert_contains "$("$AP" mcp status brygga 2>&1)" "foreign"
 }
 
 case_on_without_the_agent_says_so_and_exits_1() {
     HOME=$(new_home); export HOME
-    AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" new bouvet >/dev/null 2>&1
-    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" mcp on bouvet 2>&1); status=$?
+    AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" new brygga >/dev/null 2>&1
+    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" mcp on brygga 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "claude is not on PATH" || return
-    assert_equals "null" "$(registration_of "$HOME/.claude-bouvet")"
+    assert_equals "null" "$(registration_of "$HOME/.claude-brygga")"
 }
 
 case_a_registrar_that_fails_costs_a_line_not_the_profile() {
@@ -149,20 +149,20 @@ case_a_registrar_that_fails_costs_a_line_not_the_profile() {
     mkdir -p "$HOME/bin"
     printf '#!/bin/sh\necho "stand-in claude: boom" >&2\nexit 7\n' > "$HOME/bin/claude"
     chmod +x "$HOME/bin/claude"
-    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/bin/claude" "$AP" new bouvet 2>&1); status=$?
+    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/bin/claude" "$AP" new brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "Created profile bouvet" || return
+    assert_contains "$out" "Created profile brygga" || return
     assert_contains "$out" "mcp add failed" || return
     assert_contains "$out" "boom" || return
-    assert_contains "$out" "Try again with:  agent-profile mcp on bouvet" || return
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "the profile was not registered"
+    assert_contains "$out" "Try again with:  agent-profile mcp on brygga" || return
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "the profile was not registered"
 }
 
 case_list_shows_the_server_state() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    "$AP" mcp off highsoft >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    "$AP" mcp off havnelab >/dev/null 2>&1
     out=$("$AP" list 2>&1)
     assert_contains "$out" "mcp       on" || return
     assert_contains "$out" "mcp       off" || return
@@ -173,17 +173,17 @@ case_list_shows_the_server_state() {
 
 case_usage_errors() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$("$AP" mcp 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "usage: agent-profile mcp on <name> | off <name> | status [name]" || return
-    out=$("$AP" mcp toggle bouvet 2>&1); status=$?
+    out=$("$AP" mcp toggle brygga 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "unknown mcp subcommand 'toggle'" || return
     out=$("$AP" mcp on nope 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "no such profile" || return
-    out=$("$AP" mcp on bouvet --force 2>&1); status=$?
+    out=$("$AP" mcp on brygga --force 2>&1); status=$?
     assert_status 1 "$status" || return
     out=$("$AP" mcp status --json 2>&1); status=$?
     assert_status 1 "$status" || return
@@ -196,24 +196,24 @@ case_usage_errors() {
 
 case_serve_execs_the_interpreter_when_the_pin_matches() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "$AP" mcp serve --root "$HOME/.claude-bouvet" 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "server python: -m agent_profile_sessions --root $HOME/.claude-bouvet" || return
-    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_contains "$out" "server python: -m agent_profile_sessions --root $HOME/.claude-brygga" || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     # The package directory beside the interpreter is on the path.
     assert_contains "$out" "PYTHONPATH="
 }
 
 case_serve_tolerates_a_trailing_slash_on_either_side() {
     HOME=$(new_home); export HOME
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet/" "$AP" mcp serve --root "$HOME/.claude-bouvet" 2>&1); status=$?
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga/" "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
     assert_status 0 "$status" "$out"
 }
 
 case_serve_refuses_when_unpinned() {
     HOME=$(new_home); export HOME
-    out=$(env -u CLAUDE_CONFIG_DIR "$AP" mcp serve --root "$HOME/.claude-bouvet" 2>&1); status=$?
+    out=$(env -u CLAUDE_CONFIG_DIR "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "refusing to start: CLAUDE_CONFIG_DIR is unset" || return
     assert_not_contains "$out" "server python:"
@@ -223,10 +223,10 @@ case_serve_refuses_a_root_that_is_not_the_pinned_one() {
     # The whole point: a registration that wandered into another root must
     # not serve that root's transcripts.
     HOME=$(new_home); export HOME
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-highsoft" "$AP" mcp serve --root "$HOME/.claude-bouvet" 2>&1); status=$?
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-havnelab" "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "refusing to start" || return
-    assert_contains "$out" "CLAUDE_CONFIG_DIR is $HOME/.claude-highsoft, --root is $HOME/.claude-bouvet" || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR is $HOME/.claude-havnelab, --root is $HOME/.claude-brygga" || return
     assert_not_contains "$out" "server python:"
 }
 

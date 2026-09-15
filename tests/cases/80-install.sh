@@ -59,8 +59,8 @@ case_errors_use_the_name_it_was_invoked_as() {
 
 case_findings_use_the_name_it_was_invoked_as() {
     HOME=$(new_home); export HOME
-    as_name agpin new bouvet >/dev/null 2>&1
-    rm -rf "$HOME/.claude-bouvet"
+    as_name agpin new brygga >/dev/null 2>&1
+    rm -rf "$HOME/.claude-brygga"
     out=$(as_name agpin doctor 2>&1)
     assert_not_contains "$out" "agent-profile "
 }
@@ -69,7 +69,7 @@ case_the_document_names_the_tool_it_was_invoked_as() {
     # An audit handed to someone else has to name the command they would type,
     # which is the name this copy was installed under.
     HOME=$(new_home); export HOME
-    as_name agpin new bouvet >/dev/null 2>&1
+    as_name agpin new brygga >/dev/null 2>&1
     out=$(as_name agpin doctor --json 2>/dev/null)
     assert_equals "agpin" "$(printf '%s\n' "$out" | python3 -c '
 import json, sys
@@ -97,7 +97,7 @@ with_guard() {
 
 case_guard_refuses_an_unpinned_run() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(with_guard 'claude --version')
     assert_contains "$out" "Refusing to run claude unpinned" || return
     assert_not_contains "$out" "agent ran:"
@@ -105,17 +105,17 @@ case_guard_refuses_an_unpinned_run() {
 
 case_guard_lists_the_profiles_it_knows() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
     out=$(with_guard 'claude --version')
-    assert_contains "$out" "bouvet" || return
-    assert_contains "$out" "tide"
+    assert_contains "$out" "brygga" || return
+    assert_contains "$out" "torg"
 }
 
 case_guard_passes_through_when_pinned() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(with_guard "export CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet; claude --version")
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(with_guard "export CLAUDE_CONFIG_DIR=$HOME/.claude-brygga; claude --version")
     assert_contains "$out" "agent ran: --version"
 }
 
@@ -123,7 +123,7 @@ case_guard_passes_through_when_pinned() {
 # deleting the guard from their rc file.
 case_guard_can_be_overridden_deliberately() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(with_guard 'command claude --version')
     assert_contains "$out" "agent ran: --version"
 }
@@ -132,22 +132,22 @@ case_guard_can_be_overridden_deliberately() {
 # makes it safe: there is no working unpinned invocation for it to shadow.
 case_guard_treats_a_leading_profile_name_as_the_pin() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(with_guard 'claude bouvet')
-    assert_contains "$out" "Pinning to bouvet" || return
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(with_guard 'claude brygga')
+    assert_contains "$out" "Pinning to brygga" || return
     assert_contains "$out" "agent ran:"
 }
 
 case_guard_forwards_the_remaining_arguments() {
     HOME=$(new_home); export HOME
-    "$AP" new tide >/dev/null 2>&1
-    out=$(with_guard 'claude tide --continue --verbose')
+    "$AP" new torg >/dev/null 2>&1
+    out=$(with_guard 'claude torg --continue --verbose')
     assert_contains "$out" "agent ran: --continue --verbose"
 }
 
 case_guard_still_refuses_a_first_argument_that_is_not_a_profile() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(with_guard "claude 'fix the bug'")
     assert_contains "$out" "Refusing to run claude unpinned" || return
     assert_not_contains "$out" "agent ran:"
@@ -157,16 +157,16 @@ case_guard_still_refuses_a_first_argument_that_is_not_a_profile() {
 # profile name would break that, so the shortcut must not apply here.
 case_guard_leaves_the_argument_alone_when_already_pinned() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
-    out=$(with_guard "export CLAUDE_CONFIG_DIR=$HOME/.claude-tide; claude bouvet")
-    assert_contains "$out" "agent ran: bouvet" || return
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
+    out=$(with_guard "export CLAUDE_CONFIG_DIR=$HOME/.claude-torg; claude brygga")
+    assert_contains "$out" "agent ran: brygga" || return
     assert_not_contains "$out" "Pinning to"
 }
 
 case_guard_suggests_the_shortcut_when_it_refuses() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(with_guard 'claude')
     assert_contains "$out" "claude <profile> [args...]"
 }
@@ -274,8 +274,8 @@ case_fish_guard_has_the_command_escape_hatch() {
 # there, unmangled by the heredoc that printed it.
 case_fish_guard_lists_profiles_it_knows_when_it_refuses() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
     out=$(fish_guard)
     assert_contains "$out" "agent-profile list 2>/dev/null" || return
     assert_contains "$out" 'sed -n '"'"'s/^\([a-zA-Z0-9_-][a-zA-Z0-9_-]*\)$/  \1/p'"'"''

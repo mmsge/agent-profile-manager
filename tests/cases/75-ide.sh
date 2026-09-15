@@ -35,7 +35,7 @@ fake_pgrep() {
 # The stand-in security(1) is not optional, for the reason 70-desktop.sh gives:
 # these cases pin the platform to Darwin, and on a real Mac that would send
 # doctor and verify at the runner's own Keychain, so the same commit would pass
-# on Linux and behave differently on macOS. It is given bouvet's own service so
+# on Linux and behave differently on macOS. It is given brygga's own service so
 # the Keychain-backed rules stay quiet and a D16 assertion is testing D16.
 #
 # The stand-in pgrep(1) is not optional either, and for the same shape of
@@ -48,8 +48,8 @@ ide_fixture() {
     HOME=$(new_home); export HOME
     fake_open "$HOME/fakebin" env
     fake_pgrep "$HOME/fakebin" quiet
-    "$AP" new bouvet >/dev/null 2>&1
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    "$AP" new brygga >/dev/null 2>&1
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
 }
 
 # fixture_vscode_ext <ide-dir>: an installed Claude Code extension, named the
@@ -84,8 +84,8 @@ print("" if value is None else value)
 # side of it opens a healthy, unpinned IDE. docs/FACTS.md F13.
 case_code_puts_env_before_args() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1)
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1)
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     assert_contains "$out" "--args /tmp/project" || return
 
     before=${out%%--args*}
@@ -100,42 +100,42 @@ case_code_puts_env_before_args() {
 # opens, and every session in it writes to the default root.
 case_code_forces_a_new_instance() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1)
     assert_contains "$out" "open -n -a"
 }
 
 case_code_defaults_to_vs_code() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga 2>&1)
     assert_contains "$out" "-a Visual Studio Code"
 }
 
 # No path means launch the IDE, not open a file called nothing.
 case_code_omits_args_without_a_path() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet 2>&1)
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga 2>&1)
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     assert_not_contains "$out" "--args"
 }
 
 case_code_app_names_another_editor() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/p --app Cursor 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/p --app Cursor 2>&1)
     assert_contains "$out" "-a Cursor" || return
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     assert_not_contains "$out" "Visual Studio Code"
 }
 
 case_idea_defaults_to_intellij() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet /tmp/p 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea brygga /tmp/p 2>&1)
     assert_contains "$out" "-a IntelliJ IDEA" || return
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet"
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga"
 }
 
 case_idea_app_names_another_jetbrains_ide() {
     ide_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet --app PyCharm 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea brygga --app PyCharm 2>&1)
     assert_contains "$out" "-a PyCharm" || return
     assert_not_contains "$out" "IntelliJ IDEA"
 }
@@ -150,7 +150,7 @@ case_code_does_not_export_the_variable() {
 echo "inherited=[${CLAUDE_CONFIG_DIR:-}]"
 OPENEOF
     chmod +x "$HOME/fakebin/open"
-    out=$(ide code bouvet 2>&1)
+    out=$(ide code brygga 2>&1)
     assert_contains "$out" "inherited=[]"
 }
 
@@ -159,7 +159,7 @@ OPENEOF
 case_code_refuses_an_open_without_env() {
     ide_fixture
     fake_open "$HOME/fakebin" noenv
-    out=$(ide code bouvet /tmp/p 2>&1); status=$?
+    out=$(ide code brygga /tmp/p 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "does not support --env" || return
     assert_not_contains "$out" "open: -n"
@@ -182,11 +182,11 @@ case_code_needs_a_profile() {
 
 case_ide_rejects_an_unknown_option_and_a_second_path() {
     ide_fixture
-    out=$(ide code bouvet --nope 2>&1); status=$?
+    out=$(ide code brygga --nope 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "unknown option" || return
 
-    out=$(ide idea bouvet /tmp/a /tmp/b 2>&1); status=$?
+    out=$(ide idea brygga /tmp/a /tmp/b 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "unexpected argument"
 }
@@ -194,7 +194,7 @@ case_ide_rejects_an_unknown_option_and_a_second_path() {
 # --app with nothing after it must fail rather than swallow the profile name.
 case_ide_app_needs_a_value() {
     ide_fixture
-    out=$(ide code bouvet --app 2>&1); status=$?
+    out=$(ide code brygga --app 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "--app needs a value"
 }
@@ -409,16 +409,16 @@ case_the_fixture_never_asks_the_host_whether_an_editor_runs() {
     ide_fixture
     fake_pgrep "$HOME/hostbin" running
     out=$(AGENT_PROFILE_DRY_RUN=1 PATH="$HOME/fakebin:$HOME/hostbin:$PATH" \
-        AGENT_PROFILE_PLATFORM=Darwin USER=tester "$AP" code bouvet /tmp/project 2>&1); status=$?
+        AGENT_PROFILE_PLATFORM=Darwin USER=tester "$AP" code brygga /tmp/project 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_not_contains "$out" "already running" || return
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet"
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga"
 }
 
 case_code_refuses_when_the_editor_is_running() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "already running" || return
     assert_contains "$out" "--new-instance" || return
@@ -429,9 +429,9 @@ case_code_refuses_when_the_editor_is_running() {
 case_code_launches_when_the_editor_is_not_running() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" quiet
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet"
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga"
 }
 
 # Fails closed. An unusable pgrep must read as "running", not as "clear to go":
@@ -439,7 +439,7 @@ case_code_launches_when_the_editor_is_not_running() {
 case_code_refuses_when_it_cannot_tell() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" broken
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "could not be determined" || return
     assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
@@ -448,9 +448,9 @@ case_code_refuses_when_it_cannot_tell() {
 case_new_instance_launches_past_a_running_editor() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet /tmp/project --new-instance 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project --new-instance 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     assert_contains "$out" "--user-data-dir" || return
     assert_contains "$out" "/ide/Visual-Studio-Code" || return
     # The path still reaches the editor, after the user data directory rather
@@ -469,7 +469,7 @@ case_new_instance_launches_past_a_running_editor() {
 case_new_instance_puts_user_data_dir_after_args() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet --new-instance 2>&1)
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --new-instance 2>&1)
     before=${out%%--args*}
     case "$before" in
         *--user-data-dir*) fail "--user-data-dir must come after --args" "got: $out"; return ;;
@@ -482,14 +482,14 @@ case_new_instance_puts_user_data_dir_after_args() {
 case_new_instance_user_data_dir_sits_under_the_app_data_dir() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide code bouvet --new-instance 2>&1)
-    assert_contains "$out" "Application Support/Claude-Bouvet/ide/Visual-Studio-Code"
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --new-instance 2>&1)
+    assert_contains "$out" "Application Support/Claude-Brygga/ide/Visual-Studio-Code"
 }
 
 case_new_instance_is_refused_for_jetbrains() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet --new-instance 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea brygga --new-instance 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "VS Code mechanism" || return
     assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
@@ -498,7 +498,7 @@ case_new_instance_is_refused_for_jetbrains() {
 case_idea_refuses_when_the_ide_is_running() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
-    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea bouvet 2>&1); status=$?
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea brygga 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "already running"
 }

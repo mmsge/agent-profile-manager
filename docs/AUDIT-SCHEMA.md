@@ -78,12 +78,12 @@ Adds `profiles`, `rules` and `findings`.
   "registry": "/Users/markus/.config/agent-profiles",
   "profiles": [
     {
-      "name": "bouvet",
+      "name": "brygga",
       "agent": "claude",
-      "root": "/Users/markus/.claude-bouvet",
+      "root": "/Users/markus/.claude-brygga",
       "root_exists": true,
-      "app_data": "/Users/markus/Library/Application Support/Claude-Bouvet",
-      "account": "markus@bouvet.no",
+      "app_data": "/Users/markus/Library/Application Support/Claude-Brygga",
+      "account": "markus@brygga.no",
       "organization": "3f0b...",
       "sessions": 214
     }

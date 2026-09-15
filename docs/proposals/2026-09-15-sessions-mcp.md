@@ -98,7 +98,7 @@ numbers, and with the alternatives that lost.
 
 ## How it works, end to end
 
-Two profiles on one Mac, `nordkraft` and `fjellbank` (two invented customers of
+Two profiles on one Mac, `brygga` and `havnelab` (two invented customers of
 the README's example user), each with a session open.
 Everything above the dotted line is code and is shared the way the bash
 script itself is shared. Everything below it is data, and nothing below the
@@ -110,14 +110,14 @@ line is shared by anything.
   |  /opt/homebrew/bin/agpin  ->  libexec/bin/agent-profile             |
   |  libexec/server/.venv/bin/python  (FastMCP, agent_profile_sessions) |
   +---------------------------------------------------------------------+
-  ~/.config/agent-profiles/{nordkraft,fjellbank}.conf    (root=, no server state)
+  ~/.config/agent-profiles/{brygga,havnelab}.conf    (root=, no server state)
  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 
-  ~/.claude-nordkraft/                       ~/.claude-fjellbank/
+  ~/.claude-brygga/                       ~/.claude-havnelab/
   |-- .claude.json                        |-- .claude.json
   |     mcpServers.sessions:              |     mcpServers.sessions:
   |       agpin mcp serve                 |       agpin mcp serve
-  |         --root ~/.claude-nordkraft       |         --root ~/.claude-fjellbank
+  |         --root ~/.claude-brygga       |         --root ~/.claude-havnelab
   |-- .credentials.json  (never read)     |-- .credentials.json  (never read)
   |-- settings.json, skills/, ...         |-- settings.json, skills/, ...
   `-- projects/      <== the only         `-- projects/      <== the only
@@ -130,12 +130,12 @@ line is shared by anything.
   [python sessions server]                [python sessions server]
         ^ exec, after checking                  ^ exec, after checking
         |   CLAUDE_CONFIG_DIR == --root         |   CLAUDE_CONFIG_DIR == --root
-  [agpin mcp serve --root <nordkraft>]       [agpin mcp serve --root <fjellbank>]
+  [agpin mcp serve --root <brygga>]       [agpin mcp serve --root <havnelab>]
         ^ stdio child, inherits the             ^ stdio child, inherits the
         |   parent's environment (F24)          |   parent's environment (F24)
-  [claude, CLAUDE_CONFIG_DIR=<nordkraft>]    [claude, CLAUDE_CONFIG_DIR=<fjellbank>]
+  [claude, CLAUDE_CONFIG_DIR=<brygga>]    [claude, CLAUDE_CONFIG_DIR=<havnelab>]
         ^                                       ^
-  agpin run nordkraft, agpin shell nordkraft    agpin run fjellbank, a desktop applet
+  agpin run brygga, agpin shell brygga    agpin run havnelab, a desktop applet
 ```
 
 ### The same picture, as diagrams
@@ -153,21 +153,21 @@ flowchart TB
     end
     registry["~/.config/agent-profiles/*.conf<br/>root=, app_data= (no server state)"]
 
-    subgraph nordkraft["~/.claude-nordkraft (config root)"]
-        bstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-nordkraft"]
+    subgraph brygga["~/.claude-brygga (config root)"]
+        bstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-brygga"]
         bproj["projects/<br/>transcripts and subagents"]
         bcred[".credentials.json<br/>never read"]
     end
-    subgraph fjellbank["~/.claude-fjellbank (config root)"]
-        hstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-fjellbank"]
+    subgraph havnelab["~/.claude-havnelab (config root)"]
+        hstate[".claude.json<br/>mcpServers.sessions →<br/>agpin mcp serve --root ~/.claude-havnelab"]
         hproj["projects/"]
         hcred[".credentials.json<br/>never read"]
     end
 
-    bclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-nordkraft"]
-    hclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-fjellbank"]
-    bserver["sessions server (python)<br/>root = ~/.claude-nordkraft"]
-    hserver["sessions server (python)<br/>root = ~/.claude-fjellbank"]
+    bclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-brygga"]
+    hclaude["claude<br/>CLAUDE_CONFIG_DIR=~/.claude-havnelab"]
+    bserver["sessions server (python)<br/>root = ~/.claude-brygga"]
+    hserver["sessions server (python)<br/>root = ~/.claude-havnelab"]
 
     bclaude -- "reads registration" --> bstate
     hclaude -- "reads registration" --> hstate
@@ -189,19 +189,19 @@ Above the install tree there is one copy of the code, the same way there is one 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as agpin run nordkraft
+    participant U as agpin run brygga
     participant C as claude (pinned)
-    participant S as ~/.claude-nordkraft/.claude.json
+    participant S as ~/.claude-brygga/.claude.json
     participant L as agpin mcp serve
     participant P as python server
-    participant T as ~/.claude-nordkraft/projects/
+    participant T as ~/.claude-brygga/projects/
 
-    U->>C: exec with CLAUDE_CONFIG_DIR=~/.claude-nordkraft
+    U->>C: exec with CLAUDE_CONFIG_DIR=~/.claude-brygga
     C->>S: read mcpServers.sessions
     C->>L: spawn stdio child with its own environment (F24)
     L->>L: CLAUDE_CONFIG_DIR == --root ? else exit 1, one line on stderr
     L->>L: resolve own path through the installed symlink, find server/.venv
-    L->>P: exec python -m agent_profile_sessions --root ~/.claude-nordkraft
+    L->>P: exec python -m agent_profile_sessions --root ~/.claude-brygga
     P->>P: realpath(CLAUDE_CONFIG_DIR) == realpath(--root) ? else exit 2
     C->>P: initialize, tools/list
     P-->>C: six tools, about 1 s after spawn
@@ -280,14 +280,14 @@ flowchart LR
 
 ### What happens at session start
 
-1. `agpin run nordkraft` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-nordkraft`
+1. `agpin run brygga` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-brygga`
    in its environment, exactly as today. Nothing about the launch changes.
 2. Claude Code reads its own state file, which because of the variable is
-   `~/.claude-nordkraft/.claude.json` (F10), finds `mcpServers.sessions` there,
+   `~/.claude-brygga/.claude.json` (F10), finds `mcpServers.sessions` there,
    and spawns it as a child process over stdio. The child gets the parent's
-   environment, so it arrives with `CLAUDE_CONFIG_DIR=~/.claude-nordkraft` set
+   environment, so it arrives with `CLAUDE_CONFIG_DIR=~/.claude-brygga` set
    (F24).
-3. The child is `agpin mcp serve --root ~/.claude-nordkraft`. It compares the
+3. The child is `agpin mcp serve --root ~/.claude-brygga`. It compares the
    variable with `--root`. They agree, so it locates the server's interpreter
    in its own install tree and execs it. Had they disagreed, or had the
    variable been unset, it would have exited with one line on stderr and
@@ -321,8 +321,8 @@ Separation is not one mechanism, it is five, and each one holds on its own.
 
 1. **The registration lives inside the root.** It is one key in
    `<root>/.claude.json`, the state file that moves under `CLAUDE_CONFIG_DIR`
-   (F10). A Claude Code pinned to `nordkraft` reads nordkraft's state file and can
-   only ever find nordkraft's registration. There is no global list of servers
+   (F10). A Claude Code pinned to `brygga` reads brygga's state file and can
+   only ever find brygga's registration. There is no global list of servers
    that both profiles read.
 2. **The server is told its root by the same variable that pinned the
    session.** Claude Code spawns stdio servers with its own environment
@@ -343,8 +343,8 @@ Separation is not one mechanism, it is five, and each one holds on its own.
    history are unreachable by construction, not by policy.
 5. **stdio only, one server per session.** The server is a child process
    with a pipe to exactly one Claude Code. There is no port, no socket and
-   no HTTP transport compiled in, so a session in `fjellbank` has no way to
-   reach nordkraft's server even if it wanted to. Two sessions in the same
+   no HTTP transport compiled in, so a session in `havnelab` has no way to
+   reach brygga's server even if it wanted to. Two sessions in the same
    profile get two servers, each read-only, with no shared cache between
    them.
 
@@ -369,13 +369,13 @@ been observed and is listed as unverified below.
 
 | Moment | What happens | What is written, and where |
 | --- | --- | --- |
-| `agpin new nordkraft` | Creates the root, then runs `claude mcp add --scope user sessions -- <agpin> mcp serve --root <root>` pinned to it. On an adopted root, checks first that no other `sessions` entry is there. Without `claude` on `PATH`, registers nothing and prints the `mcp on` line to run later | `<root>/.claude.json`, by Claude Code's own CLI, plus what a first CLI run leaves in a root (F23) |
-| `agpin mcp status nordkraft`, `agpin list` | Reads `mcpServers.sessions` back and prints `on`, `off` or `stale` | Nothing |
-| `agpin mcp off nordkraft` | `claude mcp remove --scope user sessions` pinned to the root, then reads the file back to confirm the entry is gone | `<root>/.claude.json`, by the CLI |
-| `agpin mcp on nordkraft` | The same `add` as `new` runs. Idempotent | The same |
+| `agpin new brygga` | Creates the root, then runs `claude mcp add --scope user sessions -- <agpin> mcp serve --root <root>` pinned to it. On an adopted root, checks first that no other `sessions` entry is there. Without `claude` on `PATH`, registers nothing and prints the `mcp on` line to run later | `<root>/.claude.json`, by Claude Code's own CLI, plus what a first CLI run leaves in a root (F23) |
+| `agpin mcp status brygga`, `agpin list` | Reads `mcpServers.sessions` back and prints `on`, `off` or `stale` | Nothing |
+| `agpin mcp off brygga` | `claude mcp remove --scope user sessions` pinned to the root, then reads the file back to confirm the entry is gone | `<root>/.claude.json`, by the CLI |
+| `agpin mcp on brygga` | The same `add` as `new` runs. Idempotent | The same |
 | `brew upgrade agpin`, or `tools/install.sh` again | Rebuilds the Python environment in the new version's tree. The launcher link keeps its path, so every registration stays valid untouched | The install tree only |
 | `agpin doctor` | The new rule reports a registration whose `--root` is another profile's, whose command is missing or not this tool's, whose transport is not stdio, or one sitting in the stray state file | Nothing |
-| `agpin remove nordkraft --purge` | Deletes the root, and the registration with it. Nothing else to clean, because nothing else was written | The root, as today |
+| `agpin remove brygga --purge` | Deletes the root, and the registration with it. Nothing else to clean, because nothing else was written | The root, as today |
 
 ### When it fails
 
@@ -628,14 +628,14 @@ surface already has.
 `new` runs, pinned to the root it just created or adopted:
 
 ```sh
-CLAUDE_CONFIG_DIR=/Users/alex/.claude-nordkraft claude mcp add --scope user sessions -- /opt/homebrew/bin/agpin mcp serve --root /Users/alex/.claude-nordkraft
+CLAUDE_CONFIG_DIR=/Users/alex/.claude-brygga claude mcp add --scope user sessions -- /opt/homebrew/bin/agpin mcp serve --root /Users/alex/.claude-brygga
 ```
 
 Verified (F23): that writes one entry into `<root>/.claude.json`,
 
 ```json
 {"mcpServers": {"sessions": {"type": "stdio", "command": "/opt/homebrew/bin/agpin",
-                              "args": ["mcp", "serve", "--root", "/Users/alex/.claude-nordkraft"],
+                              "args": ["mcp", "serve", "--root", "/Users/alex/.claude-brygga"],
                               "env": {}}}}
 ```
 
@@ -1001,7 +1001,7 @@ adopted-root message gains one line naming what was added to `.claude.json`.
 | the registry lives outside every root | Passes unchanged. No registry key is added |
 | the source never copies between roots | Passes unchanged. `new` calls a binary; it runs no `cp`, `ln -s`, `rsync` or `install -m` |
 | the source never reads credentials | Passes unchanged |
-| no command writes the agent state file | Passes unchanged as written, since it runs `list`, `doctor`, `verify` and `explain` after `new`. It should grow: `mcp status` added to that list, and a new case that `mcp on nordkraft` leaves `.claude-fjellbank/.claude.json` byte-identical |
+| no command writes the agent state file | Passes unchanged as written, since it runs `list`, `doctor`, `verify` and `explain` after `new`. It should grow: `mcp status` added to that list, and a new case that `mcp on brygga` leaves `.claude-havnelab/.claude.json` byte-identical |
 | no document carries a credential | Extend it: `mcp status --json` and the D19 finding join the documents checked for the canary |
 
 New cases belong in `10-profiles.sh` for `new` with and without `claude` on

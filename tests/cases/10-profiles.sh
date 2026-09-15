@@ -5,15 +5,15 @@
 
 case_new_creates_a_root_holding_only_its_registration() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet 2>&1); status=$?
+    out=$("$AP" new brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    [ -d "$HOME/.claude-bouvet" ] || { fail "root was not created"; return; }
+    [ -d "$HOME/.claude-brygga" ] || { fail "root was not created"; return; }
     # Nothing is ever seeded or copied into the root. The one thing in it is
     # the state file the agent's CLI wrote the sessions server registration
     # into (docs/FACTS.md F23), and that is the whole listing.
-    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-bouvet" 2>/dev/null)" || return
+    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-brygga" 2>/dev/null)" || return
     assert_contains "$out" "Sessions server: on" || return
-    [ -d "$HOME/Library/Application Support/Claude-Bouvet" ] || \
+    [ -d "$HOME/Library/Application Support/Claude-Brygga" ] || \
         fail "app data dir was not created"
 }
 
@@ -21,42 +21,42 @@ case_new_creates_a_root_holding_only_its_registration() {
 # is then genuinely empty. new still succeeds, and says what to run later.
 case_new_creates_an_empty_root_when_the_agent_is_absent() {
     HOME=$(new_home); export HOME
-    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" new bouvet 2>&1); status=$?
+    out=$(AGENT_PROFILE_MCP_REGISTRAR="$HOME/no-such-claude" "$AP" new brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    if [ -n "$(ls -A "$HOME/.claude-bouvet" 2>/dev/null)" ]; then
-        fail "root is not empty" "$(ls -A "$HOME/.claude-bouvet")"
+    if [ -n "$(ls -A "$HOME/.claude-brygga" 2>/dev/null)" ]; then
+        fail "root is not empty" "$(ls -A "$HOME/.claude-brygga")"
         return
     fi
     assert_contains "$out" "not registered, because claude is not on PATH" || return
-    assert_contains "$out" "agent-profile mcp on bouvet"
+    assert_contains "$out" "agent-profile mcp on brygga"
 }
 
 case_new_sets_mode_700() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    mode=$(file_mode "$HOME/.claude-bouvet")
+    "$AP" new brygga >/dev/null 2>&1
+    mode=$(file_mode "$HOME/.claude-brygga")
     assert_equals "700" "$mode"
 }
 
 case_new_sets_mode_700_on_the_app_data_dir() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Bouvet")"
+    "$AP" new brygga >/dev/null 2>&1
+    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Brygga")"
 }
 
 case_new_reports_tightening_the_app_data_mode() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/Library/Application Support/Claude-Tide"
-    chmod 755 "$HOME/Library/Application Support/Claude-Tide"
-    out=$("$AP" new tide 2>&1)
+    mkdir -p "$HOME/Library/Application Support/Claude-Torg"
+    chmod 755 "$HOME/Library/Application Support/Claude-Torg"
+    out=$("$AP" new torg 2>&1)
     assert_contains "$out" "app data directory was mode 755 and became 700" || return
-    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Tide")"
+    assert_equals "700" "$(file_mode "$HOME/Library/Application Support/Claude-Torg")"
 }
 
 case_new_writes_four_keys() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    conf="$HOME/.config/agent-profiles/bouvet.conf"
+    "$AP" new brygga >/dev/null 2>&1
+    conf="$HOME/.config/agent-profiles/brygga.conf"
     [ -f "$conf" ] || { fail "no registry entry at $conf"; return; }
     got=$(cut -d= -f1 < "$conf" | tr '\n' ' ')
     assert_equals "agent root app_data created " "$got"
@@ -64,12 +64,12 @@ case_new_writes_four_keys() {
 
 case_new_is_idempotent() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    before=$(cat "$HOME/.config/agent-profiles/bouvet.conf")
-    out=$("$AP" new bouvet 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    before=$(cat "$HOME/.config/agent-profiles/brygga.conf")
+    out=$("$AP" new brygga 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "already registered" || return
-    after=$(cat "$HOME/.config/agent-profiles/bouvet.conf")
+    after=$(cat "$HOME/.config/agent-profiles/brygga.conf")
     assert_equals "$before" "$after"
 }
 
@@ -77,8 +77,8 @@ case_new_refuses_to_repoint() {
     # Credentials are keyed to the root path, so repointing would silently
     # invalidate the login. It must refuse rather than do it.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$("$AP" new bouvet --root "$HOME/elsewhere" 2>&1); status=$?
+    "$AP" new brygga >/dev/null 2>&1
+    out=$("$AP" new brygga --root "$HOME/elsewhere" 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "credentials are keyed to the root path" || return
     [ -d "$HOME/elsewhere" ] && fail "it created the new root anyway"
@@ -102,37 +102,37 @@ case_new_warns_root_has_no_guardrails() {
     # The rationale for why an empty root has no guardrails is long-form now,
     # restored by --explain; the default form says only what happened.
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet --explain 2>&1)
+    out=$("$AP" new brygga --explain 2>&1)
     assert_contains "$out" "no settings, no hooks"
 }
 
 case_list_reports_account_and_sessions() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "markus@bouvet.no" "org-abc"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-markus-dev-a" "/Users/markus/dev/a"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "markus@brygga.no" "org-abc"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-markus-dev-a" "/Users/markus/dev/a"
     out=$("$AP" list 2>&1)
-    assert_contains "$out" "markus@bouvet.no" || return
+    assert_contains "$out" "markus@brygga.no" || return
     assert_contains "$out" "org-abc" || return
     assert_contains "$out" "sessions  1"
 }
 
 case_list_flags_missing_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    rm -rf "$HOME/.claude-bouvet"
+    "$AP" new brygga >/dev/null 2>&1
+    rm -rf "$HOME/.claude-brygga"
     out=$("$AP" list 2>&1)
     assert_contains "$out" "MISSING"
 }
 
 case_path_and_env() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    assert_equals "$HOME/.claude-bouvet" "$("$AP" path bouvet)" || return
+    "$AP" new brygga >/dev/null 2>&1
+    assert_equals "$HOME/.claude-brygga" "$("$AP" path brygga)" || return
     # Assert what eval produces, not the exact quoting, so the quoting can
     # change without the test caring.
-    got=$(eval "$("$AP" env bouvet)"; printf '%s' "$CLAUDE_CONFIG_DIR")
-    assert_equals "$HOME/.claude-bouvet" "$got"
+    got=$(eval "$("$AP" env brygga)"; printf '%s' "$CLAUDE_CONFIG_DIR")
+    assert_equals "$HOME/.claude-brygga" "$got"
 }
 
 case_env_survives_a_space_in_the_path() {
@@ -185,13 +185,13 @@ case_unknown_agent_in_registry_is_hard_error() {
 # whether the data survived and whether anything was seeded into it.
 case_new_adopts_a_populated_root_without_touching_it() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/.claude-tide/projects/-U-x-w"
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
-    fixture_transcript "$HOME/.claude-tide" "-U-x-w" "/U/x/w"
-    printf '{"model":"opus","hooks":{"Stop":[]}}\n' > "$HOME/.claude-tide/settings.json"
-    before=$(find "$HOME/.claude-tide" -type f | sort)
+    mkdir -p "$HOME/.claude-torg/projects/-U-x-w"
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
+    fixture_transcript "$HOME/.claude-torg" "-U-x-w" "/U/x/w"
+    printf '{"model":"opus","hooks":{"Stop":[]}}\n' > "$HOME/.claude-torg/settings.json"
+    before=$(find "$HOME/.claude-torg" -type f | sort)
 
-    out=$("$AP" new tide --explain 2>&1); status=$?
+    out=$("$AP" new torg --explain 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "adopted rather than created" || return
     assert_contains "$out" "1 session(s)" || return
@@ -199,13 +199,13 @@ case_new_adopts_a_populated_root_without_touching_it() {
     # The claim in that message has to be true: the same files, the settings
     # byte for byte, and the one addition named as such, inside a file that
     # was already there.
-    assert_equals "$before" "$(find "$HOME/.claude-tide" -type f | sort)" || return
+    assert_equals "$before" "$(find "$HOME/.claude-torg" -type f | sort)" || return
     assert_equals '{"model":"opus","hooks":{"Stop":[]}}' \
-        "$(cat "$HOME/.claude-tide/settings.json")" || return
+        "$(cat "$HOME/.claude-torg/settings.json")" || return
     assert_contains "$out" "The one line added is the sessions server registration" || return
     assert_contains "$out" "Sessions server: on" || return
     # The account the adopted root already had is still there beside it.
-    assert_contains "$("$AP" list 2>&1)" "m@tide.no"
+    assert_contains "$("$AP" list 2>&1)" "m@torg.no"
 }
 
 # An adopted root may already carry a "sessions" server of its owner's own.
@@ -213,38 +213,38 @@ case_new_adopts_a_populated_root_without_touching_it() {
 # adoption still succeeds.
 case_new_leaves_a_foreign_sessions_entry_alone() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/.claude-tide"
-    printf '{"oauthAccount":{"emailAddress":"m@tide.no"},"mcpServers":{"sessions":{"type":"stdio","command":"/usr/bin/theirs","args":["--serve"]}}}\n' \
-        > "$HOME/.claude-tide/.claude.json"
-    before=$(cat "$HOME/.claude-tide/.claude.json")
-    out=$("$AP" new tide 2>&1); status=$?
+    mkdir -p "$HOME/.claude-torg"
+    printf '{"oauthAccount":{"emailAddress":"m@torg.no"},"mcpServers":{"sessions":{"type":"stdio","command":"/usr/bin/theirs","args":["--serve"]}}}\n' \
+        > "$HOME/.claude-torg/.claude.json"
+    before=$(cat "$HOME/.claude-torg/.claude.json")
+    out=$("$AP" new torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "not this tool's" || return
     assert_contains "$out" "left alone" || return
-    assert_equals "$before" "$(cat "$HOME/.claude-tide/.claude.json")"
+    assert_equals "$before" "$(cat "$HOME/.claude-torg/.claude.json")"
 }
 
 # Telling someone their live root "is empty" is false and alarming, and the
 # login prompt is wrong too when the root is already signed in.
 case_new_does_not_call_a_populated_root_empty() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/.claude-tide"
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
+    mkdir -p "$HOME/.claude-torg"
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
 
-    out=$("$AP" new tide 2>&1)
+    out=$("$AP" new torg 2>&1)
     assert_not_contains "$out" "The root is empty" || return
     assert_not_contains "$out" "it will ask you to log in"
 }
 
 case_new_reports_tightening_the_mode_on_adoption() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/.claude-tide"
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
-    chmod 755 "$HOME/.claude-tide"
+    mkdir -p "$HOME/.claude-torg"
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
+    chmod 755 "$HOME/.claude-torg"
 
-    out=$("$AP" new tide 2>&1)
+    out=$("$AP" new torg 2>&1)
     assert_contains "$out" "mode 755 became 700" || return
-    assert_equals "700" "$(file_mode "$HOME/.claude-tide")"
+    assert_equals "700" "$(file_mode "$HOME/.claude-torg")"
 }
 
 # A fresh root is still created, not adopted, so the guardrails warning that
@@ -272,7 +272,7 @@ case_new_short_form_still_names_a_fresh_root() {
 # form still names the fact so it is never a silent surprise.
 case_new_warns_when_a_profile_claims_the_default_root() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet --root "$HOME/.claude" --explain 2>&1)
+    out=$("$AP" new brygga --root "$HOME/.claude" --explain 2>&1)
     assert_contains "$out" "owns the default root" || return
     assert_contains "$out" "D01 goes quiet" || return
     assert_contains "$out" "F06"
@@ -280,28 +280,28 @@ case_new_warns_when_a_profile_claims_the_default_root() {
 
 case_new_short_form_still_names_the_default_root() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet --root "$HOME/.claude" 2>&1)
+    out=$("$AP" new brygga --root "$HOME/.claude" 2>&1)
     assert_contains "$out" "owns the default root" || return
     assert_not_contains "$out" "D01 goes quiet"
 }
 
 case_new_is_silent_about_it_for_an_ordinary_root() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet 2>&1)
+    out=$("$AP" new brygga 2>&1)
     assert_not_contains "$out" "owns the default root"
 }
 
 case_a_bare_profile_name_runs_it() {
     HOME=$(new_home); export HOME
-    "$AP" new tide >/dev/null 2>&1
-    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" tide 2>&1)
-    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-tide claude"
+    "$AP" new torg >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" torg 2>&1)
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-torg claude"
 }
 
 case_a_bare_profile_name_forwards_arguments() {
     HOME=$(new_home); export HOME
-    "$AP" new tide >/dev/null 2>&1
-    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" tide --continue --verbose 2>&1)
+    "$AP" new torg >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" torg --continue --verbose 2>&1)
     assert_contains "$out" "claude --continue --verbose"
 }
 
