@@ -50,10 +50,10 @@ print(hashlib.sha256(unicodedata.normalize("NFC", sys.argv[1]).encode()).hexdige
 }
 
 json_two_profiles() {
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
 }
 
 case_doctor_json_is_one_document() {
@@ -92,13 +92,13 @@ case_doctor_json_carries_the_profile_inventory() {
     out=$("$AP" doctor --json 2>/dev/null)
     assert_json "$out" || return
     assert_equals "2" "$(json_get "$out" 'len(d["profiles"])')" || return
-    assert_equals "bouvet" "$(json_get "$out" 'd["profiles"][0]["name"]')" || return
-    assert_equals "$HOME/.claude-bouvet" "$(json_get "$out" 'd["profiles"][0]["root"]')" || return
+    assert_equals "brygga" "$(json_get "$out" 'd["profiles"][0]["name"]')" || return
+    assert_equals "$HOME/.claude-brygga" "$(json_get "$out" 'd["profiles"][0]["root"]')" || return
     assert_equals "true" "$(json_get "$out" 'd["profiles"][0]["root_exists"]')" || return
-    assert_equals "m@bouvet.no" "$(json_get "$out" 'd["profiles"][0]["account"]')" || return
+    assert_equals "m@brygga.no" "$(json_get "$out" 'd["profiles"][0]["account"]')" || return
     assert_equals "org-b" "$(json_get "$out" 'd["profiles"][0]["organization"]')" || return
     assert_equals "1" "$(json_get "$out" 'd["profiles"][0]["sessions"]')" || return
-    assert_contains "$(json_get "$out" 'd["profiles"][0]["app_data"]')" "Claude-Bouvet" || return
+    assert_contains "$(json_get "$out" 'd["profiles"][0]["app_data"]')" "Claude-Brygga" || return
     assert_equals "on" "$(json_get "$out" 'd["profiles"][0]["sessions_server"]')" || return
     # A profile that is not signed in is null, not a sentence.
     assert_equals "" "$(json_get "$out" 'd["profiles"][1]["account"]')"
@@ -133,7 +133,7 @@ case_doctor_json_keeps_the_exit_code() {
 case_doctor_json_on_a_clean_machine() {
     HOME=$(new_home); export HOME
     json_two_profiles
-    fixture_account "$HOME/.claude-highsoft" "m@highsoft.no" "org-h"
+    fixture_account "$HOME/.claude-havnelab" "m@havnelab.no" "org-h"
     out=$("$AP" doctor --json 2>/dev/null); status=$?
     assert_status 0 "$status" "$out" || return
     assert_json "$out" || return
@@ -156,7 +156,7 @@ case_doctor_json_prints_no_prose() {
 case_doctor_json_reports_a_missing_root_as_missing() {
     HOME=$(new_home); export HOME
     json_two_profiles
-    rm -rf "$HOME/.claude-highsoft"
+    rm -rf "$HOME/.claude-havnelab"
     out=$("$AP" doctor --json 2>/dev/null)
     assert_json "$out" || return
     assert_equals "false" "$(json_get "$out" 'd["profiles"][1]["root_exists"]')" || return
@@ -181,8 +181,8 @@ case_doctor_json_does_not_call_an_unrun_rule_passing() {
     HOME=$(new_home); export HOME
     json_two_profiles
     fake_keychain "$HOME/fakebin" \
-        "$(json_service_for "$HOME/.claude-bouvet")" \
-        "$(json_service_for "$HOME/.claude-highsoft")" \
+        "$(json_service_for "$HOME/.claude-brygga")" \
+        "$(json_service_for "$HOME/.claude-havnelab")" \
         "Claude Code-credentials-deadbeef"
     out=$(mac_json doctor --json 2>/dev/null)
     assert_json "$out" || return
@@ -195,8 +195,8 @@ case_doctor_json_reports_d12_once_it_has_run() {
     HOME=$(new_home); export HOME
     json_two_profiles
     fake_keychain "$HOME/fakebin" \
-        "$(json_service_for "$HOME/.claude-bouvet")" \
-        "$(json_service_for "$HOME/.claude-highsoft")" \
+        "$(json_service_for "$HOME/.claude-brygga")" \
+        "$(json_service_for "$HOME/.claude-havnelab")" \
         "Claude Code-credentials-deadbeef"
     out=$(mac_json doctor --json --keychain-scan 2>/dev/null)
     assert_json "$out" || return
@@ -304,7 +304,7 @@ case_list_json_is_one_document() {
     assert_json "$out" || return
     assert_equals "agent-profile/list" "$(json_get "$out" 'd["schema"]')" || return
     assert_equals "2" "$(json_get "$out" 'len(d["profiles"])')" || return
-    assert_equals "m@bouvet.no" "$(json_get "$out" 'd["profiles"][0]["account"]')" || return
+    assert_equals "m@brygga.no" "$(json_get "$out" 'd["profiles"][0]["account"]')" || return
     assert_equals "2" "$(json_get "$out" 'd["summary"]["profiles"]')"
 }
 

@@ -21,7 +21,7 @@ desk() {
 # The stand-in security(1) is not optional. These cases pin the platform to
 # Darwin, and on a real Mac that would send doctor and verify at the runner's
 # own Keychain, so the same commit would pass on Linux and behave differently
-# on macOS. It is given tide's own service so the Keychain-backed rules are
+# on macOS. It is given torg's own service so the Keychain-backed rules are
 # quiet and a D13 assertion is testing D13.
 desktop_fixture() {
     HOME=$(new_home); export HOME
@@ -29,16 +29,16 @@ desktop_fixture() {
     fake_osa "$HOME/fakebin"
     fake_open "$HOME/fakebin" env
     fake_icon_tools "$HOME/fakebin"
-    "$AP" new tide >/dev/null 2>&1
-    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-tide")"
+    "$AP" new torg >/dev/null 2>&1
+    fake_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-torg")"
 }
 
-# want_line: the launch line the tool should produce for the tide fixture.
+# want_line: the launch line the tool should produce for the torg fixture.
 want_line() {
     printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\n' \
         "$HOME/Claude.app" \
-        "$HOME/.claude-tide" \
-        "$HOME/Library/Application Support/Claude-Tide"
+        "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg"
 }
 
 # ---------------------------------------------------------------------------
@@ -50,9 +50,9 @@ want_line() {
 # a perfectly healthy, perfectly unpinned app. docs/FACTS.md F13.
 case_desktop_puts_env_before_args() {
     desktop_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 desk desktop tide 2>&1)
-    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-tide" || return
-    assert_contains "$out" "--args --user-data-dir=$HOME/Library/Application Support/Claude-Tide" || return
+    out=$(AGENT_PROFILE_DRY_RUN=1 desk desktop torg 2>&1)
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-torg" || return
+    assert_contains "$out" "--args --user-data-dir=$HOME/Library/Application Support/Claude-Torg" || return
 
     before=${out%%--args*}
     case "$before" in
@@ -63,8 +63,8 @@ case_desktop_puts_env_before_args() {
 
 case_desktop_passes_extra_args_through() {
     desktop_fixture
-    out=$(AGENT_PROFILE_DRY_RUN=1 desk desktop tide --hide 2>&1)
-    assert_contains "$out" "--user-data-dir=$HOME/Library/Application Support/Claude-Tide --hide"
+    out=$(AGENT_PROFILE_DRY_RUN=1 desk desktop torg --hide 2>&1)
+    assert_contains "$out" "--user-data-dir=$HOME/Library/Application Support/Claude-Torg --hide"
 }
 
 # The pin travels in --env and nowhere else. open inherits nothing from the
@@ -78,7 +78,7 @@ case_desktop_does_not_export_the_variable() {
 echo "inherited=[${CLAUDE_CONFIG_DIR:-}]"
 OPENEOF
     chmod +x "$HOME/fakebin/open"
-    out=$(desk desktop tide 2>&1)
+    out=$(desk desktop torg 2>&1)
     assert_contains "$out" "inherited=[]"
 }
 
@@ -88,7 +88,7 @@ OPENEOF
 case_desktop_refuses_an_open_without_env() {
     desktop_fixture
     fake_open "$HOME/fakebin" noenv
-    out=$(desk desktop tide 2>&1); status=$?
+    out=$(desk desktop torg 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "does not support --env" || return
     assert_not_contains "$out" "open: -n"
@@ -97,7 +97,7 @@ case_desktop_refuses_an_open_without_env() {
 case_desktop_refuses_when_the_app_is_absent() {
     desktop_fixture
     rmdir "$HOME/Claude.app"
-    out=$(desk desktop tide 2>&1); status=$?
+    out=$(desk desktop torg 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "not installed"
 }
@@ -108,14 +108,14 @@ case_desktop_refuses_when_the_app_is_absent() {
 
 case_app_creates_an_applet_and_registers_it() {
     desktop_fixture
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "Created" || return
 
-    applet="$HOME/Applications/Claude-Tide.app"
+    applet="$HOME/Applications/Claude-Torg.app"
     [ -d "$applet" ] || { fail "no applet at $applet"; return; }
     assert_equals "$(want_line)" "$(applet_line_of "$applet")" || return
-    assert_equals "$applet" "$(sed -n 's/^applet=//p' "$HOME/.config/agent-profiles/tide.conf")"
+    assert_equals "$applet" "$(sed -n 's/^applet=//p' "$HOME/.config/agent-profiles/torg.conf")"
 }
 
 # "Already applied" and "never worked" must not look the same. That confusion
@@ -123,8 +123,8 @@ case_app_creates_an_applet_and_registers_it() {
 # likely to be run twice.
 case_app_is_idempotent_and_says_so() {
     desktop_fixture
-    desk app tide >/dev/null 2>&1
-    out=$(desk app tide 2>&1); status=$?
+    desk app torg >/dev/null 2>&1
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "already correct" || return
     assert_not_contains "$out" "Repaired"
@@ -132,12 +132,12 @@ case_app_is_idempotent_and_says_so() {
 
 case_app_repairs_a_wrong_root_and_keeps_the_icon() {
     desktop_fixture
-    applet="$HOME/Applications/Claude-Tide.app"
+    applet="$HOME/Applications/Claude-Torg.app"
     fixture_applet "$applet" \
         'do shell script "open -n -a \"/Applications/Claude.app\" --env \"CLAUDE_CONFIG_DIR=/somewhere/else\" --args --user-data-dir=\"/elsewhere\" > /dev/null 2>&1 &"'
     printf 'ORIGINAL-ICON\n' > "$applet/Contents/Resources/applet.icns"
 
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "different config root" || return
     assert_equals "$(want_line)" "$(applet_line_of "$applet")" || return
@@ -146,9 +146,9 @@ case_app_repairs_a_wrong_root_and_keeps_the_icon() {
 
 case_app_refuses_a_bundle_that_is_not_an_applet() {
     desktop_fixture
-    applet="$HOME/Applications/Claude-Tide.app"
+    applet="$HOME/Applications/Claude-Torg.app"
     mkdir -p "$applet/Contents/MacOS"
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "not an AppleScript applet"
 }
@@ -170,25 +170,25 @@ case_app_rejects_a_root_the_launch_line_cannot_carry() {
 
 case_icon_is_installed_and_the_original_kept_once() {
     desktop_fixture
-    applet="$HOME/Applications/Claude-Tide.app"
-    desk app tide >/dev/null 2>&1
+    applet="$HOME/Applications/Claude-Torg.app"
+    desk app torg >/dev/null 2>&1
     printf 'ORIGINAL-ICON\n' > "$applet/Contents/Resources/applet.icns"
     printf 'source\n' > "$HOME/src.png"
 
-    out=$(desk app tide --icon "$HOME/src.png" 2>&1); status=$?
+    out=$(desk app torg --icon "$HOME/src.png" 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_equals "generated-icns" "$(cat "$applet/Contents/Resources/applet.icns")" || return
     assert_equals "ORIGINAL-ICON" "$(cat "$applet/Contents/Resources/applet.icns.orig")" || return
 
     # A second run must not overwrite the real original with a generated one.
-    desk app tide --icon "$HOME/src.png" >/dev/null 2>&1
+    desk app torg --icon "$HOME/src.png" >/dev/null 2>&1
     assert_equals "ORIGINAL-ICON" "$(cat "$applet/Contents/Resources/applet.icns.orig")"
 }
 
 case_icon_reports_a_missing_source_image() {
     desktop_fixture
-    desk app tide >/dev/null 2>&1
-    out=$(desk app tide --icon "$HOME/absent.png" 2>&1); status=$?
+    desk app torg >/dev/null 2>&1
+    out=$(desk app torg --icon "$HOME/absent.png" 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
     assert_contains "$out" "no such image"
 }
@@ -198,7 +198,7 @@ case_icon_reports_a_missing_source_image() {
 # ---------------------------------------------------------------------------
 
 d13_out() {
-    fixture_applet "$HOME/Applications/Claude-Tide.app" "$1"
+    fixture_applet "$HOME/Applications/Claude-Torg.app" "$1"
     desk doctor 2>&1
 }
 
@@ -227,14 +227,14 @@ case_d13_reports_the_wrong_root() {
 
 case_d13_reports_the_wrong_app_data_dir() {
     desktop_fixture
-    out=$(d13_out "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-tide\\\" --args --user-data-dir=\\\"/somewhere/else\\\" > /dev/null 2>&1 &\"")
+    out=$(d13_out "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-torg\\\" --args --user-data-dir=\\\"/somewhere/else\\\" > /dev/null 2>&1 &\"")
     assert_contains "$out" "D13" || return
     assert_contains "$out" "different app data directory"
 }
 
 case_d13_quiet_on_a_correct_applet() {
     desktop_fixture
-    desk app tide >/dev/null 2>&1
+    desk app torg >/dev/null 2>&1
     out=$(desk doctor 2>&1)
     assert_not_contains "$out" "D13"
 }
@@ -250,7 +250,7 @@ case_d13_quiet_when_there_is_no_applet() {
 # generated form.
 case_d13_quiet_on_a_hand_tuned_but_correct_line() {
     desktop_fixture
-    out=$(d13_out "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-tide\\\" --args --user-data-dir=\\\"$HOME/Library/Application Support/Claude-Tide\\\" --hide > /dev/null 2>&1 &\"")
+    out=$(d13_out "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-torg\\\" --args --user-data-dir=\\\"$HOME/Library/Application Support/Claude-Torg\\\" --hide > /dev/null 2>&1 &\"")
     assert_not_contains "$out" "D13"
 }
 
@@ -301,11 +301,11 @@ case_verify_reports_on_the_applet_reader() {
 # fall back to the conventional path rather than to nothing.
 case_registry_without_an_applet_key_still_works() {
     desktop_fixture
-    grep -v '^applet=' "$HOME/.config/agent-profiles/tide.conf" > "$HOME/t.conf"
-    mv "$HOME/t.conf" "$HOME/.config/agent-profiles/tide.conf"
-    out=$(desk app tide 2>&1); status=$?
+    grep -v '^applet=' "$HOME/.config/agent-profiles/torg.conf" > "$HOME/t.conf"
+    mv "$HOME/t.conf" "$HOME/.config/agent-profiles/torg.conf"
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "$HOME/Applications/Claude-Tide.app"
+    assert_contains "$out" "$HOME/Applications/Claude-Torg.app"
 }
 
 case_explain_names_both_identities() {
@@ -319,10 +319,10 @@ case_explain_names_both_identities() {
 # Finding launchers this tool did not create
 # ---------------------------------------------------------------------------
 
-# tide_line: the launch line a correct applet for the tide fixture holds.
+# tide_line: the launch line a correct applet for the torg fixture holds.
 tide_line() {
-    fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-tide" \
-        "$HOME/Library/Application Support/Claude-Tide"
+    fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg"
 }
 
 # The depth is the whole trick. A script sits five levels below the search
@@ -331,10 +331,10 @@ tide_line() {
 # pinned here rather than trusted to a comment.
 case_scan_finds_an_applet_five_levels_down() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
     out=$(desk doctor 2>&1)
     assert_contains "$out" "D14" || return
-    assert_contains "$out" "$HOME/Desktop/Tide-Claude.app"
+    assert_contains "$out" "$HOME/Desktop/Torg-Claude.app"
 }
 
 case_scan_ignores_bundles_that_are_not_ours() {
@@ -347,10 +347,10 @@ case_scan_ignores_bundles_that_are_not_ours() {
 
 case_d14_names_the_profile_owning_the_root() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
     out=$(desk doctor 2>&1)
-    assert_contains "$out" "launcher for profile 'tide' is not registered" || return
-    assert_contains "$out" "agent-profile app tide --applet"
+    assert_contains "$out" "launcher for profile 'torg' is not registered" || return
+    assert_contains "$out" "agent-profile app torg --applet"
 }
 
 case_d14_reports_a_launcher_no_profile_owns() {
@@ -364,8 +364,8 @@ case_d14_reports_a_launcher_no_profile_owns() {
 
 case_d14_quiet_once_the_applet_is_registered() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
-    desk app tide --applet "$HOME/Desktop/Tide-Claude.app" >/dev/null 2>&1
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
+    desk app torg --applet "$HOME/Desktop/Torg-Claude.app" >/dev/null 2>&1
     out=$(desk doctor 2>&1)
     assert_not_contains "$out" "D14"
 }
@@ -374,8 +374,8 @@ case_d14_quiet_once_the_applet_is_registered() {
 # unregistered one sits beside it, and both are worth knowing at once.
 case_d13_and_d14_can_both_fire() {
     desktop_fixture
-    desk app tide >/dev/null 2>&1
-    fixture_applet "$(reg_applet_of tide)" \
+    desk app torg >/dev/null 2>&1
+    fixture_applet "$(reg_applet_of torg)" \
         "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-elsewhere" "$HOME/x")"
     fixture_applet "$HOME/Desktop/Stray.app" \
         "$(fixture_launch_line "$HOME/Claude.app" "$HOME/.claude-nobody" "$HOME/x")"
@@ -390,47 +390,47 @@ case_d13_and_d14_can_both_fire() {
 
 case_app_adopts_a_launcher_outside_the_conventional_dir() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
 
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "adopted it" || return
     assert_contains "$out" "already correct" || return
-    assert_equals "$HOME/Desktop/Tide-Claude.app" "$(reg_applet_of tide)" || return
+    assert_equals "$HOME/Desktop/Torg-Claude.app" "$(reg_applet_of torg)" || return
 
     # It must not have built a second one at the conventional path.
-    if [ -d "$HOME/Applications/Claude-Tide.app" ]; then
+    if [ -d "$HOME/Applications/Claude-Torg.app" ]; then
         fail "app built a second applet instead of adopting the existing one"
     fi
 }
 
 case_app_refuses_when_two_launchers_pin_one_root() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
-    fixture_applet "$HOME/Desktop/Tide-Copy.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
+    fixture_applet "$HOME/Desktop/Torg-Copy.app" "$(tide_line)"
 
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 1 "$status" "$out" || return
-    assert_contains "$out" "Tide-Claude.app" || return
-    assert_contains "$out" "Tide-Copy.app" || return
+    assert_contains "$out" "Torg-Claude.app" || return
+    assert_contains "$out" "Torg-Copy.app" || return
     assert_contains "$out" "--applet"
 }
 
 case_app_falls_back_to_the_conventional_path() {
     desktop_fixture
-    out=$(desk app tide 2>&1)
+    out=$(desk app torg 2>&1)
     assert_contains "$out" "Created" || return
     assert_not_contains "$out" "adopted it" || return
-    assert_equals "$HOME/Applications/Claude-Tide.app" "$(reg_applet_of tide)"
+    assert_equals "$HOME/Applications/Claude-Torg.app" "$(reg_applet_of torg)"
 }
 
 case_explicit_applet_wins_over_the_scan() {
     desktop_fixture
-    fixture_applet "$HOME/Desktop/Tide-Claude.app" "$(tide_line)"
-    out=$(desk app tide --applet "$HOME/Applications/Chosen.app" 2>&1)
+    fixture_applet "$HOME/Desktop/Torg-Claude.app" "$(tide_line)"
+    out=$(desk app torg --applet "$HOME/Applications/Chosen.app" 2>&1)
     assert_contains "$out" "Chosen.app" || return
     assert_not_contains "$out" "adopted it" || return
-    assert_equals "$HOME/Applications/Chosen.app" "$(reg_applet_of tide)"
+    assert_equals "$HOME/Applications/Chosen.app" "$(reg_applet_of torg)"
 }
 
 # The hint used to be built from root_prefix, whose glob ".claude-*" excludes
@@ -439,7 +439,7 @@ case_explicit_applet_wins_over_the_scan() {
 # --explain now; the default form only points at the flag.
 case_the_leak_test_hint_covers_the_default_root() {
     desktop_fixture
-    out=$(desk app tide --explain 2>&1)
+    out=$(desk app torg --explain 2>&1)
     # shellcheck disable=SC2016  # the literal text the hint must print
     assert_contains "$out" '"$HOME"/.claude* -name' || return
     # shellcheck disable=SC2016  # the literal text it must not print
@@ -448,7 +448,7 @@ case_the_leak_test_hint_covers_the_default_root() {
 
 case_app_short_form_points_at_explain_instead_of_the_hint() {
     desktop_fixture
-    out=$(desk app tide 2>&1)
+    out=$(desk app torg 2>&1)
     assert_not_contains "$out" 'mmin -3' || return
     assert_contains "$out" '--explain'
 }

@@ -2817,7 +2817,7 @@ cmd_app() {
     #
     # Step 3 exists because the conventional path was wrong on the first real
     # machine this met: the working launchers were on the Desktop. Without it,
-    # `app tide` builds a second applet beside a working one and leaves the
+    # `app torg` builds a second applet beside a working one and leaves the
     # working one unaudited, which is worse than doing nothing.
     _ap_found=""
     if [ -z "$_ap_applet" ]; then

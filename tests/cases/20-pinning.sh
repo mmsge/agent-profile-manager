@@ -5,28 +5,28 @@
 
 case_run_pins_the_variable() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" run bouvet --version 2>&1)
-    assert_equals "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet claude --version" "$out"
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" run brygga --version 2>&1)
+    assert_equals "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga claude --version" "$out"
 }
 
 case_run_forwards_all_arguments() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" run bouvet -p "hello world" --model opus 2>&1)
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 "$AP" run brygga -p "hello world" --model opus 2>&1)
     assert_contains "$out" "claude -p hello world --model opus"
 }
 
 case_shell_pins_the_variable() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(SHELL=/bin/zsh AGENT_PROFILE_DRY_RUN=1 "$AP" shell bouvet 2>/dev/null)
-    assert_equals "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet /bin/zsh" "$out"
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(SHELL=/bin/zsh AGENT_PROFILE_DRY_RUN=1 "$AP" shell brygga 2>/dev/null)
+    assert_equals "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga /bin/zsh" "$out"
 }
 
 case_which_says_so_when_unpinned() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(env -u CLAUDE_CONFIG_DIR "$AP" which 2>&1)
     assert_contains "$out" "Not pinned to any profile"
 }
@@ -51,7 +51,7 @@ case_the_fast_path_never_parses_past_itself() {
     # lives inside an indented function body) and confirm `which --label`
     # still answers correctly through the broken copy.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     src="$ROOT/bin/agent-profile"
     fp_end=$(grep -n '^fi$' "$src" | head -1 | cut -d: -f1)
     if [ -z "$fp_end" ]; then
@@ -62,10 +62,10 @@ case_the_fast_path_never_parses_past_itself() {
     awk -v n="$fp_end" 'NR==n { print; print "echo \"unterminated"; next } { print }' \
         "$src" > "$broken"
 
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "${BASH:-/bin/bash}" "$broken" which --label 2>&1)
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "${BASH:-/bin/bash}" "$broken" which --label 2>&1)
     status=$?
     assert_status 0 "$status" "$out" || return
-    assert_equals "bouvet" "$out" || return
+    assert_equals "brygga" "$out" || return
 
     # The control: without the fast path being taken, the same broken copy
     # must actually fail to parse, or the case above would pass for the wrong
@@ -78,9 +78,9 @@ case_the_fast_path_never_parses_past_itself() {
 
 case_which_derives_label_from_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "$AP" which --label)
-    assert_equals "bouvet" "$out"
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" which --label)
+    assert_equals "brygga" "$out"
 }
 
 case_label_comes_from_the_root_not_the_registry() {
@@ -97,10 +97,10 @@ case_label_survives_a_renamed_registry_entry() {
     # Rename the registry file and the label must not follow it: it comes from
     # the root. This is the drift the brief asks to make impossible.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    mv "$HOME/.config/agent-profiles/bouvet.conf" "$HOME/.config/agent-profiles/mislabelled.conf"
-    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "$AP" which --label)
-    assert_equals "bouvet" "$out"
+    "$AP" new brygga >/dev/null 2>&1
+    mv "$HOME/.config/agent-profiles/brygga.conf" "$HOME/.config/agent-profiles/mislabelled.conf"
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" which --label)
+    assert_equals "brygga" "$out"
 }
 
 # The default root is the one root whose basename says nothing: ".claude"
@@ -109,9 +109,9 @@ case_label_survives_a_renamed_registry_entry() {
 # and only that root, the registered name is used.
 case_label_uses_the_registry_for_the_default_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet --root "$HOME/.claude" >/dev/null 2>&1
+    "$AP" new brygga --root "$HOME/.claude" >/dev/null 2>&1
     out=$(CLAUDE_CONFIG_DIR="$HOME/.claude" "$AP" which --label)
-    assert_equals "bouvet" "$out"
+    assert_equals "brygga" "$out"
 }
 
 case_label_falls_back_when_the_default_root_is_unclaimed() {
@@ -125,7 +125,7 @@ case_label_falls_back_when_the_default_root_is_unclaimed() {
 # though the registry is now consulted for one case.
 case_the_registry_exception_does_not_leak_to_other_roots() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     "$AP" new work --root "$HOME/My Roots/claude-work" >/dev/null 2>&1
     mv "$HOME/.config/agent-profiles/work.conf" "$HOME/.config/agent-profiles/renamed.conf"
     out=$(CLAUDE_CONFIG_DIR="$HOME/My Roots/claude-work" "$AP" which --label)
@@ -154,7 +154,7 @@ case_d15_quiet_when_every_root_is_distinct() {
 # or scripted, this must never prompt, or anything reading the output hangs.
 case_bare_command_is_unchanged_without_a_terminal() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$("$AP" </dev/null 2>&1); status=$?
     assert_status 1 "$status" || return
     assert_contains "$out" "USAGE" || return
@@ -173,23 +173,23 @@ pick() {
 
 case_picker_opens_the_chosen_profile_on_the_desktop() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
     out=$(pick '2
 1
 ')
     assert_contains "$out" "Which profile?" || return
     assert_contains "$out" "open -n -a" || return
-    assert_contains "$out" ".claude-highsoft"
+    assert_contains "$out" ".claude-havnelab"
 }
 
 case_picker_runs_the_cli_when_that_is_chosen() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(pick '1
 2
 ')
-    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet claude" || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga claude" || return
     assert_not_contains "$out" "open -n -a"
 }
 
@@ -197,23 +197,23 @@ case_picker_runs_the_cli_when_that_is_chosen() {
 # pinned interactive subshell, the same thing `shell <profile>` opens.
 case_picker_opens_a_subshell_when_that_is_chosen() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(pick '1
 3
 ')
-    assert_contains "$out" "Pinned to bouvet. Type exit to leave." || return
-    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet" || return
+    assert_contains "$out" "Pinned to brygga. Type exit to leave." || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     assert_not_contains "$out" "open -n -a" || return
     # The dry-run line names the shell to pin, not the agent binary: cmd_run
     # would print "... claude", cmd_shell prints "... $SHELL" instead.
-    assert_not_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-bouvet claude"
+    assert_not_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga claude"
 }
 
 # A stray Return must cancel, not select. Defaulting to the first profile is
 # how someone opens the wrong account without noticing.
 case_picker_cancels_on_an_empty_answer() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(pick '
 ')
     assert_contains "$out" "Nothing chosen" || return
@@ -222,7 +222,7 @@ case_picker_cancels_on_an_empty_answer() {
 
 case_picker_rejects_a_number_out_of_range() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(pick '9
 ')
     assert_contains "$out" "Nothing chosen" || return
@@ -231,8 +231,8 @@ case_picker_rejects_a_number_out_of_range() {
 
 case_picker_rejects_a_non_numeric_answer() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    out=$(pick 'bouvet
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(pick 'brygga
 ')
     assert_contains "$out" "Nothing chosen" || return
     assert_not_contains "$out" "CLAUDE_CONFIG_DIR="
@@ -242,7 +242,7 @@ case_picker_rejects_a_non_numeric_answer() {
 # surface: the answer to "where" was never given.
 case_picker_cancels_at_the_second_question() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(pick '1
 
 ')

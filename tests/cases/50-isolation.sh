@@ -6,63 +6,63 @@
 
 case_no_symlinks_anywhere_under_a_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    found=$(find "$HOME/.claude-bouvet" "$HOME/.claude-highsoft" -type l 2>/dev/null)
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    found=$(find "$HOME/.claude-brygga" "$HOME/.claude-havnelab" -type l 2>/dev/null)
     assert_equals "" "$found"
 }
 
 case_a_second_profile_does_not_inherit_the_first() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     # Give the first root settings and a hook, as a real profile would have.
-    printf '{"model":"opus"}\n' > "$HOME/.claude-bouvet/settings.json"
-    mkdir -p "$HOME/.claude-bouvet/skills/example"
-    "$AP" new highsoft >/dev/null 2>&1
+    printf '{"model":"opus"}\n' > "$HOME/.claude-brygga/settings.json"
+    mkdir -p "$HOME/.claude-brygga/skills/example"
+    "$AP" new havnelab >/dev/null 2>&1
     # The new root holds its own sessions server registration and nothing
     # else: no settings, no skills, nothing the first root has. And the one
     # file it does hold names its own root, not the first profile's.
-    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-highsoft" 2>/dev/null)" || return
-    assert_contains "$(cat "$HOME/.claude-highsoft/.claude.json")" "$HOME/.claude-highsoft" || return
-    assert_not_contains "$(cat "$HOME/.claude-highsoft/.claude.json")" ".claude-bouvet" || return
-    assert_not_contains "$(cat "$HOME/.claude-highsoft/.claude.json")" "opus"
+    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-havnelab" 2>/dev/null)" || return
+    assert_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" "$HOME/.claude-havnelab" || return
+    assert_not_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" ".claude-brygga" || return
+    assert_not_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" "opus"
 }
 
 # The registration is the one thing new writes into a root, and it must never
 # be written into any root but the one being registered.
 case_registering_one_profile_never_touches_another_root() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    before=$(cat "$HOME/.claude-highsoft/.claude.json")
-    "$AP" mcp off bouvet >/dev/null 2>&1
-    "$AP" mcp on bouvet >/dev/null 2>&1
-    assert_equals "$before" "$(cat "$HOME/.claude-highsoft/.claude.json")"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    before=$(cat "$HOME/.claude-havnelab/.claude.json")
+    "$AP" mcp off brygga >/dev/null 2>&1
+    "$AP" mcp on brygga >/dev/null 2>&1
+    assert_equals "$before" "$(cat "$HOME/.claude-havnelab/.claude.json")"
 }
 
 # Off means gone from the state file, not hidden in it, and nothing else in
 # the root moves.
 case_mcp_off_leaves_no_registration_and_nothing_else_changed() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    printf '{"model":"opus"}\n' > "$HOME/.claude-bouvet/settings.json"
-    "$AP" mcp off bouvet >/dev/null 2>&1
-    assert_not_contains "$(cat "$HOME/.claude-bouvet/.claude.json")" "mcp serve" || return
-    assert_not_contains "$(cat "$HOME/.claude-bouvet/.claude.json")" "disabledMcpServers" || return
-    assert_equals '{"model":"opus"}' "$(cat "$HOME/.claude-bouvet/settings.json")" || return
+    "$AP" new brygga >/dev/null 2>&1
+    printf '{"model":"opus"}\n' > "$HOME/.claude-brygga/settings.json"
+    "$AP" mcp off brygga >/dev/null 2>&1
+    assert_not_contains "$(cat "$HOME/.claude-brygga/.claude.json")" "mcp serve" || return
+    assert_not_contains "$(cat "$HOME/.claude-brygga/.claude.json")" "disabledMcpServers" || return
+    assert_equals '{"model":"opus"}' "$(cat "$HOME/.claude-brygga/settings.json")" || return
     assert_equals ".claude.json settings.json" \
-        "$(find "$HOME/.claude-bouvet" -mindepth 1 -maxdepth 1 | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')"
+        "$(find "$HOME/.claude-brygga" -mindepth 1 -maxdepth 1 | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')"
 }
 
 case_registry_lives_outside_every_root() {
     # Putting the tool's own state inside a root would make that state
     # account-specific, which is the opposite of the point.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    case "$HOME/.config/agent-profiles/bouvet.conf" in
+    "$AP" new brygga >/dev/null 2>&1
+    case "$HOME/.config/agent-profiles/brygga.conf" in
         "$HOME/.claude"*) fail "the registry is inside a config root" ;;
     esac
-    [ -f "$HOME/.config/agent-profiles/bouvet.conf" ] || fail "no registry entry"
+    [ -f "$HOME/.config/agent-profiles/brygga.conf" ] || fail "no registry entry"
 }
 
 # AP_SOURCE is the script itself. $AP is a two-line shim that re-executes it
@@ -105,17 +105,17 @@ case_source_never_uses_predictable_temp_names() {
 
 case_no_command_writes_to_the_agents_state_file() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
-    before=$(cat "$HOME/.claude-bouvet/.claude.json")
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
+    before=$(cat "$HOME/.claude-brygga/.claude.json")
     "$AP" list >/dev/null 2>&1
     "$AP" doctor >/dev/null 2>&1
     "$AP" verify >/dev/null 2>&1
     "$AP" explain >/dev/null 2>&1
     "$AP" mcp status >/dev/null 2>&1
-    "$AP" mcp status bouvet >/dev/null 2>&1
-    after=$(cat "$HOME/.claude-bouvet/.claude.json")
+    "$AP" mcp status brygga >/dev/null 2>&1
+    after=$(cat "$HOME/.claude-brygga/.claude.json")
     assert_equals "$before" "$after"
 }
 
@@ -125,10 +125,10 @@ case_no_document_carries_a_credential() {
     # well as in the source. A credential file is put where a root really
     # keeps one, and no document may reproduce a byte of it.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
     printf '{"claudeAiOauth":{"accessToken":"sk-ant-oat-NOTATOKEN-CANARY"}}\n' \
-        > "$HOME/.claude-bouvet/.credentials.json"
+        > "$HOME/.claude-brygga/.credentials.json"
     assert_not_contains "$("$AP" doctor --json 2>&1)" "CANARY" || return
     assert_not_contains "$("$AP" list --json 2>&1)" "CANARY" || return
     assert_not_contains "$("$AP" verify --json 2>&1)" "CANARY" || return
@@ -140,12 +140,12 @@ case_no_document_carries_a_credential() {
 
 case_explain_states_the_scheme() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$("$AP" explain 2>&1); status=$?
     assert_status 0 "$status" || return
     assert_contains "$out" "No symlinks" || return
     assert_contains "$out" "keyed to the root path" || return
-    assert_contains "$out" "$HOME/.claude-bouvet"
+    assert_contains "$out" "$HOME/.claude-brygga"
 }
 
 case_help_and_version() {

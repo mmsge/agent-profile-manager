@@ -367,10 +367,10 @@ guidance_fixture() {
     fake_osa "$HOME/fakebin"
     fake_open "$HOME/fakebin" env
     fake_defaults "$HOME/fakebin" applets
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
-    guarded_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-bouvet")"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
+    guarded_keychain "$HOME/fakebin" "$(cred_service_for "$HOME/.claude-brygga")"
 }
 
 # guidance_fixture_retiring: the same machine with a second profile, so that
@@ -378,15 +378,15 @@ guidance_fixture() {
 # the shape of an engagement ending.
 guidance_fixture_retiring() {
     guidance_fixture
-    "$AP" new tide >/dev/null 2>&1
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
-    guidance_applet "$HOME/Applications/Claude-Bouvet.app" "$HOME/.claude-bouvet" \
-        "$HOME/Library/Application Support/Claude-Bouvet"
-    printf 'applet=%s\n' "$HOME/Applications/Claude-Bouvet.app" \
-        >> "$HOME/.config/agent-profiles/bouvet.conf"
+    "$AP" new torg >/dev/null 2>&1
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
+    guidance_applet "$HOME/Applications/Claude-Brygga.app" "$HOME/.claude-brygga" \
+        "$HOME/Library/Application Support/Claude-Brygga"
+    printf 'applet=%s\n' "$HOME/Applications/Claude-Brygga.app" \
+        >> "$HOME/.config/agent-profiles/brygga.conf"
     guarded_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
-        "$(cred_service_for "$HOME/.claude-tide")"
+        "$(cred_service_for "$HOME/.claude-brygga")" \
+        "$(cred_service_for "$HOME/.claude-torg")"
 }
 
 # guidance_applet <applet> <root-it-pins> <app-data>: a launcher on disk whose
@@ -747,7 +747,7 @@ case_no_printed_command_reads_or_deletes_a_credential() {
 # it has to report the orphan the line says it will.
 case_removes_credential_line_names_a_doctor_that_reports_the_orphan() {
     guidance_fixture_retiring
-    _out=$(g_remove bouvet)
+    _out=$(g_remove brygga)
     _line=$(printf '%s\n' "$_out" | grep 'D12' | head -1)
     if [ -z "$_line" ]; then
         fail "remove printed nothing about D12 in its closing report" \
@@ -757,7 +757,7 @@ case_removes_credential_line_names_a_doctor_that_reports_the_orphan() {
     _args=$(printed_command_args "$_line")
     if [ -z "$_args" ]; then
         fail "remove's credential line promises a rule but names no command to run" \
-             "printed by: remove bouvet" "claim:      $(printf '%s' "$_line" | sed 's/^ *//')"
+             "printed by: remove brygga" "claim:      $(printf '%s' "$_line" | sed 's/^ *//')"
         return
     fi
     # shellcheck disable=SC2086  # the printed argv, run as printed
@@ -765,7 +765,7 @@ case_removes_credential_line_names_a_doctor_that_reports_the_orphan() {
     case "$_dout" in
         *"belong to no known root"*) ;;
         *) fail "the command remove's credential line names does not report the orphan" \
-                "printed by: remove bouvet" \
+                "printed by: remove brygga" \
                 "claim:      $(printf '%s' "$_line" | sed 's/^ *//')" \
                 "ran:        ${AP##*/} $_args" \
                 "actual:" "$(guidance_trim "$_dout")"
@@ -780,14 +780,14 @@ case_removes_credential_line_names_a_doctor_that_reports_the_orphan() {
 # reports nothing.
 case_removes_credential_line_would_be_wrong_without_the_flag() {
     guidance_fixture_retiring
-    g_remove bouvet >/dev/null
+    g_remove brygga >/dev/null
     assert_not_contains "$(g_doctor)" "belong to no known root"
 }
 
 # The closing "Then run:" line, and the rules it promises go quiet.
 case_removes_closing_line_names_a_doctor_that_reports_d06_and_d14() {
     guidance_fixture_retiring
-    _out=$(g_remove bouvet)
+    _out=$(g_remove brygga)
     _line=$(printf '%s\n' "$_out" | grep 'Then run:' | head -1)
     if [ -z "$_line" ]; then
         fail "remove printed no closing instruction" "actual:" "$(guidance_trim "$_out")"
@@ -804,7 +804,7 @@ case_removes_closing_line_names_a_doctor_that_reports_d06_and_d14() {
         case "$_dout" in
             *"$_rule"*) ;;
             *) fail "remove promises a rule the command it names does not report" \
-                    "printed by: remove bouvet" \
+                    "printed by: remove brygga" \
                     "claim:      $(printf '%s' "$_line" | sed 's/^ *//')" \
                     "ran:        ${AP##*/} $_args" \
                     "actual:     $_rule is absent from" "$(guidance_trim "$_dout")"
@@ -817,7 +817,7 @@ case_removes_closing_line_names_a_doctor_that_reports_d06_and_d14() {
 # prints have to be the ones that make the rules it names go quiet.
 case_the_paths_remove_prints_are_there_and_deleting_them_quiets_doctor() {
     guidance_fixture_retiring
-    _out=$(g_remove bouvet)
+    _out=$(g_remove brygga)
     printf '%s\n' "$_out" | grep 'rm -rf' > "$HOME/deletes"
     _n=$(grep -c '' < "$HOME/deletes")
     if [ "$_n" -lt 3 ]; then
@@ -829,7 +829,7 @@ case_the_paths_remove_prints_are_there_and_deleting_them_quiets_doctor() {
         _target=$(printed_rm_target "$_line")
         if [ ! -e "$_target" ]; then
             fail "remove says a path is still on this machine and it is not" \
-                 "printed by: remove bouvet" \
+                 "printed by: remove brygga" \
                  "claim:      $(printf '%s' "$_line" | sed 's/^ *//')" \
                  "actual:     $_target does not exist"
             return
@@ -844,7 +844,7 @@ case_the_paths_remove_prints_are_there_and_deleting_them_quiets_doctor() {
         case "$_dout" in
             *"$_rule"*)
                 fail "remove says a rule goes quiet once the printed deletes are run" \
-                     "printed by: remove bouvet" \
+                     "printed by: remove brygga" \
                      "claim:      both go quiet once those paths are gone" \
                      "ran:        ${AP##*/} $_args" \
                      "actual:     $_rule is still reported in" "$(guidance_trim "$_dout")"
@@ -858,7 +858,7 @@ case_the_paths_remove_prints_are_there_and_deleting_them_quiets_doctor() {
 # which is both how the shape is checked and how the invariant is kept.
 case_removes_credential_command_is_a_delete_the_stand_in_refuses() {
     guidance_fixture_retiring
-    _out=$(g_remove bouvet)
+    _out=$(g_remove brygga)
     if [ -f "$HOME/security-refused" ]; then
         fail "remove called security itself" "$(cat "$HOME/security-refused")"
         return
@@ -878,7 +878,7 @@ case_removes_credential_command_is_a_delete_the_stand_in_refuses() {
     assert_status 90 "$_status" "the stand-in security did not refuse the printed delete" || return
     _recorded=$(cat "$HOME/security-refused" 2>/dev/null)
     assert_contains "$_recorded" "delete-generic-password" || return
-    assert_contains "$_recorded" "-s $(cred_service_for "$HOME/.claude-bouvet")" || return
+    assert_contains "$_recorded" "-s $(cred_service_for "$HOME/.claude-brygga")" || return
     assert_contains "$_recorded" "-a tester" || return
     assert_not_contains "$_recorded" " -g" || return
     assert_not_contains "$_recorded" " -w"
@@ -890,7 +890,7 @@ case_removes_credential_command_is_a_delete_the_stand_in_refuses() {
 
 case_doctors_d07_fix_line_run_as_printed_quiets_d07() {
     guidance_fixture
-    chmod 755 "$HOME/.claude-bouvet"
+    chmod 755 "$HOME/.claude-brygga"
     _out=$(g_doctor)
     _line=$(printf '%s\n' "$_out" | sed -n 's/^ *Fix with: \(chmod .*\)$/\1/p' | head -1)
     if [ -z "$_line" ]; then
@@ -911,10 +911,10 @@ case_doctors_d07_fix_line_run_as_printed_quiets_d07() {
 case_doctors_d13_fix_line_run_as_printed_quiets_d13() {
     guidance_fixture
     mkdir -p "$HOME/.claude-elsewhere"
-    guidance_applet "$HOME/Applications/Claude-Bouvet.app" "$HOME/.claude-elsewhere" \
-        "$HOME/Library/Application Support/Claude-Bouvet"
-    printf 'applet=%s\n' "$HOME/Applications/Claude-Bouvet.app" \
-        >> "$HOME/.config/agent-profiles/bouvet.conf"
+    guidance_applet "$HOME/Applications/Claude-Brygga.app" "$HOME/.claude-elsewhere" \
+        "$HOME/Library/Application Support/Claude-Brygga"
+    printf 'applet=%s\n' "$HOME/Applications/Claude-Brygga.app" \
+        >> "$HOME/.config/agent-profiles/brygga.conf"
     _out=$(g_doctor)
     assert_contains "$_out" "D13" || return
     _line=$(printf '%s\n' "$_out" | grep 'Fix with:' | grep "${AP##*/} app" | head -1)
@@ -937,8 +937,8 @@ case_doctors_d13_fix_line_run_as_printed_quiets_d13() {
 
 case_doctors_d14_fix_line_run_as_printed_quiets_d14() {
     guidance_fixture
-    guidance_applet "$HOME/Desktop/Bouvet.app" "$HOME/.claude-bouvet" \
-        "$HOME/Library/Application Support/Claude-Bouvet"
+    guidance_applet "$HOME/Desktop/Brygga.app" "$HOME/.claude-brygga" \
+        "$HOME/Library/Application Support/Claude-Brygga"
     _out=$(g_doctor)
     assert_contains "$_out" "D14" || return
     _line=$(printf '%s\n' "$_out" | grep 'Fix with:' | grep -- '--applet' | head -1)
@@ -1002,7 +1002,7 @@ case_doctors_d15_fix_line_names_the_registry_that_holds_the_entries() {
 case_doctors_d12_skip_note_names_a_doctor_that_reports_d12() {
     guidance_fixture
     guarded_keychain "$HOME/fakebin" \
-        "$(cred_service_for "$HOME/.claude-bouvet")" \
+        "$(cred_service_for "$HOME/.claude-brygga")" \
         "Claude Code-credentials-deadbeef"
     _out=$(g_doctor)
     _line=$(printf '%s\n' "$_out" | grep 'were not checked' | head -1)
@@ -1029,13 +1029,13 @@ case_doctors_d12_skip_note_names_a_doctor_that_reports_d12() {
 
 case_verifys_missing_root_hint_sends_you_to_a_rule_doctor_reports() {
     guidance_fixture
-    rm -rf "$HOME/.claude-bouvet"
+    rm -rf "$HOME/.claude-brygga"
     assert_doctor_reports_what_verify_says "$(g_verify)" "$(g_doctor)"
 }
 
 case_verifys_project_dir_note_sends_you_to_a_rule_doctor_reports() {
     guidance_fixture
-    fixture_transcript "$HOME/.claude-bouvet" "work" "/Users/m/dev/renamed"
+    fixture_transcript "$HOME/.claude-brygga" "work" "/Users/m/dev/renamed"
     assert_doctor_reports_what_verify_says "$(g_verify)" "$(g_doctor)"
 }
 
@@ -1062,7 +1062,7 @@ case_the_audit_never_asks_the_keychain_for_a_secret() {
     guidance_fixture
     g_doctor --keychain-scan >/dev/null 2>&1
     g_verify >/dev/null 2>&1
-    g_remove bouvet >/dev/null 2>&1
+    g_remove brygga >/dev/null 2>&1
     if [ -f "$HOME/security-refused" ]; then
         fail "the tool made a security(1) call the stand-in refuses" \
              "$(cat "$HOME/security-refused")"

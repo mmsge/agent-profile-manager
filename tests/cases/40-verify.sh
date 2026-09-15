@@ -6,9 +6,9 @@
 case_verify_unchecked_exits_4() {
     # Nothing broken, but the macOS facts cannot be checked from anywhere else.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
     out=$("$AP" verify 2>&1); status=$?
     assert_status 4 "$status" "$out" || return
     assert_contains "$out" "not running on macOS" || return
@@ -17,9 +17,9 @@ case_verify_unchecked_exits_4() {
 
 case_verify_confirms_cwd_is_recorded() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
     out=$("$AP" verify 2>&1)
     assert_contains "$out" "ok        F11"
 }
@@ -30,12 +30,12 @@ case_verify_catches_cwd_disappearing() {
     # D03 finds nothing and reports a clean machine. verify must catch that,
     # because a silent pass is worse than a failure.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_account "$HOME/.claude-highsoft" "m@highsoft.no" "org-h"
-    fixture_transcript_nocwd "$HOME/.claude-bouvet" "-Users-m-dev-shared"
-    fixture_transcript_nocwd "$HOME/.claude-highsoft" "-Users-m-dev-shared"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_account "$HOME/.claude-havnelab" "m@havnelab.no" "org-h"
+    fixture_transcript_nocwd "$HOME/.claude-brygga" "-Users-m-dev-shared"
+    fixture_transcript_nocwd "$HOME/.claude-havnelab" "-Users-m-dev-shared"
 
     out=$("$AP" verify 2>&1); status=$?
     assert_status 3 "$status" "$out" || return
@@ -50,10 +50,10 @@ case_verify_catches_cwd_disappearing() {
 
 case_verify_catches_account_key_moving() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
     # A state file that no longer carries oauthAccount.emailAddress.
-    printf '{"account":{"email":"m@bouvet.no"}}\n' > "$HOME/.claude-bouvet/.claude.json"
+    printf '{"account":{"email":"m@brygga.no"}}\n' > "$HOME/.claude-brygga/.claude.json"
     out=$("$AP" verify 2>&1); status=$?
     assert_status 3 "$status" || return
     assert_contains "$out" "BROKEN    F07"
@@ -61,10 +61,10 @@ case_verify_catches_account_key_moving() {
 
 case_verify_reports_partial_cwd_coverage() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-a" "/Users/m/dev/a"
-    fixture_transcript_nocwd "$HOME/.claude-bouvet" "-Users-m-dev-b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-a" "/Users/m/dev/a"
+    fixture_transcript_nocwd "$HOME/.claude-brygga" "-Users-m-dev-b"
     out=$("$AP" verify 2>&1); status=$?
     assert_status 3 "$status" || return
     assert_contains "$out" "only 1 of 2"
@@ -79,8 +79,8 @@ case_verify_unchecked_without_roots() {
 
 case_verify_notes_version_drift() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
     # A fake claude that reports a version the facts were not checked against.
     mkdir -p "$HOME/fakebin"
     printf '#!/bin/sh\necho "9.9.9 (Claude Code)"\n' > "$HOME/fakebin/claude"
@@ -95,8 +95,8 @@ case_verify_notes_version_drift() {
 # not registered. Verify must say which of the two situations it is in.
 case_verify_says_unregistered_not_absent() {
     HOME=$(new_home); export HOME
-    mkdir -p "$HOME/.claude-tide"
-    fixture_account "$HOME/.claude-tide" "m@tide.no" "org-t"
+    mkdir -p "$HOME/.claude-torg"
+    fixture_account "$HOME/.claude-torg" "m@torg.no" "org-t"
 
     out=$("$AP" verify 2>&1)
     assert_contains "$out" "no profile is registered" || return

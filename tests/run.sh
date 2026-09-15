@@ -412,10 +412,10 @@ fake_defaults() {
                 printf '        GUID = 1105742133;\n'
                 printf '        "tile-data" =         {\n'
                 printf '            "file-data" =             {\n'
-                printf '                "_CFURLString" = "file://%s/";\n' "$(url_encode "$HOME/Applications/Claude-Tide.app")"
+                printf '                "_CFURLString" = "file://%s/";\n' "$(url_encode "$HOME/Applications/Claude-Torg.app")"
                 printf '                "_CFURLStringType" = 15;\n'
                 printf '            };\n'
-                printf '            "file-label" = "Claude-Tide";\n'
+                printf '            "file-label" = "Claude-Torg";\n'
                 printf '        };\n'
                 printf '        "tile-type" = "file-tile";\n'
                 printf '    }\n'

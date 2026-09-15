@@ -11,9 +11,9 @@
 
 # ol_clean_profile: one profile, signed in, with a transcript. A clean audit.
 ol_clean_profile() {
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
 }
 
 # strip_generated_at <json>: a document's own timestamp is the one field two
@@ -56,7 +56,7 @@ case_doctor_quiet_is_silent_with_no_profiles_either() {
 case_doctor_quiet_still_prints_a_finding() {
     HOME=$(new_home); export HOME
     ol_clean_profile
-    chmod 755 "$HOME/.claude-bouvet"
+    chmod 755 "$HOME/.claude-brygga"
     out=$("$AP" doctor --quiet 2>&1); status=$?
     assert_status 2 "$status" || return
     assert_contains "$out" "D07" || return
@@ -81,7 +81,7 @@ case_doctor_explain_does_not_hide_or_add_findings() {
     # rejected, which is what a genuinely global flag has to do.
     HOME=$(new_home); export HOME
     ol_clean_profile
-    chmod 755 "$HOME/.claude-bouvet"
+    chmod 755 "$HOME/.claude-brygga"
     plain=$("$AP" doctor 2>&1); pstatus=$?
     explained=$("$AP" doctor --explain 2>&1); estatus=$?
     assert_equals "$pstatus" "$estatus" || return
@@ -130,9 +130,9 @@ case_quiet_wins_over_explain_after_it() {
 
 case_verify_quiet_drops_routine_lines_but_keeps_unchecked() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
 
     plain=$("$AP" verify 2>&1)
     assert_contains "$plain" "Checking the assumptions" || return
@@ -148,12 +148,12 @@ case_verify_quiet_drops_routine_lines_but_keeps_unchecked() {
 
 case_verify_quiet_still_prints_when_broken() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new highsoft >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_account "$HOME/.claude-highsoft" "m@highsoft.no" "org-h"
-    fixture_transcript_nocwd "$HOME/.claude-bouvet" "-Users-m-dev-shared"
-    fixture_transcript_nocwd "$HOME/.claude-highsoft" "-Users-m-dev-shared"
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_account "$HOME/.claude-havnelab" "m@havnelab.no" "org-h"
+    fixture_transcript_nocwd "$HOME/.claude-brygga" "-Users-m-dev-shared"
+    fixture_transcript_nocwd "$HOME/.claude-havnelab" "-Users-m-dev-shared"
 
     out=$("$AP" verify --quiet 2>&1); status=$?
     assert_status 3 "$status" "$out" || return
@@ -164,9 +164,9 @@ case_verify_quiet_still_prints_when_broken() {
 
 case_verify_explain_does_not_change_the_verdict() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
     plain=$("$AP" verify 2>&1); pstatus=$?
     explained=$("$AP" verify --explain 2>&1); estatus=$?
     assert_equals "$pstatus" "$estatus" || return
@@ -189,7 +189,7 @@ case_verify_rejects_nothing_new() {
 case_doctor_json_is_identical_at_every_level() {
     HOME=$(new_home); export HOME
     ol_clean_profile
-    chmod 755 "$HOME/.claude-bouvet"
+    chmod 755 "$HOME/.claude-brygga"
 
     raw_plain=$("$AP" doctor --json 2>/dev/null)
     raw_quiet=$("$AP" doctor --json --quiet 2>/dev/null)
@@ -208,9 +208,9 @@ case_doctor_json_is_identical_at_every_level() {
 
 case_verify_json_is_identical_at_every_level() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    fixture_account "$HOME/.claude-bouvet" "m@bouvet.no" "org-b"
-    fixture_transcript "$HOME/.claude-bouvet" "-Users-m-dev-b" "/Users/m/dev/b"
+    "$AP" new brygga >/dev/null 2>&1
+    fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
+    fixture_transcript "$HOME/.claude-brygga" "-Users-m-dev-b" "/Users/m/dev/b"
 
     raw_plain=$("$AP" verify --json 2>/dev/null)
     raw_quiet=$("$AP" verify --json --quiet 2>/dev/null)
@@ -242,7 +242,7 @@ case_list_json_is_identical_under_agent_profile_explain() {
 case_doctor_report_is_identical_at_every_level() {
     HOME=$(new_home); export HOME
     ol_clean_profile
-    chmod 755 "$HOME/.claude-bouvet"
+    chmod 755 "$HOME/.claude-brygga"
 
     base="$HOME/plain"; "$AP" doctor --report "$base" >/dev/null 2>&1
     base_q="$HOME/quiet"; "$AP" doctor --report "$base_q" --quiet >/dev/null 2>&1
@@ -269,25 +269,25 @@ case_doctor_report_is_identical_at_every_level() {
 
 case_new_default_is_short() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet 2>&1)
+    out=$("$AP" new brygga 2>&1)
     lines=$(printf '%s\n' "$out" | grep -c '')
     if [ "$lines" -gt 3 ]; then
         fail "expected at most 3 lines, got $lines" "$out"
         return
     fi
-    assert_contains "$out" "Created profile bouvet" || return
+    assert_contains "$out" "Created profile brygga" || return
     assert_contains "$out" "Next:"
 }
 
 case_new_default_omits_the_field_block() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet 2>&1)
+    out=$("$AP" new brygga 2>&1)
     assert_not_contains "$out" "  agent     claude"
 }
 
 case_new_explain_restores_the_field_block() {
     HOME=$(new_home); export HOME
-    out=$("$AP" new bouvet --explain 2>&1)
+    out=$("$AP" new brygga --explain 2>&1)
     assert_contains "$out" "  agent     claude" || return
     assert_contains "$out" "  root      " || return
     assert_contains "$out" "  app data  "
@@ -299,7 +299,7 @@ case_new_explain_restores_the_field_block() {
 
 case_app_default_omits_pins_and_rationale() {
     desktop_fixture
-    out=$(desk app tide 2>&1); status=$?
+    out=$(desk app torg 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "Created" || return
     assert_not_contains "$out" "  pins" || return
@@ -308,8 +308,8 @@ case_app_default_omits_pins_and_rationale() {
 
 case_app_explain_restores_pins_and_confirm_hint() {
     desktop_fixture
-    desk app tide >/dev/null 2>&1
-    out=$(desk app tide --explain 2>&1); status=$?
+    desk app torg >/dev/null 2>&1
+    out=$(desk app torg --explain 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "  pins" || return
     assert_contains "$out" "Nothing to do" || return
@@ -338,9 +338,9 @@ case_which_pinned_output_is_unaffected_by_explain() {
     # The pinned branch already states facts only, so --explain changes
     # nothing there; it must still be accepted rather than rejected.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    plain=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "$AP" which)
-    explained=$(CLAUDE_CONFIG_DIR="$HOME/.claude-bouvet" "$AP" which --explain)
+    "$AP" new brygga >/dev/null 2>&1
+    plain=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" which)
+    explained=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" which --explain)
     assert_equals "$plain" "$explained"
 }
 

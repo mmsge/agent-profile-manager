@@ -53,39 +53,39 @@ case_bash_completion_offers_profile_names_at_the_first_word_too() {
     # A bare profile name runs it, so it belongs at the same position as a
     # subcommand.
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(complete_for agent-profile "")
-    assert_contains "$out" "bouvet"
+    assert_contains "$out" "brygga"
 }
 
 case_bash_completion_offers_only_profiles_after_run() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
-    "$AP" new tide >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new torg >/dev/null 2>&1
     out=$(complete_for agent-profile run "")
-    assert_contains "$out" "bouvet" || return
-    assert_contains "$out" "tide" || return
+    assert_contains "$out" "brygga" || return
+    assert_contains "$out" "torg" || return
     assert_not_contains "$out" "doctor"
 }
 
 case_bash_completion_offers_profiles_and_purge_after_remove() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(complete_for agent-profile remove "")
-    assert_contains "$out" "bouvet" || return
+    assert_contains "$out" "brygga" || return
     assert_contains "$out" "--purge"
 }
 
 case_bash_completion_offers_subcommands_then_profiles_after_mcp() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$(complete_for agent-profile mcp "")
     assert_contains "$out" "on" || return
     assert_contains "$out" "off" || return
     assert_contains "$out" "status" || return
-    assert_not_contains "$out" "bouvet" || return
+    assert_not_contains "$out" "brygga" || return
     out=$(complete_for agent-profile mcp on "")
-    assert_contains "$out" "bouvet" || return
+    assert_contains "$out" "brygga" || return
     assert_not_contains "$out" "status"
 }
 
@@ -135,12 +135,12 @@ case_bash_completion_sees_a_profile_created_after_sourcing() {
     # shellcheck source=/dev/null
     . "$_cff"
     rm -f "$_cff"
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     COMP_WORDS=(agent-profile run "")
     COMP_CWORD=2
     COMPREPLY=()
     _agent-profile_complete
-    assert_contains "${COMPREPLY[*]}" "bouvet"
+    assert_contains "${COMPREPLY[*]}" "brygga"
 }
 
 case_bash_completion_uses_the_invoked_name() {
@@ -181,10 +181,10 @@ case_zsh_completion_lists_every_subcommand() {
 
 case_zsh_completion_looks_up_profiles_rather_than_baking_them_in() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$("$AP" completion zsh 2>&1)
     assert_contains "$out" "list 2>/dev/null" || return
-    assert_not_contains "$out" "bouvet"
+    assert_not_contains "$out" "brygga"
 }
 
 case_zsh_completion_offers_flags_per_subcommand() {
@@ -225,10 +225,10 @@ case_fish_completion_lists_every_subcommand() {
 
 case_fish_completion_looks_up_profiles_rather_than_baking_them_in() {
     HOME=$(new_home); export HOME
-    "$AP" new bouvet >/dev/null 2>&1
+    "$AP" new brygga >/dev/null 2>&1
     out=$("$AP" completion fish 2>&1)
     assert_contains "$out" "__agent-profile_profiles" || return
-    assert_not_contains "$out" "bouvet"
+    assert_not_contains "$out" "brygga"
 }
 
 case_fish_completion_offers_flags_per_subcommand() {
