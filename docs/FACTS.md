@@ -951,6 +951,145 @@ it, and list again; nothing should have moved.
 
 ---
 
+## MCP servers, and the sessions server
+
+Written on Linux on 2026-09-15 against Claude Code **2.1.272**, in a throwaway
+config root under `$TMPDIR`, for the sessions server design in
+[docs/proposals/2026-09-15-sessions-mcp.md](proposals/2026-09-15-sessions-mcp.md).
+Linux is not a Mac: the CLI is the same program, but what it fetches, what it
+writes before a login and how the desktop app's embedded copy behaves were not
+observed there. Each entry says what a Mac check would settle.
+
+### F23 What does `claude mcp add --scope user` write into a pinned root?
+
+**Status:** `VERIFIED` 2026-09-15 on Linux against 2.1.272 for the file, the
+key and its shape; `UNVERIFIED` on macOS, and `UNVERIFIED` anywhere for what
+happens before a first login on a real machine, see below.
+
+With `CLAUDE_CONFIG_DIR` pointed at an empty throwaway directory,
+
+```sh
+claude mcp add --scope user sessions -- sh -c 'true'
+```
+
+printed `File modified: <root>/.claude.json` and wrote, at the top level of
+that file:
+
+```json
+{"mcpServers": {"sessions": {"type": "stdio", "command": "sh",
+                              "args": ["-c", "true"], "env": {}}}}
+```
+
+`claude mcp remove --scope user sessions` took the entry out again, leaving
+`"mcpServers": {}`. `claude mcp get sessions` reports the scope as
+`User config (available in all your projects)`.
+
+The other two scopes are wrong for a per-root server. `--scope local`, the
+default, lands under `projects[<cwd>].mcpServers` in the same file, keyed by
+the directory the command ran in. `--scope project` writes `.mcp.json` into
+that directory, which every profile and everyone else on the repository would
+then share.
+
+**The root was not empty afterwards.** Beside `.claude.json` the run created
+`backups/`, `policy-limits.json`, `policy-limits.json.stamp.json` and
+`remote-settings.json`. The documentation describes the last two as fetched
+caches, "Cached copy of server-managed settings for your organization" and
+"Cached feature policy settings for your organization"
+([.claude directory](https://code.claude.com/docs/en/claude-directory)), so a
+`mcp add` may make a network request. On the hosted environment this was run
+in, the new state file also carried an `oauthAccount` block, supplied to the
+CLI by that environment rather than by a login. Whether either happens on a
+Mac that has never logged in to that root is the open question, and it
+matters: `list` reads `oauthAccount` to name a root's account.
+
+**How to re-check, on a Mac.** Point the variable at an empty directory,
+register and remove a harmless server, and list what appeared. Run the four
+lines one at a time.
+
+```sh
+export CLAUDE_CONFIG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agpin-mcp-XXXXXX")
+claude mcp add --scope user probe -- sh -c 'true'
+ls -A "$CLAUDE_CONFIG_DIR"
+python3 -c 'import json,os; d=json.load(open(os.environ["CLAUDE_CONFIG_DIR"]+"/.claude.json")); print(sorted(d)); print(d.get("mcpServers"))'
+```
+
+Then `claude mcp remove --scope user probe`, `rm -rf "$CLAUDE_CONFIG_DIR"` and
+`unset CLAUDE_CONFIG_DIR`. If `oauthAccount` is in the printed key list on a
+machine that never logged in there, this entry is out of date and `list` needs
+a guard. Watch the network while the `add` runs if the question of a fetch
+matters to you.
+
+### F24 Does a stdio MCP server inherit `CLAUDE_CONFIG_DIR` from the pinned process?
+
+**Status:** `VERIFIED` 2026-09-15 on Linux against 2.1.272. Answer: **yes**,
+together with the rest of the parent's environment. `UNVERIFIED` on macOS and
+for the desktop app's embedded copy.
+
+A server registered as in F23, whose command was `sh -c 'env > <file>'`, was
+started by `claude mcp list` run with `CLAUDE_CONFIG_DIR` pointed at the
+throwaway root. The file it wrote held 138 variables, among them
+`CLAUDE_CONFIG_DIR=<the throwaway root>`, `HOME`, `PATH`, `PWD` and every
+`CLAUDE_*` variable of the parent process. The `env` object in the
+registration was empty, so nothing in the registration supplied the value: it
+came from the process that started the server. The documentation adds that
+Claude Code sets `CLAUDE_PROJECT_DIR` in the spawned server's environment to
+the project root ([mcp](https://code.claude.com/docs/en/mcp)).
+
+**This is what the sessions server's isolation rests on.** A server that
+reads the variable sees the root its Claude Code sees, and a launcher that
+compares the variable against the root it was registered for can refuse to
+serve the wrong one. The same inheritance also means a stdio server sees
+every other variable in the session's environment, which is a reason for the
+server to read exactly one of them.
+
+**How to re-check.** `claude mcp list` starts every registered server, so no
+login is needed. Pin the variable to a throwaway root, register a server that
+writes its environment to a file, list, and read the file. One command per
+line.
+
+```sh
+export CLAUDE_CONFIG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agpin-mcp-XXXXXX")
+claude mcp add --scope user envprobe -- sh -c "env > $CLAUDE_CONFIG_DIR/env.txt"
+claude mcp list
+grep '^CLAUDE_CONFIG_DIR=' "$CLAUDE_CONFIG_DIR/env.txt"
+```
+
+The `list` reports the probe as failed to connect, which is expected: it
+exits without speaking the protocol. The `grep` should print the throwaway
+path. Then `rm -rf "$CLAUDE_CONFIG_DIR"` and `unset CLAUDE_CONFIG_DIR`.
+
+### F25 Where do subagent transcripts live, and how are they tied to their session?
+
+**Status:** `DOCUMENTED` for the location, `VERIFIED` 2026-09-15 on Linux
+against 2.1.272 for the file names and the record keys.
+
+The documentation lists `projects/<project>/<session>/subagents/` as
+"Subagent conversation transcripts, removed with the parent session
+transcript when it ages out", beside `projects/<project>/<session>/tool-results/`,
+"Large tool outputs spilled to separate files"
+([.claude directory](https://code.claude.com/docs/en/claude-directory)).
+
+Observed after one subagent ran: `<session-id>/subagents/agent-<id>.jsonl`
+and `agent-<id>.meta.json` beside it. The subagent's `user`, `assistant` and
+`attachment` records carry the same keys as the parent's, `sessionId`,
+`timestamp`, `cwd`, `gitBranch`, `version`, `uuid`, `parentUuid` and
+`isSidechain`, plus `agentId`. In the parent transcript, the `user` record
+that carries the subagent's result has a `toolUseResult` object naming
+`agentId` and `agentType`. So the link runs both ways by key name, and a
+reader can page a subagent's transcript as a child of exactly one session.
+
+**How to re-check.** In any pinned session, run one subagent, then list the
+session's directory by name only.
+
+```sh
+find "$CLAUDE_CONFIG_DIR/projects" -path '*/subagents/*' -name '*.jsonl'
+```
+
+A path of the shape above means the layout holds. Nothing in this check reads
+a transcript's content.
+
+---
+
 ## Windows
 
 **No Windows machine has been probed.** Everything in this section was read out
