@@ -160,7 +160,7 @@ if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
         exec "$_ms_python" -m agent_profile_sessions --root "$_ms_root"
 fi
 
-AGENT_PROFILE_VERSION="0.10.0"
+AGENT_PROFILE_VERSION="0.11.0"
 AGENT_PROFILE_LICENSE="GPL-3.0-or-later"
 
 # The name this was invoked as. Every message names the command the reader
