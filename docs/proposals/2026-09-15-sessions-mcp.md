@@ -16,6 +16,11 @@ is not the same as verified on a Mac. The three new entries in
 [FACTS.md](../FACTS.md), F23 to F25, record the observations and say how to
 repeat them on macOS.
 
+The companion issue is
+[#67](https://github.com/mmsge/agent-profile-manager/issues/67), which
+offers the options below with a recommendation and carries the
+implementation prompt for whatever is decided there.
+
 ## What was asked, and what is already decided
 
 The request, verbatim: "I want all profiles to include an MCP server for
