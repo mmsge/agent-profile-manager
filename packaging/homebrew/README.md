@@ -129,8 +129,8 @@ AGENT_PROFILE_COSIGN_IDENTITY='^https://github\.com/mmsge/agent-profile-manager/
 ```
 
 Nothing cut after 2026-09-14 needs that, and the default is deliberately left
-strict so it stays that way. README.md's "Verifying by hand" has the same
-override for `tools/install.sh` and for `cosign verify-blob`.
+strict so it stays that way. "Verifying by hand" in [`docs/INSTALL.md`](../../docs/INSTALL.md#verifying-by-hand)
+has the same override for `tools/install.sh` and for `cosign verify-blob`.
 
 Either way the formula cannot be updated before the release, because until it
 exists there is no sum to pin.

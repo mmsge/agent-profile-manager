@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# gen-test-count.sh: generate the test count in README.md's Development
-# section instead of hand-typing it.
+# gen-test-count.sh: generate the test count in the Development section of
+# docs/CONTRIBUTING.md instead of hand-typing it.
 #
 # The count used to be a number a contributor typed by hand every time a
 # branch added or removed a test. Every branch that touched it edited the
@@ -13,7 +13,7 @@
 # computes it by hand, or guesses it, again.
 #
 # Usage:
-#   tools/gen-test-count.sh                # run the suite, rewrite README.md
+#   tools/gen-test-count.sh                # run the suite, rewrite the count
 #   tools/gen-test-count.sh --check         # run the suite, fail if stale
 #   tools/gen-test-count.sh --from FILE     # read the suite's output from
 #                                           # FILE instead of running it again
@@ -26,7 +26,8 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-README="$ROOT/README.md"
+README="$ROOT/docs/CONTRIBUTING.md"
+README_NAME="docs/CONTRIBUTING.md"
 
 MODE="write"
 OUTPUT_FILE=""
@@ -74,7 +75,7 @@ else
     OUTPUT_FILE="$_tmp_output"
     if ! "$ROOT/tests/run.sh" >"$OUTPUT_FILE" 2>&1; then
         cat "$OUTPUT_FILE" >&2
-        printf '%s: the suite failed; fix it before touching the README count\n' "$(basename "$0")" >&2
+        printf '%s: the suite failed; fix it before touching the documented count\n' "$(basename "$0")" >&2
         exit 1
     fi
 fi
@@ -93,21 +94,21 @@ documented=$(sed -n 's/^tests\/run\.sh[[:space:]][[:space:]]*# \([0-9][0-9]*\) t
 
 if [ "$MODE" = check ]; then
     if [ -z "$documented" ]; then
-        printf "%s: could not find the test count line in README.md's Development section\n" \
-            "$(basename "$0")" >&2
+        printf "%s: could not find the test count line in the Development section of %s\n" \
+            "$(basename "$0")" "$README_NAME" >&2
         exit 1
     fi
     if [ "$reported" != "$documented" ]; then
-        printf '%s: tests/run.sh reports %s tests but README.md says %s tests; run tools/gen-test-count.sh and commit README.md\n' \
-            "$(basename "$0")" "$reported" "$documented" >&2
+        printf '%s: tests/run.sh reports %s tests but %s says %s tests; run tools/gen-test-count.sh and commit %s\n' \
+            "$(basename "$0")" "$reported" "$README_NAME" "$documented" "$README_NAME" >&2
         exit 1
     fi
-    printf '%s: README.md agrees with the suite: %s tests\n' "$(basename "$0")" "$reported"
+    printf '%s: %s agrees with the suite: %s tests\n' "$(basename "$0")" "$README_NAME" "$reported"
     exit 0
 fi
 
 if [ "$reported" = "$documented" ]; then
-    printf '%s: README.md already says %s tests, nothing to do\n' "$(basename "$0")" "$reported"
+    printf '%s: %s already says %s tests, nothing to do\n' "$(basename "$0")" "$README_NAME" "$reported"
     exit 0
 fi
 
@@ -116,4 +117,4 @@ sed "s/^\(tests\/run\.sh[[:space:]]*# \)[0-9][0-9]*\( tests, no dependencies\)\$
     "$README" > "$_tmp_readme"
 mv "$_tmp_readme" "$README"
 _tmp_readme=""
-printf '%s: README.md updated: %s -> %s tests\n' "$(basename "$0")" "${documented:-none}" "$reported"
+printf '%s: %s updated: %s -> %s tests\n' "$(basename "$0")" "$README_NAME" "${documented:-none}" "$reported"
