@@ -89,6 +89,156 @@ reopened here, but each has a cost and the cost is stated where it lands.
 The rest of this document is the argument for each of those, with the
 numbers, and with the alternatives that lost.
 
+## How it works, end to end
+
+Two profiles on one Mac, `bouvet` and `highsoft`, each with a session open.
+Everything above the dotted line is code and is shared the way the bash
+script itself is shared. Everything below it is data, and nothing below the
+line is shared by anything.
+
+```
+              the tool's install tree: one copy, code only, no data
+  +---------------------------------------------------------------------+
+  |  /opt/homebrew/bin/agpin  ->  libexec/bin/agent-profile             |
+  |  libexec/server/.venv/bin/python  (FastMCP, agent_profile_sessions) |
+  +---------------------------------------------------------------------+
+  ~/.config/agent-profiles/{bouvet,highsoft}.conf    (root=, no server state)
+ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+  ~/.claude-bouvet/                       ~/.claude-highsoft/
+  |-- .claude.json                        |-- .claude.json
+  |     mcpServers.sessions:              |     mcpServers.sessions:
+  |       agpin mcp serve                 |       agpin mcp serve
+  |         --root ~/.claude-bouvet       |         --root ~/.claude-highsoft
+  |-- .credentials.json  (never read)     |-- .credentials.json  (never read)
+  |-- settings.json, skills/, ...         |-- settings.json, skills/, ...
+  `-- projects/      <== the only         `-- projects/      <== the only
+        <enc-cwd>/       directory the          <enc-cwd>/       directory the
+          <sid>.jsonl    server opens             <sid>.jsonl    server opens
+          <sid>/subagents/                        <sid>/subagents/
+
+        ^ reads                                 ^ reads
+        |                                       |
+  [python sessions server]                [python sessions server]
+        ^ exec, after checking                  ^ exec, after checking
+        |   CLAUDE_CONFIG_DIR == --root         |   CLAUDE_CONFIG_DIR == --root
+  [agpin mcp serve --root <bouvet>]       [agpin mcp serve --root <highsoft>]
+        ^ stdio child, inherits the             ^ stdio child, inherits the
+        |   parent's environment (F24)          |   parent's environment (F24)
+  [claude, CLAUDE_CONFIG_DIR=<bouvet>]    [claude, CLAUDE_CONFIG_DIR=<highsoft>]
+        ^                                       ^
+  agpin run bouvet, agpin shell bouvet    agpin run highsoft, a desktop applet
+```
+
+### What happens at session start
+
+1. `agpin run bouvet` execs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-bouvet`
+   in its environment, exactly as today. Nothing about the launch changes.
+2. Claude Code reads its own state file, which because of the variable is
+   `~/.claude-bouvet/.claude.json` (F10), finds `mcpServers.sessions` there,
+   and spawns it as a child process over stdio. The child gets the parent's
+   environment, so it arrives with `CLAUDE_CONFIG_DIR=~/.claude-bouvet` set
+   (F24).
+3. The child is `agpin mcp serve --root ~/.claude-bouvet`. It compares the
+   variable with `--root`. They agree, so it locates the server's interpreter
+   in its own install tree and execs it. Had they disagreed, or had the
+   variable been unset, it would have exited with one line on stderr and
+   Claude Code would show the server as failed in `/mcp`.
+4. The Python server resolves `--root`, opens nothing but `projects/` beneath
+   it, and answers `initialize` and `tools/list`. About one second after step
+   2, the session has six tools: `list_projects`, `list_sessions`,
+   `session_summary`, `get_session`, `get_message` and `search`.
+5. The server lives as long as the session. It caches what it has parsed in
+   memory, keyed by path, size and modification time, and re-reads a file
+   only when those change, so it can answer about the conversation it is
+   part of. When the session exits, Claude Code closes the pipe and the
+   server exits. Nothing was written anywhere.
+
+### What a session sees
+
+Asked "what did we decide about retries in the billing repo last week", the
+model would typically call `list_sessions(cwd="/Users/alex/src/billing",
+since="2026-09-08")`, get back a page of session rows with a 200-character
+first-prompt preview each, call `search("retry", cwd=...)` to get pointers
+into specific records, and then `get_session(session_id, start=40,
+limit=20)` to read the twenty messages around the hit, each cut at 2,000
+characters, tool results and thinking left out. Every reply is capped at
+40,000 characters, which stays under the point where Claude Code starts
+warning about tool output size. Nothing returns a whole transcript in one
+call, and nothing takes a path.
+
+### How the profiles stay separate
+
+Separation is not one mechanism, it is five, and each one holds on its own.
+
+1. **The registration lives inside the root.** It is one key in
+   `<root>/.claude.json`, the state file that moves under `CLAUDE_CONFIG_DIR`
+   (F10). A Claude Code pinned to `bouvet` reads bouvet's state file and can
+   only ever find bouvet's registration. There is no global list of servers
+   that both profiles read.
+2. **The server is told its root by the same variable that pinned the
+   session.** Claude Code spawns stdio servers with its own environment
+   (F24), so the server inherits `CLAUDE_CONFIG_DIR` from the process that
+   is itself pinned by it. The pin and the server's scope cannot come apart,
+   because they are the same variable in the same process tree.
+3. **The registration also names the root, and the launcher checks both.**
+   `--root` is written into the registration at `new` time, and `mcp serve`
+   refuses to start unless it equals `CLAUDE_CONFIG_DIR`. That covers the
+   case the second mechanism does not: a state file copied or restored into
+   the wrong root. It fails visibly instead of serving the wrong account's
+   transcripts.
+4. **The server reads one directory and takes no paths.** It opens
+   `<root>/projects/` and nothing else in the root, checks every path it
+   opens is still inside `projects/` after symlink resolution, and no tool
+   accepts a path, a root or a session directory. The credential, the OAuth
+   block of the state file, `history.jsonl`, the paste cache and the file
+   history are unreachable by construction, not by policy.
+5. **stdio only, one server per session.** The server is a child process
+   with a pipe to exactly one Claude Code. There is no port, no socket and
+   no HTTP transport compiled in, so a session in `highsoft` has no way to
+   reach bouvet's server even if it wanted to. Two sessions in the same
+   profile get two servers, each read-only, with no shared cache between
+   them.
+
+What is shared is the code: the `agpin` launcher and the Python environment
+in the tool's install tree, in the same way the bash script is one file
+that every profile runs. No data, no index and no cache lives outside a
+root, and nothing lives inside a root that came from another root. The
+registry under `~/.config/agent-profiles/` holds no server state at all;
+`agpin mcp status` and `agpin list` read the answer back out of each root's
+own state file.
+
+Two edges are worth naming. An unpinned `claude` reads `~/.claude.json`,
+the stray state file beside the default root, and finds no `sessions`
+entry there unless someone registered one; if someone did, the `doctor`
+rule reports it, because a server serving the default root is a server
+serving whatever leaked into it. And the desktop app's embedded Claude Code
+honours the variable (F01) and so should read the pinned root's
+registration, but whether it starts user-scope MCP servers from it has not
+been observed and is listed as unverified below.
+
+### The lifecycle
+
+| Moment | What happens | What is written, and where |
+| --- | --- | --- |
+| `agpin new bouvet` | Creates the root, then runs `claude mcp add --scope user sessions -- <agpin> mcp serve --root <root>` pinned to it. On an adopted root, checks first that no other `sessions` entry is there. Without `claude` on `PATH`, registers nothing and prints the `mcp on` line to run later | `<root>/.claude.json`, by Claude Code's own CLI, plus what a first CLI run leaves in a root (F23) |
+| `agpin mcp status bouvet`, `agpin list` | Reads `mcpServers.sessions` back and prints `on`, `off` or `stale` | Nothing |
+| `agpin mcp off bouvet` | `claude mcp remove --scope user sessions` pinned to the root, then reads the file back to confirm the entry is gone | `<root>/.claude.json`, by the CLI |
+| `agpin mcp on bouvet` | The same `add` as `new` runs. Idempotent | The same |
+| `brew upgrade agpin`, or `tools/install.sh` again | Rebuilds the Python environment in the new version's tree. The launcher link keeps its path, so every registration stays valid untouched | The install tree only |
+| `agpin doctor` | The new rule reports a registration whose `--root` is another profile's, whose command is missing or not this tool's, whose transport is not stdio, or one sitting in the stray state file | Nothing |
+| `agpin remove bouvet --purge` | Deletes the root, and the registration with it. Nothing else to clean, because nothing else was written | The root, as today |
+
+### When it fails
+
+| Failure | What you see | Why it is safe |
+| --- | --- | --- |
+| `claude` not on `PATH` at `new` time | `new` succeeds and prints the `agpin mcp on <name>` line | The profile exists and works without the server |
+| The Python environment is missing or broken | `mcp serve` exits non-zero naming the install command; `/mcp` lists the server as failed | The session runs without the tools, nothing else is affected |
+| `--root` and `CLAUDE_CONFIG_DIR` disagree | The same failed state in `/mcp`, with the reason on stderr | The wrong account's transcripts are never opened |
+| Claude Code changes the record format | Listings shrink or empty; `verify` F11 already reports the `cwd` field going missing, and the server skips records it cannot parse | A parse failure is silence, never a crash and never a write |
+| A transcript contains hostile text | The model may read it through `get_session`; caps limit how much per call, tool results and thinking stay out unless asked for, and the server has no write, network or shell tool | The blast radius is one profile's `projects/`, read-only. Anything beyond that has to go through another tool, where Claude Code's permission model applies |
+
 ## 1. The data
 
 ### Where sessions live
