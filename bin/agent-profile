@@ -3968,7 +3968,7 @@ import json, os, sys
 state_base = sys.argv[1]
 roots = sys.argv[2:]
 
-state_files = with_account = 0
+state_files = with_account = signed_in = 0
 transcripts = with_cwd = 0
 encoded_dirs = odd_dirs = 0
 state_inside = 0
@@ -3984,6 +3984,15 @@ for root in roots:
             account = data.get("oauthAccount") or {}
             if account.get("emailAddress"):
                 with_account += 1
+            # A state file the sessions server registration created, in a
+            # root nobody has logged in to yet, holds no account under any
+            # name. Only a file that shows some sign of a login can say
+            # anything about where the identity key lives.
+            if isinstance(data, dict) and any(
+                any(word in key.lower() for word in ("account", "email", "oauth"))
+                for key in data
+            ):
+                signed_in += 1
         except Exception:
             pass
 
@@ -4021,6 +4030,7 @@ for root in roots:
 for key, value in [
     ("state_files", state_files),
     ("with_account", with_account),
+    ("signed_in", signed_in),
     ("transcripts", transcripts),
     ("with_cwd", with_cwd),
     ("encoded_dirs", encoded_dirs),
@@ -4135,11 +4145,20 @@ Try: $SELF verify [--json] [--quiet] [--explain]" ;;
         state_files=0; with_account=0
         transcripts=0; with_cwd=0
         encoded_dirs=0; odd_dirs=0
+        signed_in=0
         eval "$(verify_scan "$_ver_state" "${_ver_roots[@]}")"
 
-        # F07: account identity key.
+        # F07: account identity key. A state file with no account under any
+        # name is a root nobody has logged in to: new writes one when it
+        # registers the sessions server (docs/FACTS.md F23), so its existence
+        # no longer means a login happened.
         if [ "$state_files" -eq 0 ]; then
             vunchecked "F07" "no root holds a state file yet" \
+                "Sign in to a profile, then run verify again."
+        elif [ "$signed_in" -eq 0 ]; then
+            vunchecked "F07" "no profile is signed in yet" \
+                "$state_files state file(s) exist but hold no account under any name," \
+                "which is what a root looks like before its first login." \
                 "Sign in to a profile, then run verify again."
         elif [ "$with_account" -gt 0 ]; then
             vok "F07" "oauthAccount.emailAddress present in $with_account of $state_files state file(s)"
