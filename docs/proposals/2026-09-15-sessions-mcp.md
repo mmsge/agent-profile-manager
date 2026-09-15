@@ -4,11 +4,18 @@
 > in its own profile's config root, through an MCP server that every profile
 > gets registered at `new` time and that `agpin mcp on|off|status` controls.
 
-**Status:** proposal. Nothing in this document is decided. It argues for one
-shape, states what that shape costs, and names the decisions that are
-Markus's to make. No code accompanies it, on purpose: the request collides
-with two rules this tool states everywhere, adds a runtime and adds a
-third-party dependency, and all of that is a decision before it is a patch.
+**Status:** decided and implemented. The note was written first, with no
+code, because the request collides with two rules this tool states
+everywhere, adds a runtime and adds a third-party dependency, and all of that
+was a decision before it was a patch. Markus took the recommendations in
+sections 4 and 5 (registration through `claude mcp add` with `agpin mcp
+serve` as the command, and the Python environment built at install time in
+the tool's own tree), and
+[#68](https://github.com/mmsge/agent-profile-manager/pull/68) implements
+them: `server/`, `agpin mcp on|off|status|serve`, `doctor` D19, the installer
+and formula changes, and the rewording in section 7. The argument below is
+kept as written, so the reasoning behind each choice stays readable next to
+the code that made it.
 
 Written on 2026-09-15 against Claude Code **2.1.272**, on Linux. Everything
 marked verified below was verified there, with a throwaway config root, and
