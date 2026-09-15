@@ -251,7 +251,10 @@ case_serve_finds_the_environment_beside_the_installed_link() {
         "${BASH:-/bin/bash}" "$HOME/bin/agpin" mcp serve --root "$HOME/r" 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
     assert_contains "$out" "server python: -m agent_profile_sessions --root $HOME/r" || return
-    assert_contains "$out" "PYTHONPATH=$HOME/tree/server"
+    # The launcher resolves its tree physically, and on macOS the temporary
+    # directory is itself a symlink (/var to /private/var), so compare against
+    # the physical path rather than the one the fixture was spelled with.
+    assert_contains "$out" "PYTHONPATH=$(cd "$HOME/tree/server" && pwd -P)"
 }
 
 case_serve_usage() {
