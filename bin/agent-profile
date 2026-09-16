@@ -2558,18 +2558,51 @@ applet_scan() {
         [ -n "$_as_script" ] || continue
         # Strip the four trailing path components back to the bundle.
         _as_app=${_as_script%/Contents/Resources/Scripts/main.scpt}
-        case "$(applet_current_line "$_as_app")" in
+        # Every launch line, not the first: an applet can pin on its
+        # second line and launch bare on its first.
+        case "$(applet_lines "$_as_app" | tr '\n' ' ')" in
             *"$_as_var="*) printf '%s\n' "$_as_app" ;;
         esac
     done | sort -u
 }
 
 # applet_pinned_root <agent> <applet>: the root an applet pins, or empty.
+#
+# The first line that pins anything answers for the applet, which is what D14
+# names the owning profile from.
 applet_pinned_root() {
     _apr_var=$(agent_def "$1" envvar)
-    _apr_line=$(applet_current_line "$2")
-    # Anchored on " --args" so a root containing spaces still comes back whole.
-    printf '%s' "$_apr_line" | sed -n "s/.*$_apr_var=\(.*\) --args.*/\1/p"
+    applet_lines "$2" | while IFS= read -r _apr_line; do
+        _apr_value=$(applet_env_value "$_apr_line" "$_apr_var")
+        if [ -n "$_apr_value" ]; then
+            printf '%s\n' "$_apr_value"
+            break
+        fi
+    done | head -1
+}
+
+# applet_env_value <line> <var>: what the first "--env VAR=" in a line carries.
+#
+# Parsed as one entry in a list of arguments rather than captured greedily up
+# to " --args": a second --env after the pin used to swallow the rest of the
+# line into the root, so a working hand-tuned launcher was reported as pinning
+# somewhere else (audit-coverage gap 9, E9a). A root may hold spaces, so the
+# value runs to the next argument open(1) would read rather than to the next
+# space: the next --env, the --args that ends open's own arguments, or the
+# redirection the line ends with. A path containing " > " would be misread,
+# and this tool refuses to write one.
+applet_env_value() {
+    case "$1" in
+        *"--env $2="*) ;;
+        *) return 0 ;;
+    esac
+    _aev_rest=${1#*"--env $2="}
+    _aev_rest=${_aev_rest%% --env *}
+    _aev_rest=${_aev_rest%% --args*}
+    case "$_aev_rest" in
+        *" > "*) _aev_rest=${_aev_rest%% > *} ;;
+    esac
+    printf '%s\n' "$_aev_rest"
 }
 
 # reg_set <name> <key> <value>: replace one key, leave every other one alone.
@@ -2602,13 +2635,25 @@ applet_line_norm() {
     sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\\"'
 }
 
-# applet_current_line <applet>: the applet's launch line, normalised, or empty.
-applet_current_line() {
+# applet_lines <applet>: every launch line it holds, normalised, one per line.
+#
+# Every one of them, because an applet is a script rather than a single
+# command: one whose first line is pinned and whose second launches the app
+# bare passed the audit while launching unpinned every time it was opened
+# (audit-coverage gap 9, E9b).
+applet_lines() {
     command -v osadecompile >/dev/null 2>&1 || return 0
     osadecompile "$(applet_script_path "$1")" 2>/dev/null \
         | sed -n 's/^[[:space:]]*//; /^do shell script /p' \
-        | head -1 \
-        | applet_line_norm
+        | while IFS= read -r _al_line; do
+            printf '%s\n' "$_al_line" | applet_line_norm
+        done
+}
+
+# applet_current_line <applet>: the first launch line, normalised, or empty.
+# What a reader sees quoted back at them; the audit reads them all.
+applet_current_line() {
+    applet_lines "$1" | head -1
 }
 
 # applet_verdict <applet> <bundle> <var> <root> <flag> <app-data>
@@ -2635,36 +2680,86 @@ applet_verdict() {
     [ -f "$(applet_script_path "$_av_applet")" ] || { printf 'no-script\n'; return 0; }
     command -v osadecompile >/dev/null 2>&1 || { printf 'unreadable\n'; return 0; }
 
-    _av_have=$(applet_current_line "$_av_applet")
-    [ -n "$_av_have" ] || { printf 'no-line\n'; return 0; }
+    _av_lines=$(applet_lines "$_av_applet")
+    [ -n "$_av_lines" ] || { printf 'no-line\n'; return 0; }
 
     _av_want=$(applet_launch_line "$_av_bundle" "$_av_var" "$_av_root" "$_av_flag" "$_av_data" \
         | applet_line_norm)
-    [ "$_av_have" = "$_av_want" ] && { printf 'ok\n'; return 0; }
 
-    case "$_av_have" in
-        *"--env $_av_var="*) ;;
+    # Every launch line is read, and the worst of them is the applet's
+    # verdict: a line that pins nothing, or the wrong root, is a finding even
+    # when another line beside it is exactly right.
+    _av_worst="ok"
+    _av_seen=""
+    while IFS= read -r _av_line; do
+        [ -n "$_av_line" ] || continue
+        # A line that neither launches the app nor names the variable is doing
+        # something else entirely, and pins nothing because it needs to.
+        case "$_av_line" in
+            *"$_av_bundle"*|*"$_av_var="*) ;;
+            *) continue ;;
+        esac
+        _av_seen=1
+        _av_one=$(applet_line_verdict "$_av_line" "$_av_want" \
+            "$_av_var" "$_av_root" "$_av_flag" "$_av_data")
+        if [ "$(applet_verdict_rank "$_av_one")" -gt "$(applet_verdict_rank "$_av_worst")" ]; then
+            _av_worst="$_av_one"
+        fi
+    done <<AVEOF
+$_av_lines
+AVEOF
+
+    [ -n "$_av_seen" ] || { printf 'nopin\n'; return 0; }
+    printf '%s\n' "$_av_worst"
+}
+
+# applet_line_verdict <line> <want> <var> <root> <flag> <app-data>
+#
+# One launch line, judged on its own, in the words applet_verdict emits.
+applet_line_verdict() {
+    _alv_line="$1"; _alv_want="$2"; _alv_var="$3"
+    _alv_root="$4"; _alv_flag="$5"; _alv_data="$6"
+
+    [ "$_alv_line" = "$_alv_want" ] && { printf 'ok\n'; return 0; }
+
+    case "$_alv_line" in
+        *"--env $_alv_var="*) ;;
         *) printf 'nopin\n'; return 0 ;;
     esac
 
     # Everything after --args belongs to the application, so an --env that only
     # appears there is not a pin at all, however right it looks.
-    case "${_av_have%%--args*}" in
-        *"--env $_av_var="*) ;;
+    _alv_head=${_alv_line%%--args*}
+    case "$_alv_head" in
+        *"--env $_alv_var="*) ;;
         *) printf 'badorder\n'; return 0 ;;
     esac
 
-    case "$_av_have" in
-        *"--env $_av_var=$_av_root --args"*) ;;
-        *) printf 'wrongroot\n'; return 0 ;;
-    esac
+    # The whole line rather than the head: the value ends at " --args", and
+    # cutting there first would leave the space before it on the root.
+    [ "$(applet_env_value "$_alv_line" "$_alv_var")" = "$_alv_root" ] || \
+        { printf 'wrongroot\n'; return 0; }
 
-    case "$_av_have" in
-        *"$_av_flag=$_av_data "*) ;;
+    case "$_alv_line" in
+        *"$_alv_flag=$_alv_data "*) ;;
         *) printf 'wrongdata\n'; return 0 ;;
     esac
 
     printf 'differs\n'
+}
+
+# applet_verdict_rank <verdict>: how much of a leak it is, so that the worst
+# line in a multi-line applet is the one reported.
+applet_verdict_rank() {
+    case "$1" in
+        ok)        printf '0\n' ;;
+        differs)   printf '1\n' ;;
+        wrongdata) printf '2\n' ;;
+        badorder)  printf '3\n' ;;
+        nopin)     printf '4\n' ;;
+        wrongroot) printf '5\n' ;;
+        *)         printf '6\n' ;;
+    esac
 }
 
 # applet_verdict_says <verdict>: one sentence, shared by `app` and D13.
@@ -3460,8 +3555,9 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
         # doctor reads (D13):
         #   The AppleScript source of the applet named in the profile's
         #   registry entry, or its default conventional path if none is
-        #   registered, decompiled with `osadecompile`. Only its single
-        #   `do shell script` launch line is read.
+        #   registered, decompiled with `osadecompile`. Every
+        #   `do shell script` line in it is read, and the worst of them is
+        #   the verdict.
         _doc_applet=$(profile_applet "$_doc_name" "$_doc_agent")
         _doc_data=$(reg_get "$_doc_name" app_data)
         [ -n "$_doc_data" ] || _doc_data="$(agent_def "$_doc_agent" app_support)/$(agent_def "$_doc_agent" app_prefix)$(capitalize "$_doc_name")"

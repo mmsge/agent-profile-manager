@@ -209,7 +209,7 @@ Keychain query it makes, and which external command it runs, if any.
 | D10 | The registry's stored root string, compared against its own canonical form. A string comparison, no filesystem or Keychain read. |
 | D11 | On macOS, whether a Keychain entry exists for the default root's own service name (attributes only, via `security find-generic-password`). |
 | D12, only with `--keychain-scan` | The entire login Keychain's item list, via `security dump-keychain`. Attributes only, specifically the `svce` field of each entry; no entry's secret data is read. |
-| D13 | The AppleScript source of the applet named in the profile's registry entry, or its default conventional path if none is registered, decompiled with `osadecompile`. Only its single `do shell script` launch line is read. |
+| D13 | The AppleScript source of the applet named in the profile's registry entry, or its default conventional path if none is registered, decompiled with `osadecompile`. Every `do shell script` line in it is read, and the worst of them is the verdict. |
 | D14 | Every `.app` bundle up to five levels deep under `$AGENT_PROFILE_APPLET_DIRS` (by default `~/Applications`, `~/Desktop` and `/Applications`) whose compiled script mentions the agent's config variable, decompiled the same way as D13. |
 | D15 | The registry only. No filesystem or Keychain access. |
 | D16 | Directory names one level under `~/.vscode/extensions` and `~/.cursor/extensions`, and one level under `~/Library/Application Support/JetBrains`, `~/Library/Application Support` and `~/Library/Application Support/Google` for a `plugins/claude-code-jetbrains-plugin` inside. Names only; no file in an extension is ever opened, and the IDE's own `--list-extensions` is deliberately not run. |
