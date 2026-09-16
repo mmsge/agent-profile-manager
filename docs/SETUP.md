@@ -70,6 +70,7 @@ Check each of these. The command beside it is how.
 | A Mac. The tool is macOS only; see [Windows](INSTALL.md#windows). | `uname` prints `Darwin` |
 | Claude Code installed, with `claude` on `PATH` | `command -v claude` prints a path |
 | Claude Desktop, if the desktop app is to be pinned | `ls /Applications/Claude.app` |
+| `python3`, which every command that reads JSON uses | `python3 --version` prints one; `xcode-select --install` if it does not |
 | `cosign`, so the installer can check the release signature | `brew install cosign` |
 | `uv`, so the sessions server's environment builds without the Command Line Tools dialogue | `brew install uv` |
 | The list of accounts, and a profile name for each | Ask. Letters, digits, dash and underscore only |
@@ -126,10 +127,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install -->
 
@@ -298,27 +302,33 @@ the root to fix it; that invalidates the login.
 
 Where a human acts: editing their rc file, or agreeing to have it edited.
 
-Add these lines to `~/.zshrc`, or `~/.bashrc`:
+Run `agpin shellrc` and add what it prints to the file it names. It reads
+`$SHELL`, so on a stock Mac that is zsh and `~/.zshrc`:
 
+<!-- BEGIN GENERATED: example shellrc (tools/gen-doc-examples.sh) -->
 ```sh
-eval "$(agpin guard)"
-eval "$(agpin completion bash)"   # or: completion zsh
-PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+agpin shellrc
 ```
+
+```
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(agpin guard)"           # refuse to run the agent unpinned
+  eval "$(agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
+```
+<!-- END GENERATED: example shellrc -->
 
 The first refuses to run `claude` with nothing pinned. The second
 tab-completes subcommands, flags and profile names. The third shows which
 profile a pinned shell is using, so a prompt can never claim the wrong
-account. In fish, in `~/.config/fish/config.fish`:
-
-```fish
-agpin guard --shell fish | source
-agpin completion fish | source
-function fish_prompt
-    set -l p (agpin which --label 2>/dev/null)
-    echo -n "$p "(prompt_pwd)'> '
-end
-```
+account. `agpin shellrc --shell bash` and `agpin shellrc --shell fish` print
+the other two forms, and `agpin shellrc --explain` prints all three at once.
+Never paste one shell's block into another shell's rc file: a bash
+completion script sourced under zsh is the mistake this command exists to
+prevent.
 
 Open a new shell, or `source` the rc file. Check it worked, in three parts.
 A shell that is not pinned says so:
@@ -392,6 +402,8 @@ agpin doctor
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
 ```
 <!-- END GENERATED: example doctor-clean -->
 
@@ -520,6 +532,9 @@ agpin doctor --report ~/audits/brygga-2026-09-08
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
+Created /Users/alex/audits
 Wrote /Users/alex/audits/brygga-2026-09-08.json
 Wrote /Users/alex/audits/brygga-2026-09-08.md
 ```

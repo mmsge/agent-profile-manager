@@ -467,13 +467,13 @@ printf '  %s help\n' "$SHORT_NAME"
 printf '  %s doctor\n' "$SHORT_NAME"
 printf '  %s version --check\n' "$SHORT_NAME"
 printf '\n'
-printf 'Worth adding to your shell rc file:\n'
-# shellcheck disable=SC2016  # literal rc-file text; the user pastes this
-printf '  eval "$(%s guard)"      # refuse to run the agent unpinned\n' "$SHORT_NAME"
-# shellcheck disable=SC2016  # literal rc-file text; the user pastes this
-printf '  eval "$(%s completion bash)"  # tab-complete commands and profile names\n' "$SHORT_NAME"
-# shellcheck disable=SC2016  # literal rc-file text; the user pastes this
-printf '  PROMPT='"'"'$(%s which --label 2>/dev/null) %%~ %%# '"'"'\n' "$SHORT_NAME"
+# The rc block comes from the tool just installed, in the dialect of the one
+# shell $SHELL names, so this installer never carries a second copy of it. The
+# copy it used to carry was half bash and half zsh, which on a Mac put a bash
+# completion line into ~/.zshrc. shellrc reads $SHELL, needs no python3 and
+# writes nothing. The install has already succeeded by this line, so a shellrc
+# that cannot run must not make it look otherwise.
+"$PREFIX/$SHORT_NAME" shellrc || true
 
 # The links are in place whatever happened to the server build, so the tool
 # works; the status is how a scripted install learns the server did not.

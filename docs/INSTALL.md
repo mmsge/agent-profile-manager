@@ -31,10 +31,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install -->
 
@@ -85,10 +88,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-no-cosign -->
 
@@ -96,24 +102,29 @@ If `~/.local/bin` is already on your `PATH`, the warning about it is replaced
 by a line saying so. The tool names itself by whichever name you invoke:
 run it as `agpin` and every message, error and suggested fix says `agpin`.
 
-Worth adding to your shell rc file. In bash or zsh:
+Worth adding to your shell rc file, and `agpin shellrc` prints it for the
+shell `$SHELL` names rather than leaving you to translate one:
 
+<!-- BEGIN GENERATED: example shellrc (tools/gen-doc-examples.sh) -->
 ```sh
-eval "$(agpin guard)"
-eval "$(agpin completion bash)"   # or: agpin completion zsh
-PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+agpin shellrc
 ```
 
-In fish, in `~/.config/fish/config.fish`:
-
-```fish
-agpin guard --shell fish | source
-agpin completion fish | source
-function fish_prompt
-    set -l p (agpin which --label 2>/dev/null)
-    echo -n "$p "(prompt_pwd)'> '
-end
 ```
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(agpin guard)"           # refuse to run the agent unpinned
+  eval "$(agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
+```
+<!-- END GENERATED: example shellrc -->
+
+`agpin shellrc --shell bash|zsh|fish` prints another shell's form, and
+`agpin shellrc --explain` prints all three with a line on what each does. The
+installer prints the same block at the end of an install, by calling this
+command, so there is one copy of it.
 
 See [Refusing to run unpinned](USE.md#refusing-to-run-unpinned) and
 [Completions](USE.md#completions) for what each line does.
@@ -148,10 +159,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-again -->
 
@@ -161,6 +175,14 @@ No dependencies beyond a stock macOS for the tool itself. It is one bash
 script, written to bash 3.2 because that is what `/bin/bash` is on macOS, and
 it uses `python3` from the Command Line Tools only to read JSON. No Homebrew,
 no `jq`.
+
+`python3` is the one prerequisite the tool cannot avoid. A Mac that has never
+had Xcode or the Command Line Tools has none, and `agpin new`, `agpin list`,
+`agpin doctor`, `agpin remove` and `agpin verify` all refuse without it,
+naming `xcode-select --install`. That download is several gigabytes, so it is
+worth doing before the first profile rather than in the middle of one. `uv`
+does not help here: it brings its own Python for the sessions server and puts
+nothing on your `PATH`.
 
 Installing adds nothing to that: `curl`, `shasum` and `tar` are on every Mac,
 and neither `tools/install.sh` nor `agpin version --check` calls `python3`,
@@ -376,10 +398,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-dev -->
 

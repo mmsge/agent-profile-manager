@@ -199,7 +199,8 @@ case_serve_execs_the_interpreter_when_the_pin_matches() {
     "$AP" new brygga >/dev/null 2>&1
     out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "server python: -m agent_profile_sessions --root $HOME/.claude-brygga" || return
+    # -s keeps the user site directory out of the interpreter this starts.
+    assert_contains "$out" "server python: -s -m agent_profile_sessions --root $HOME/.claude-brygga" || return
     assert_contains "$out" "CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
     # The package directory beside the interpreter is on the path.
     assert_contains "$out" "PYTHONPATH="
@@ -230,6 +231,71 @@ case_serve_refuses_a_root_that_is_not_the_pinned_one() {
     assert_not_contains "$out" "server python:"
 }
 
+# A root reachable by two spellings, one of them through a symlink. The
+# Python half compares real paths, so the launcher has to as well: comparing
+# the two as strings refused a root the server itself would have accepted, and
+# the message did not say why (sessions-server gap 12).
+case_serve_accepts_a_symlinked_spelling_of_the_same_root() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    ln -s "$HOME/.claude-brygga" "$HOME/brygga-link"
+    out=$(CLAUDE_CONFIG_DIR="$HOME/brygga-link" \
+        "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "server python: -s -m agent_profile_sessions"
+}
+
+case_serve_accepts_a_symlinked_root_argument() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    ln -s "$HOME/.claude-brygga" "$HOME/brygga-link"
+    out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" \
+        "$AP" mcp serve --root "$HOME/brygga-link" 2>&1); status=$?
+    assert_status 0 "$status" "$out"
+}
+
+# Two roots that really are two roots stay refused, whichever way they are
+# spelled, or the case above would be passing by accepting everything.
+case_serve_refuses_two_roots_that_only_look_alike() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    ln -s "$HOME/.claude-havnelab" "$HOME/other-link"
+    out=$(CLAUDE_CONFIG_DIR="$HOME/other-link" \
+        "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_not_contains "$out" "server python:"
+}
+
+# The refusal spells both sides as they were given, and adds what they
+# resolved to when that differs, so the reason is on the screen.
+case_serve_refusal_shows_the_resolved_paths() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    "$AP" new havnelab >/dev/null 2>&1
+    ln -s "$HOME/.claude-havnelab" "$HOME/other-link"
+    out=$(CLAUDE_CONFIG_DIR="$HOME/other-link" \
+        "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1)
+    assert_contains "$out" "CLAUDE_CONFIG_DIR is $HOME/other-link, --root is $HOME/.claude-brygga" || return
+    assert_contains "$out" ".claude-havnelab"
+}
+
+# Defence in depth for the one attack this design names: a transcript that
+# talks a model into writing settings.json could put a directory holding a
+# fastmcp.py on PYTHONPATH, and the launcher used to pass that straight to
+# the interpreter (sessions-server gap 13).
+case_serve_does_not_hand_the_sessions_pythonpath_to_the_interpreter() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    mkdir -p "$HOME/planted-modules"
+    out=$(PYTHONPATH="$HOME/planted-modules" CLAUDE_CONFIG_DIR="$HOME/.claude-brygga" \
+        "$AP" mcp serve --root "$HOME/.claude-brygga" 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_not_contains "$out" "planted-modules" || return
+    # The package directory is still there, or the server would not import.
+    assert_contains "$out" "PYTHONPATH=/"
+}
+
 case_serve_says_when_the_server_is_not_installed() {
     HOME=$(new_home); export HOME
     out=$(CLAUDE_CONFIG_DIR="$HOME/r" AGENT_PROFILE_SERVER_PYTHON="$HOME/no/python" "$AP" mcp serve --root "$HOME/r" 2>&1); status=$?
@@ -250,7 +316,7 @@ case_serve_finds_the_environment_beside_the_installed_link() {
     out=$(CLAUDE_CONFIG_DIR="$HOME/r" AGENT_PROFILE_SERVER_PYTHON='' \
         "${BASH:-/bin/bash}" "$HOME/bin/agpin" mcp serve --root "$HOME/r" 2>&1); status=$?
     assert_status 0 "$status" "$out" || return
-    assert_contains "$out" "server python: -m agent_profile_sessions --root $HOME/r" || return
+    assert_contains "$out" "server python: -s -m agent_profile_sessions --root $HOME/r" || return
     # The launcher resolves its tree physically, and on macOS the temporary
     # directory is itself a symlink (/var to /private/var), so compare against
     # the physical path rather than the one the fixture was spelled with.
@@ -294,6 +360,11 @@ run_case "serve execs the interpreter when the pin matches" case_serve_execs_the
 run_case "serve tolerates a trailing slash"                 case_serve_tolerates_a_trailing_slash_on_either_side
 run_case "serve refuses when unpinned"                      case_serve_refuses_when_unpinned
 run_case "serve refuses a root that is not the pinned one"  case_serve_refuses_a_root_that_is_not_the_pinned_one
+run_case "serve accepts a symlinked pin"                    case_serve_accepts_a_symlinked_spelling_of_the_same_root
+run_case "serve accepts a symlinked --root"                 case_serve_accepts_a_symlinked_root_argument
+run_case "serve refuses two roots that look alike"          case_serve_refuses_two_roots_that_only_look_alike
+run_case "serve's refusal shows the resolved paths"         case_serve_refusal_shows_the_resolved_paths
+run_case "serve drops the session's PYTHONPATH"             case_serve_does_not_hand_the_sessions_pythonpath_to_the_interpreter
 run_case "serve says when the server is not installed"      case_serve_says_when_the_server_is_not_installed
 run_case "serve finds the environment beside the link"      case_serve_finds_the_environment_beside_the_installed_link
 run_case "serve usage"                                      case_serve_usage

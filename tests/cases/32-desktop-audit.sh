@@ -88,17 +88,20 @@ case_d17_reports_the_app_in_the_dock() {
     assert_contains "$out" "$HOME/Claude.app"
 }
 
+# A clean run names the rules that did not run here, so these cases ask for
+# the finding shape, "D17" followed by two spaces, rather than for the bare id
+# being absent from the whole output.
 case_d17_quiet_when_only_the_applets_are_pinned() {
     # The healthy machine: applets in the Dock, the app itself out of it.
     audit_fixture applets
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D17"
+    assert_not_contains "$out" "D17  "
 }
 
 case_d17_quiet_on_an_empty_dock() {
     audit_fixture empty
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D17"
+    assert_not_contains "$out" "D17  "
 }
 
 # A Dock tile stores the path as a percent-encoded file:// URL, so a bundle
@@ -119,7 +122,7 @@ case_d17_decodes_a_percent_encoded_tile() {
 case_d17_reports_an_unreadable_dock_as_not_run() {
     audit_fixture fails
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D17" || return
+    assert_not_contains "$out" "D17  " || return
     assert_equals "not_run" \
         "$(audit_json '[r for r in d["rules"] if r["rule"] == "D17"][0]["status"]')" || return
     assert_contains \
@@ -130,7 +133,7 @@ case_d17_reports_an_unreadable_dock_as_not_run() {
 case_d17_is_silent_off_macos() {
     audit_fixture app
     out=$(audit_elsewhere doctor 2>&1)
-    assert_not_contains "$out" "D17"
+    assert_not_contains "$out" "D17  "
 }
 
 # The login items are the half of this rule that cannot run without root or a
@@ -216,13 +219,13 @@ case_d18_quiet_when_the_directory_is_empty() {
     audit_fixture applets
     mkdir -p "$(default_app_data)"
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D18"
+    assert_not_contains "$out" "D18  "
 }
 
 case_d18_quiet_when_there_is_no_such_directory() {
     audit_fixture applets
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D18"
+    assert_not_contains "$out" "D18  "
 }
 
 # A profile is allowed to claim that directory. Then it is somebody's profile
@@ -236,14 +239,14 @@ case_d18_quiet_when_a_profile_claims_the_directory() {
         "$(cred_service_for "$HOME/.claude-torg")" \
         "$(cred_service_for "$HOME/.claude-desk")"
     out=$(audit doctor 2>&1)
-    assert_not_contains "$out" "D18"
+    assert_not_contains "$out" "D18  "
 }
 
 case_d18_is_silent_off_macos() {
     audit_fixture applets
     fixture_unpinned_app_data
     out=$(audit_elsewhere doctor 2>&1)
-    assert_not_contains "$out" "D18"
+    assert_not_contains "$out" "D18  "
 }
 
 # ---------------------------------------------------------------------------

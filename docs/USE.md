@@ -25,9 +25,9 @@ agpin desktop brygga      # launch the desktop app pinned
 agpin app brygga          # build its Dock launcher
 agpin code brygga ~/src/x   # launch VS Code pinned, --app Cursor for Cursor
 agpin idea brygga ~/src/x   # the same for the JetBrains IDEs
+agpin shellrc             # the rc-file lines, in your own shell's dialect
 eval "$(agpin guard)"     # refuse to run the agent unpinned
 claude brygga             # with the guard on, this pins and runs
-eval "$(agpin completion bash)"  # tab-complete commands and profiles
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -91,7 +91,10 @@ IDEs
                           land in the running instance and be pinned to
                           whatever it was started with; --new-instance starts a
                           separate one, with its own settings kept under this
-                          profile, so the pin applies anyway.
+                          profile, so the pin applies anyway. --new-instance
+                          is refused for an --app outside the VS Code family,
+                          because it works by passing --user-data-dir and an
+                          editor that ignores that flag is not separate.
   idea <name> [path] [--app NAME]
                           The same for the JetBrains IDEs, IntelliJ IDEA by
                           default; --app PyCharm and so on. It refuses on a
@@ -130,6 +133,12 @@ SESSIONS SERVER
                           it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
+  shellrc [--shell bash|zsh|fish] [--explain]
+                          Print the three lines worth adding to your shell rc
+                          file, in one shell's dialect and no other, with the
+                          file they belong in. The shell comes from --shell,
+                          or from $SHELL; --explain prints all three forms and
+                          what each line does. Nothing is written anywhere.
   guard [--shell bash|zsh|fish]
                           Print a shell function that refuses to run the agent
                           unpinned, and turns a leading profile name into a
@@ -389,7 +398,8 @@ except when a new release adds a subcommand.
 
 Printed rather than installed, for the same reason `guard` is: this tool never
 writes to a completion directory or your rc file. Add the line above to it
-yourself, once.
+yourself, once, and `agpin shellrc` prints it beside the other two lines worth
+having, already in the right dialect for your shell.
 
 ## Output levels
 
@@ -429,17 +439,18 @@ session can ask what an earlier one did without leaving Claude Code:
 | --- | --- |
 | `list_projects` | one row per working directory, with counts and the retention window |
 | `list_sessions` | identity columns and a 200-character first-prompt preview, filterable by project, date range, branch and a substring, paged |
-| `session_summary` | last reply, tool histogram, files touched, subagents; no conversation |
+| `session_summary` | last reply, tool histogram, files touched, subagents; no conversation. The last two are capped at 100 and 20, with the total beside each |
 | `get_session` | messages by record range, 2,000 characters each, tool results and thinking left out unless asked for, 40,000 characters per call at most |
 | `get_message` | one message whole, up to a hard cap |
-| `search` | substring or regex over prompts and replies, returning pointers |
+| `search` | case-insensitive substring over prompts and replies, returning pointers |
 
 `new` registers it, in the root's own state file and through `claude mcp add
 --scope user` pinned to that root, which is why the root is no longer
 strictly empty after `new` (docs/FACTS.md F23). The registered command is
 `agpin mcp serve --root <root>`: this tool's own launcher, at its installed
 path, which finds the server's Python environment beside itself and refuses
-to start unless `CLAUDE_CONFIG_DIR` names that same root. Claude Code hands a
+to start unless `CLAUDE_CONFIG_DIR` resolves to that same root, symlinks and
+all, which is the check the server itself makes. Claude Code hands a
 stdio server its own environment (F24), so the pin and the server's scope are
 the same variable in the same process tree, and a registration copied into
 another root fails visibly in `/mcp` instead of serving the wrong account's

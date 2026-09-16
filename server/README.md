@@ -19,11 +19,22 @@ it belongs to, and the launcher execs this server:
 claude  ->  agpin mcp serve --root <root>  ->  python -m agent_profile_sessions --root <root>
 ```
 
-Both halves make the same check: `CLAUDE_CONFIG_DIR` must be set and must
-resolve to the same directory as `--root`. When it does not, the server prints
-one line on stderr and exits 2, so a registration that was copied into another
+Both halves make the same check, the same way: `CLAUDE_CONFIG_DIR` must be set
+and must resolve to the same directory as `--root`, symlinks and all, so a
+root reachable by two spellings is not accepted by one half and refused by the
+other. When it does not resolve to the same directory, the server prints one
+line on stderr and exits 2, naming both paths as they were given and what they
+resolved to when that differs, so a registration that was copied into another
 root fails visibly in `/mcp` rather than serving one account's transcripts to
 another. Transport is stdio only.
+
+The launcher execs the interpreter with `PYTHONPATH` set to this package
+directory alone, dropping whatever the session had, and with `-s`, so the user
+site directory is out too. A stdio server inherits its parent's environment,
+and a root's own `settings.json` can set variables for a session, so an
+inherited `PYTHONPATH` would be one way to choose what `import fastmcp` finds.
+`AGENT_PROFILE_SERVER_PYTHON` overrides the interpreter for the test suite and
+for a hand-built environment; a real install never sets it.
 
 ## The tools
 
@@ -31,10 +42,10 @@ another. Transport is stdio only.
 | --- | --- |
 | `list_projects()` | One row per working directory, with session counts and the retention window |
 | `list_sessions(cwd, since, until, branch, query, limit, cursor)` | Session identity columns, newest activity first, with a first prompt preview |
-| `session_summary(session_id)` | The identity columns, the last reply, a tool histogram, the files touched and the subagents |
+| `session_summary(session_id)` | The identity columns, the last reply, a tool histogram, the files touched and the subagents, the last two capped |
 | `get_session(session_id, agent_id, start, limit, roles, include_tool_results, include_thinking, max_chars)` | A range of messages, by record index |
 | `get_message(session_id, uuid, agent_id, max_chars, include_spilled)` | One message whole, optionally with the tool output it spilled to a file |
-| `search(query, cwd, since, until, branch, roles, regex, limit)` | Pointers into `get_session`, with a snippet |
+| `search(query, cwd, since, until, branch, roles, limit)` | Pointers into `get_session`, with a snippet |
 
 Subagent transcripts are reached through their parent session, with
 `agent_id`, and never listed as sessions of their own.
@@ -49,12 +60,20 @@ Subagent transcripts are reached through their parent session, with
 | `get_message` characters | 20,000 by default, clamped to 1..100,000 |
 | `list_sessions` rows per page | 20 by default, clamped to 1..100 |
 | `search` hits | 20 by default, clamped to 1..50, snippets of 240 characters |
-| `search` regular expression | 200 characters, longer patterns are refused |
+| `session_summary` files touched | 100, with `files_touched_total` and `files_touched_truncated` beside them |
+| `session_summary` subagents | 20, with `subagents_total` and `subagents_truncated` beside them |
 | `first_prompt` preview, `last_reply` | 200 and 500 characters |
 
 Tool results and thinking are left out of `get_session` unless asked for by
 name. Every text-bearing structure carries `"source": "transcript"`, because
 transcript text is data written by earlier sessions and not instructions.
+
+`search` has no regular expression mode. It had one, and a pattern of six
+characters could take this server, which is single threaded and lives for the
+session, out of service for the rest of it; the pattern is chosen by a model
+reading a transcript, which is the threat the rest of this design takes
+seriously. Substring with the `cwd`, date and branch filters covers what it
+was used for.
 
 ## Tests
 

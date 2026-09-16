@@ -63,8 +63,12 @@ both go quiet once those paths are gone.
 
 The credential is never touched, in either form. This tool does not read, write
 or delete credentials, and the command that ends an engagement is the last
-place to start. It prints the `security delete-generic-password` line and
-leaves running it to you.
+place to start. On macOS the credential is a Keychain entry, so it prints the
+`security delete-generic-password` line and leaves running it to you. Where
+there is no Keychain the credential is a `.credentials.json` file inside the
+root instead, and it prints the `rm` that deletes that file. A machine with
+neither is told about neither: naming a Keychain service that cannot exist
+there would send you looking for something that was never on your disk.
 
 ## remove --purge
 
@@ -122,6 +126,15 @@ name is refused too: where a launcher would conventionally be is a guess, and a
 guess is not something to delete. Everything it declines is printed with the
 reason and the command, so nothing is silently retained.
 
+The one thing it never deletes is the credential. A root that holds a
+`.credentials.json`, which is where the login lives on every platform without
+a Keychain, is emptied rather than deleted: everything around that file goes,
+the file is left exactly where it was, and the root stays around it because
+the file cannot be moved. The screen says so before it asks you to type the
+name, and the closing list names the file and the `rm` that deletes it, the
+same way it names the Keychain entry on a Mac. Deleting it is your decision
+and your command, on every platform.
+
 ## Then audit what is left
 
 A root no profile claims is D06 and a launcher no profile claims is D14, so
@@ -174,6 +187,9 @@ agpin doctor --report ~/audits/brygga-2026-09-08
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
+Created /Users/alex/audits
 Wrote /Users/alex/audits/brygga-2026-09-08.json
 Wrote /Users/alex/audits/brygga-2026-09-08.md
 ```

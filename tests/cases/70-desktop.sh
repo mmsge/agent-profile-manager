@@ -254,6 +254,92 @@ case_d13_quiet_on_a_hand_tuned_but_correct_line() {
     assert_not_contains "$out" "D13"
 }
 
+# A second --env after the pin. The pin itself is right, so this is a
+# hand-tuned line that works, and D13 reported it as pinning a different root
+# because the capture ran greedily to " --args" (audit-coverage gap 9, E9a).
+case_d13_quiet_on_a_second_env_after_the_pin() {
+    desktop_fixture
+    out=$(d13_out "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-torg\\\" --env \\\"FOO=bar\\\" --args --user-data-dir=\\\"$HOME/Library/Application Support/Claude-Torg\\\" > /dev/null 2>&1 &\"")
+    assert_not_contains "$out" "D13"
+}
+
+# And the root it pins is read as the root, not as the root plus the rest of
+# the line, which is what D14 names the owner from.
+case_d14_names_the_owner_of_a_line_with_a_second_env() {
+    desktop_fixture
+    fixture_applet "$HOME/Desktop/Handmade.app" \
+        "do shell script \"open -n -a \\\"$HOME/Claude.app\\\" --env \\\"CLAUDE_CONFIG_DIR=$HOME/.claude-torg\\\" --env \\\"FOO=bar\\\" --args --user-data-dir=\\\"$HOME/Library/Application Support/Claude-Torg\\\" > /dev/null 2>&1 &\""
+    out=$(desk doctor 2>&1)
+    assert_contains "$out" "D14" || return
+    assert_contains "$out" "It pins $HOME/.claude-torg, which profile 'torg' owns"
+}
+
+# Two launch lines, the first pinned and the second bare. Only the first was
+# read, so an applet that launches the app unpinned every time it is opened
+# passed the audit (audit-coverage gap 9, E9b). This is the security half.
+case_d13_reports_a_second_unpinned_launch_line() {
+    desktop_fixture
+    _d13_two=$(printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\ndo shell script "open -n -a \\"%s\\" > /dev/null 2>&1 &"' \
+        "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg" "$HOME/Claude.app")
+    out=$(d13_out "$_d13_two")
+    assert_contains "$out" "D13" || return
+    assert_contains "$out" "nothing pinned"
+}
+
+# A second line that pins another customer's root is worse still, and it is
+# the same blindness.
+case_d13_reports_a_second_line_pinning_another_root() {
+    desktop_fixture
+    mkdir -p "$HOME/.claude-elsewhere"
+    _d13_two=$(printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\ndo shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"' \
+        "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg" \
+        "$HOME/Claude.app" "$HOME/.claude-elsewhere" \
+        "$HOME/Library/Application Support/Claude-Torg")
+    out=$(d13_out "$_d13_two")
+    assert_contains "$out" "D13" || return
+    assert_contains "$out" "different config root"
+}
+
+# A second line that is right stays quiet, so the case above is about the pin
+# rather than about there being more than one line.
+case_d13_quiet_on_two_correct_launch_lines() {
+    desktop_fixture
+    _d13_one=$(printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"' \
+        "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg")
+    out=$(d13_out "$_d13_one
+$_d13_one")
+    assert_not_contains "$out" "D13"
+}
+
+# A line that is not a launch at all pins nothing and needs nothing pinned.
+case_d13_ignores_a_line_that_launches_nothing() {
+    desktop_fixture
+    _d13_one=$(printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"' \
+        "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg")
+    out=$(d13_out "do shell script \"mkdir -p $HOME/logs\"
+$_d13_one")
+    assert_not_contains "$out" "D13"
+}
+
+# app repairs what D13 reports, so the repair has to leave one line behind
+# rather than a pinned line followed by an unpinned one.
+case_app_repairs_an_applet_with_two_launch_lines() {
+    desktop_fixture
+    _d13_two=$(printf 'do shell script "open -n -a \\"%s\\" --env \\"CLAUDE_CONFIG_DIR=%s\\" --args --user-data-dir=\\"%s\\" > /dev/null 2>&1 &"\ndo shell script "open -n -a \\"%s\\" > /dev/null 2>&1 &"' \
+        "$HOME/Claude.app" "$HOME/.claude-torg" \
+        "$HOME/Library/Application Support/Claude-Torg" "$HOME/Claude.app")
+    fixture_applet "$HOME/Applications/Claude-Torg.app" "$_d13_two"
+    desk app torg >/dev/null 2>&1
+    out=$(desk doctor 2>&1)
+    assert_not_contains "$out" "D13" || return
+    lines=$(grep -c '^do shell script ' "$HOME/Applications/Claude-Torg.app/Contents/Resources/Scripts/main.scpt")
+    assert_equals "1" "$lines"
+}
+
 # ---------------------------------------------------------------------------
 # verify
 # ---------------------------------------------------------------------------
@@ -472,6 +558,13 @@ run_case "D13 reports the wrong app data dir"         case_d13_reports_the_wrong
 run_case "D13 quiet on a correct applet"              case_d13_quiet_on_a_correct_applet
 run_case "D13 quiet when there is no applet"          case_d13_quiet_when_there_is_no_applet
 run_case "D13 quiet on a hand-tuned correct line"     case_d13_quiet_on_a_hand_tuned_but_correct_line
+run_case "D13 quiet on a second --env after the pin" case_d13_quiet_on_a_second_env_after_the_pin
+run_case "D14 names the owner past a second --env"   case_d14_names_the_owner_of_a_line_with_a_second_env
+run_case "D13 reports a second unpinned launch line" case_d13_reports_a_second_unpinned_launch_line
+run_case "D13 reports a second line, another root"   case_d13_reports_a_second_line_pinning_another_root
+run_case "D13 quiet on two correct launch lines"     case_d13_quiet_on_two_correct_launch_lines
+run_case "D13 ignores a line that launches nothing"  case_d13_ignores_a_line_that_launches_nothing
+run_case "app repairs an applet with two lines"      case_app_repairs_an_applet_with_two_launch_lines
 run_case "verify is broken without --env support"     case_verify_is_broken_without_env_support
 run_case "verify passes with --env support"           case_verify_passes_with_env_support
 run_case "verify reports on the applet reader"        case_verify_reports_on_the_applet_reader

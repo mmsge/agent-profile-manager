@@ -272,6 +272,39 @@ case_d16_is_quiet_with_no_extension_installed() {
         "$(ide_json "$(ide doctor --json 2>/dev/null)" '[r for r in d["rules"] if r["rule"] == "D16"][0]["status"]')"
 }
 
+# Off macOS, code and idea refuse: they pin through open --env, which is
+# macOS only. A fix line naming them there is a dead end (portability gap 3).
+# The extension reads the root from the editor's process environment either
+# way, so the remedy off macOS is a shell that is already pinned.
+case_d16_fix_line_off_macos_names_a_pinned_shell() {
+    ide_fixture
+    fixture_vscode_ext ".vscode/extensions"
+    out=$("$AP" doctor 2>&1)
+    assert_contains "$out" "D16" || return
+    assert_contains "$out" "$(basename "$AP") shell <profile>" || return
+    assert_not_contains "$out" "$(basename "$AP") code <profile>"
+}
+
+# The JetBrains half of the same thing: idea refuses off macOS too.
+case_d16_jetbrains_fix_line_off_macos_names_a_pinned_shell() {
+    ide_fixture
+    fixture_jetbrains_plugin "Library/Application Support/JetBrains/IntelliJIdea2026.1"
+    out=$("$AP" doctor 2>&1)
+    assert_contains "$out" "D16" || return
+    assert_contains "$out" "$(basename "$AP") shell <profile>" || return
+    assert_not_contains "$out" "$(basename "$AP") idea <profile>"
+}
+
+# And the command the fix line names off macOS has to be one that works
+# there, which is the whole point: run it and see.
+case_d16_fix_line_off_macos_names_a_command_that_runs() {
+    ide_fixture
+    fixture_vscode_ext ".vscode/extensions"
+    out=$("$AP" env brygga 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "CLAUDE_CONFIG_DIR='$HOME/.claude-brygga'"
+}
+
 # Where a JetBrains IDE keeps its plugins is known for macOS only. On any
 # other platform D16 has looked in two of its three places, and a document
 # that called that a pass would be claiming a check that did not happen.
@@ -382,6 +415,9 @@ run_case "D16 reports a JetBrains plugin its way"     case_d16_reports_a_jetbrai
 run_case "D16 finds a plugin in the older layout"     case_d16_finds_a_plugin_in_the_older_layout
 run_case "D16 reports every installed IDE once"       case_d16_reports_every_installed_ide_once
 run_case "D16 quiet with no extension installed"      case_d16_is_quiet_with_no_extension_installed
+run_case "D16 off macOS names a pinned shell"         case_d16_fix_line_off_macos_names_a_pinned_shell
+run_case "D16 JetBrains off macOS names a shell"      case_d16_jetbrains_fix_line_off_macos_names_a_pinned_shell
+run_case "D16 off macOS names a command that runs"    case_d16_fix_line_off_macos_names_a_command_that_runs
 run_case "D16 is limited off macOS"                   case_d16_is_limited_off_macos
 run_case "D16 reaches the document intact"            case_d16_reaches_the_document_with_its_prose_intact
 run_case "verify reports F21 unchecked without an IDE" case_verify_reports_f21_unchecked_without_an_ide
@@ -486,6 +522,53 @@ case_new_instance_user_data_dir_sits_under_the_app_data_dir() {
     assert_contains "$out" "Application Support/Claude-Brygga/ide/Visual-Studio-Code"
 }
 
+# --new-instance passes --user-data-dir, which only the VS Code family
+# understands. The family came from the subcommand rather than from --app, so
+# --app Zed was handed a flag Zed does not take, and a flag that is ignored
+# means the instance is not separate at all, which is the refusal it was
+# meant to bypass (launch-paths G10).
+case_new_instance_is_refused_for_an_app_outside_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed --new-instance 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "VS Code mechanism" || return
+    assert_contains "$out" "Zed" || return
+    assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
+}
+
+# The refusal names the editors the flag is known for, so the reader learns
+# what it is rather than only that they cannot have it.
+case_the_new_instance_refusal_names_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed --new-instance 2>&1)
+    assert_contains "$out" "Visual Studio Code" || return
+    assert_contains "$out" "Cursor"
+}
+
+# Cursor is in the family, so the flag still works for it and this is a
+# refusal about the application rather than about --app.
+case_new_instance_is_allowed_for_another_app_in_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Cursor --new-instance 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--user-data-dir" || return
+    assert_contains "$out" "/ide/Cursor"
+}
+
+# Without --new-instance, --app names any editor at all: the flag is the only
+# thing that needs the family, and open --env pins whatever it launches.
+case_an_app_outside_the_family_still_launches_pinned() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" quiet
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
+    assert_not_contains "$out" "--user-data-dir"
+}
+
 case_new_instance_is_refused_for_jetbrains() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
@@ -510,4 +593,8 @@ run_case "--new-instance launches past a running one" case_new_instance_launches
 run_case "--user-data-dir comes after --args"         case_new_instance_puts_user_data_dir_after_args
 run_case "the instance data sits under app data"      case_new_instance_user_data_dir_sits_under_the_app_data_dir
 run_case "--new-instance is refused for JetBrains"    case_new_instance_is_refused_for_jetbrains
+run_case "--new-instance is refused outside the family" case_new_instance_is_refused_for_an_app_outside_the_family
+run_case "that refusal names the VS Code family"     case_the_new_instance_refusal_names_the_family
+run_case "--new-instance works for Cursor"           case_new_instance_is_allowed_for_another_app_in_the_family
+run_case "--app outside the family still pins"       case_an_app_outside_the_family_still_launches_pinned
 run_case "idea refuses a running IDE"                 case_idea_refuses_when_the_ide_is_running

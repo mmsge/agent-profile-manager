@@ -51,8 +51,18 @@ recording_security() {
     chmod +x "$1/security"
 }
 
-# plain <args...>: remove without --purge.
+# plain <args...>: remove without --purge, as if on macOS.
+#
+# macOS is where the credential is a Keychain entry, so that is where the
+# closing report names a security(1) delete. The Linux and Windows shape,
+# where the credential is a file inside the root, has its own helpers below.
 plain() {
+    AGENT_PROFILE_PLATFORM=Darwin USER=tester PATH="$HOME/fakebin:$PATH" \
+        "$AP" remove "$@" 2>&1
+}
+
+# plain_nokeychain <args...>: the same, on a platform that has no Keychain.
+plain_nokeychain() {
     USER=tester PATH="$HOME/fakebin:$PATH" "$AP" remove "$@" 2>&1
 }
 
@@ -65,8 +75,25 @@ plain() {
 purge() {
     _pg_answer="$1"; shift
     printf '%s\n' "$_pg_answer" | \
+        AGENT_PROFILE_ASSUME_TTY=1 AGENT_PROFILE_PLATFORM=Darwin \
+        USER=tester PATH="$HOME/fakebin:$PATH" \
+        "$AP" remove "$@" --purge 2>&1
+}
+
+# purge_nokeychain <answer> <args...>: the same, on a platform that has no
+# Keychain, which is where the credential is a file inside the root.
+purge_nokeychain() {
+    _pgn_answer="$1"; shift
+    printf '%s\n' "$_pgn_answer" | \
         AGENT_PROFILE_ASSUME_TTY=1 USER=tester PATH="$HOME/fakebin:$PATH" \
         "$AP" remove "$@" --purge 2>&1
+}
+
+# credential_file <name>: a credential where Linux and Windows really keep
+# one, inside the root. Nothing here is a real token, and nothing ever reads
+# this file: the cases assert that it is still on the disk afterwards.
+credential_file() {
+    printf '{"fake":"not-a-real-token"}\n' > "$HOME/.claude-$1/.credentials.json"
 }
 
 # rm_doctor: doctor with the stand-in AppleScript tools and the fixture's own
@@ -382,6 +409,114 @@ case_purge_only_prints_the_credential_command() {
 }
 
 # ---------------------------------------------------------------------------
+# --purge and the credential file
+#
+# Off macOS the login is a file inside the root, and --purge used to delete
+# the root whole, credential and all, on the same screen that promised it
+# never touches credentials (portability gap 2). It was the invariant this
+# tool sells hardest, false on every platform the port is aimed at.
+#
+# The file is now left exactly where it is and everything around it goes. The
+# cases below assert the file is still on the disk afterwards; none of them
+# reads it, and the stand-in security(1) records any call the tool makes.
+# ---------------------------------------------------------------------------
+
+case_purge_leaves_the_credential_file_and_deletes_the_rest() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    register_applet brygga "$HOME/Applications/Claude-Brygga.app"
+    credential_file brygga
+    out=$(purge_nokeychain "brygga" brygga); status=$?
+    assert_status 0 "$status" "$out" || return
+    [ -f "$HOME/.claude-brygga/.credentials.json" ] || \
+        { fail "--purge deleted the credential" "$out"; return; }
+    [ -e "$HOME/.claude-brygga/projects" ] && \
+        { fail "the sessions survived the purge"; return; }
+    [ -e "$HOME/Library/Application Support/Claude-Brygga" ] && \
+        { fail "the app data directory survived"; return; }
+    [ -e "$HOME/Applications/Claude-Brygga.app" ] && \
+        { fail "the launcher survived"; return; }
+    [ -e "$HOME/.config/agent-profiles/brygga.conf" ] && \
+        { fail "the registry entry survived"; return; }
+    assert_contains "$out" "Unregistered brygga"
+}
+
+# What it left, and the command that removes it, the way the Keychain entry
+# is named on macOS.
+case_purge_names_the_credential_it_left_and_how_to_delete_it() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    credential_file brygga
+    out=$(purge_nokeychain "brygga" brygga)
+    assert_contains "$out" "$HOME/.claude-brygga/.credentials.json" || return
+    assert_contains "$out" "rm -rf '$HOME/.claude-brygga/.credentials.json'" || return
+    assert_contains "$out" "never touches credentials"
+}
+
+# A machine with no Keychain must not be told to run a Keychain command. The
+# service it names does not exist there, and neither does D12.
+case_purge_off_macos_prints_no_keychain_command() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    credential_file brygga
+    out=$(purge_nokeychain "brygga" brygga)
+    assert_not_contains "$out" "security delete-generic-password" || return
+    assert_not_contains "$out" "D12"
+}
+
+# And the other direction, so the fix cannot regress into deleting a
+# credential file that happens to sit in a root on a Mac.
+case_purge_on_macos_leaves_a_credential_file_too() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    recording_security "$HOME/fakebin"
+    credential_file brygga
+    out=$(purge "brygga" brygga); status=$?
+    assert_status 0 "$status" "$out" || return
+    [ -f "$HOME/.claude-brygga/.credentials.json" ] || \
+        { fail "--purge deleted the credential on macOS" "$out"; return; }
+    assert_contains "$out" "security delete-generic-password" || return
+    [ -f "$HOME/security-was-called" ] && \
+        fail "security was called" "$(cat "$HOME/security-was-called")"
+}
+
+# With no credential file there is nothing to keep, so the root goes whole and
+# the case above is not passing because --purge stopped deleting anything.
+case_purge_without_a_credential_file_still_deletes_the_root() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    out=$(purge_nokeychain "brygga" brygga); status=$?
+    assert_status 0 "$status" "$out" || return
+    [ -e "$HOME/.claude-brygga" ] && fail "the root survived a purge with no credential in it"
+}
+
+# The screen that asks for the typed confirmation has to describe what will
+# happen, not what used to.
+case_purge_says_beforehand_that_the_credential_stays() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    credential_file brygga
+    out=$(purge_nokeychain "wrongname" brygga)
+    assert_contains "$out" "Aborted" || return
+    assert_contains "$out" "The credential is not listed above" || return
+    assert_contains "$out" "except the credential file" || return
+    assert_contains "$out" "holding that one file and nothing else" || return
+    [ -f "$HOME/.claude-brygga/.credentials.json" ] || fail "an aborted purge touched the credential"
+}
+
+# A plain remove off macOS names the file rather than a Keychain that is not
+# there, and still deletes nothing.
+case_remove_off_macos_names_the_credential_file() {
+    HOME=$(new_home); export HOME
+    retiring_profile brygga
+    credential_file brygga
+    out=$(plain_nokeychain brygga)
+    assert_contains "$out" "rm -rf '$HOME/.claude-brygga/.credentials.json'" || return
+    assert_not_contains "$out" "security delete-generic-password" || return
+    [ -f "$HOME/.claude-brygga/.credentials.json" ] || fail "remove deleted the credential"
+}
+
+# ---------------------------------------------------------------------------
 # What doctor says afterwards
 # ---------------------------------------------------------------------------
 
@@ -463,6 +598,13 @@ run_case "--purge deletes root, app data and applet"  case_purge_deletes_the_roo
 run_case "--purge leaves nothing beside the root"     case_purge_leaves_nothing_beside_the_root
 run_case "--purge leaves another profile untouched"   case_purge_leaves_another_profile_untouched
 run_case "--purge only prints the credential command" case_purge_only_prints_the_credential_command
+run_case "--purge leaves the credential file"         case_purge_leaves_the_credential_file_and_deletes_the_rest
+run_case "--purge names what it left"                 case_purge_names_the_credential_it_left_and_how_to_delete_it
+run_case "--purge off macOS prints no Keychain line"  case_purge_off_macos_prints_no_keychain_command
+run_case "--purge on macOS leaves the file too"       case_purge_on_macos_leaves_a_credential_file_too
+run_case "--purge with no credential deletes it all"  case_purge_without_a_credential_file_still_deletes_the_root
+run_case "--purge says beforehand what it keeps"      case_purge_says_beforehand_that_the_credential_stays
+run_case "remove off macOS names the file"            case_remove_off_macos_names_the_credential_file
 run_case "doctor reports what a bare remove leaves"   case_doctor_reports_what_a_bare_remove_leaves
 run_case "doctor is quiet after a purge"              case_doctor_is_quiet_after_a_purge
 run_case "doctor still reports the Keychain entry"    case_doctor_still_reports_the_purged_keychain_entry

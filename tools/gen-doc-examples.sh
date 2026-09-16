@@ -675,9 +675,10 @@ print(json.dumps([r for r in rules if r["rule"] == "D12"][0], indent=2))'
 }
 
 scenario doctor-report
+# ~/audits is not there to begin with, which is the state every reader's Mac
+# is in, so the example shows the directory being made.
 ex_doctor_report() {
     two_profiles
-    mkdir -p "$H/audits"
     SHOWN='agpin doctor --report ~/audits/brygga-2026-09-08'
     agpin doctor --report "$H/audits/brygga-2026-09-08"
 }
@@ -724,6 +725,14 @@ ex_mcp_on() {
     quiet mcp off brygga
     SHOWN='agpin mcp on brygga'
     agpin mcp on brygga
+}
+
+# The rc block, in the dialect of one shell. The fixture's $SHELL is zsh,
+# which is what a Mac has, so this is the block a reader will see.
+scenario shellrc
+ex_shellrc() {
+    SHOWN='agpin shellrc'
+    agpin shellrc
 }
 
 scenario guard-refusal
@@ -779,6 +788,16 @@ ex_err_claude_not_on_path() {
     SHOWN='agpin run brygga'
     in_fixture PATH="$H/bin:$H/.local/bin:$PY_DIR:/usr/bin:/bin" \
         "$BASH_BIN" "$H/.local/bin/agpin" run brygga 2>&1
+    return 0
+}
+
+# A Mac with no Command Line Tools, which is every Mac issued to somebody
+# who is not a developer. PATH holds the stand-ins and nothing else, so
+# there is no python3 anywhere on it.
+scenario err-no-python3
+ex_err_no_python3() {
+    SHOWN='agpin new brygga'
+    in_fixture PATH="$H/bin" "$BASH_BIN" "$H/.local/bin/agpin" new brygga 2>&1
     return 0
 }
 

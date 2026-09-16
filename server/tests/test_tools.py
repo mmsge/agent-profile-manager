@@ -8,7 +8,7 @@ import os
 import pytest
 from fastmcp.exceptions import ToolError
 
-from conftest import lorem, prompt, reply, write_jsonl
+from conftest import lorem, prompt, reply, subagent_result, write_jsonl
 
 
 def test_list_projects_groups_by_cwd_and_reports_retention(call, root):
@@ -223,16 +223,92 @@ def test_search_substring_and_filters(call):
     assert call("search", {"query": "the file holds"})["hits"] == []
 
 
-def test_search_regex_and_its_refusals(call):
-    out = call("search", {"query": "back.?off", "regex": True})
-    assert [h["index"] for h in out["hits"]] == [3, 5]
+def test_search_does_not_take_a_regex_argument(call):
+    """The parameter is gone, not merely discouraged.
+
+    A pattern of six characters could hang the one thread this server has for
+    the rest of the session, chosen by a model reading a transcript, and
+    substring plus the cwd, date and branch filters covers what it was for.
+    """
+    with pytest.raises(ToolError):
+        call("search", {"query": "back.?off", "regex": True})
+    # And the query is a substring now, whatever it looks like.
     assert call("search", {"query": "back.?off"})["hits"] == []
-    with pytest.raises(ToolError, match="bad regular expression"):
-        call("search", {"query": "(unclosed", "regex": True})
-    with pytest.raises(ToolError, match="longer than 200 characters"):
-        call("search", {"query": "a" * 201, "regex": True})
-    # The length refusal is about patterns, a long substring is fine.
+    assert len(call("search", {"query": "backoff"})["hits"]) == 2
+    # A long query is a long substring, not a refused pattern.
     assert call("search", {"query": "a" * 201})["hits"] == []
+
+
+def test_session_summary_caps_its_two_lists(call, make_root):
+    """The two lists that had no cap in a design that caps everything else."""
+    from agent_profile_sessions import server
+
+    root = make_root("wide")
+    common = {"session_id": "s-wide", "cwd": "/work/wide", "branch": "main"}
+    records = []
+    for index in range(server.SUMMARY_FILES_CAP + 20):
+        records.append(
+            reply(
+                f"touching file {index}",
+                tools=[("Edit", f"/work/wide/pkg/module_{index:04d}.py")],
+                ts="2026-09-10T09:00:00.000Z",
+                uuid=f"w{index}",
+                **common,
+            )
+        )
+    write_jsonl(os.path.join(root, "projects", "-work-wide", "s-wide.jsonl"), records)
+
+    out = call("session_summary", {"session_id": "s-wide"}, use_root=root)
+    assert len(out["files_touched"]) == server.SUMMARY_FILES_CAP
+    assert out["files_touched_total"] == server.SUMMARY_FILES_CAP + 20
+    assert out["files_touched_truncated"] is True
+    # The kept ones are the first of the same sorted order, so paging by hand
+    # is possible and the answer is stable between calls.
+    assert out["files_touched"][0].endswith("module_0000.py")
+
+
+def test_session_summary_says_nothing_was_cut_when_nothing_was(call):
+    out = call("session_summary", {"session_id": "s-alpha-1"})
+    assert out["files_touched"] == ["/work/alpha/fetcher.py"]
+    assert out["files_touched_total"] == 1
+    assert out["files_touched_truncated"] is False
+    assert out["subagents_total"] == 1
+    assert out["subagents_truncated"] is False
+
+
+def test_session_summary_caps_the_subagents(call, make_root, monkeypatch):
+    from agent_profile_sessions import server
+
+    monkeypatch.setattr(server, "SUMMARY_SUBAGENTS_CAP", 2)
+    root = make_root("agents")
+    common = {"session_id": "s-agents", "cwd": "/work/agents", "branch": "main"}
+    parent = [prompt("go", ts="2026-09-10T09:00:00.000Z", uuid="p0", **common)]
+    for index in range(4):
+        parent.append(
+            subagent_result(
+                f"ag{index}", "explorer",
+                ts=f"2026-09-10T09:0{index}:30.000Z", uuid=f"r{index}", **common,
+            )
+        )
+    write_jsonl(os.path.join(root, "projects", "-work-agents", "s-agents.jsonl"), parent)
+    for index in range(4):
+        child = [
+            prompt(f"step {index}", ts="2026-09-10T09:01:00.000Z",
+                   uuid=f"c{index}", **common)
+        ]
+        for record in child:
+            record["agentId"] = f"ag{index}"
+            record["isSidechain"] = True
+        write_jsonl(
+            os.path.join(root, "projects", "-work-agents", "s-agents", "subagents",
+                         f"agent-ag{index}.jsonl"),
+            child,
+        )
+
+    out = call("session_summary", {"session_id": "s-agents"}, use_root=root)
+    assert len(out["subagents"]) == 2
+    assert out["subagents_total"] == 4
+    assert out["subagents_truncated"] is True
 
 
 def _run_main(root_arg: str, config_dir: str | None) -> tuple[int, str]:

@@ -134,6 +134,11 @@ data directory, or puts `--env` after `--args`. It stays quiet about a
 hand-tuned line that still pins the right root: that is nobody's business but
 its owner's, and a rule that fires on a working setup gets ignored.
 
+An applet is a script rather than a single command, so every `do shell script`
+line in it is read and the worst of them is the verdict: a second line that
+launches the app with nothing pinned is a finding even when the first line is
+exactly right, and a second `--env` after the pin is not part of the root.
+
 D14 exists because assuming launchers live in `~/Applications` is wrong on a
 real machine. Two working ones were found sitting on a Desktop, entirely
 outside the audit, while `doctor` reported a clean desktop. It searches

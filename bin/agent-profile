@@ -128,9 +128,27 @@ if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
         exit 1
     fi
     _ms_pinned=${CLAUDE_CONFIG_DIR:-}
-    if [ -z "$_ms_pinned" ] || [ "${_ms_pinned%/}" != "${_ms_root%/}" ]; then
+    # Both sides are resolved before they are compared. The Python half
+    # compares real paths, and comparing these two as strings meant a root
+    # reachable by a second spelling, a symlinked home or a symlinked volume,
+    # was refused by one guard and accepted by the other, with a message that
+    # did not say why (sessions-server gap 12). `cd && pwd -P` is the bash 3.2
+    # way to ask, and it is what this block already does to find its own tree.
+    # A path that does not exist resolves to itself, and the Python half
+    # refuses it a moment later for not being a directory.
+    _ms_real_pinned=$(cd "$_ms_pinned" 2>/dev/null && pwd -P)
+    [ -n "$_ms_real_pinned" ] || _ms_real_pinned="${_ms_pinned%/}"
+    _ms_real_root=$(cd "$_ms_root" 2>/dev/null && pwd -P)
+    [ -n "$_ms_real_root" ] || _ms_real_root="${_ms_root%/}"
+    if [ -z "$_ms_pinned" ] || [ "$_ms_real_pinned" != "$_ms_real_root" ]; then
         printf '%s mcp serve: refusing to start: CLAUDE_CONFIG_DIR is %s, --root is %s\n' \
             "$_ms_self" "${_ms_pinned:-unset}" "$_ms_root" >&2
+        # Both spellings as they were given, and what they resolved to when
+        # that is a different answer, so a refusal over a symlink says so.
+        if [ -n "$_ms_pinned" ] && \
+           { [ "$_ms_real_pinned" != "${_ms_pinned%/}" ] || [ "$_ms_real_root" != "${_ms_root%/}" ]; }; then
+            printf 'Resolved: %s and %s\n' "$_ms_real_pinned" "$_ms_real_root" >&2
+        fi
         exit 1
     fi
     _ms_python=${AGENT_PROFILE_SERVER_PYTHON:-}
@@ -156,8 +174,15 @@ if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
         printf 'Run tools/install.sh again, or brew reinstall agpin, to build it.\n' >&2
         exit 1
     fi
-    PYTHONPATH="$_ms_pkg${PYTHONPATH:+:$PYTHONPATH}" \
-        exec "$_ms_python" -m agent_profile_sessions --root "$_ms_root"
+    # The package directory is the whole path, rather than the head of
+    # whatever the session had. A stdio server inherits its parent's
+    # environment (docs/FACTS.md F24), and a root's own settings.json can set
+    # variables for a session, so extending PYTHONPATH here would let a
+    # transcript that talked a model into writing that file choose what
+    # `import fastmcp` finds (sessions-server gap 13). Nothing needs the
+    # inherited value: the environment beside this script is self-contained.
+    PYTHONPATH="$_ms_pkg" \
+        exec "$_ms_python" -s -m agent_profile_sessions --root "$_ms_root"
 fi
 
 AGENT_PROFILE_VERSION="0.11.0"
@@ -207,6 +232,11 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 # suite points the first at a stand-in that edits a state file the way the CLI
 # does, and the second at a script that records what it was asked to run, so
 # no test starts the agent or a Python interpreter.
+#
+# AGENT_PROFILE_SERVER_PYTHON is a test hook and a way to point at a
+# hand-built environment. A real install never sets it: the launcher finds the
+# interpreter beside itself, and a variable naming another one is a variable
+# that chooses what code the sessions server runs.
 : "${AGENT_PROFILE_MCP_REGISTRAR:=}"
 : "${AGENT_PROFILE_SERVER_PYTHON:=}"
 
@@ -248,6 +278,9 @@ KNOWN_AGENTS="claude"
 #   state_file    agent state file that sits beside the default root
 #   state_base    basename of that state file, as found inside a pinned root
 #   cred_service  Keychain service name, before the per-root suffix
+#   cred_base     basename of the credential file inside a root, which is
+#                 where the login lives where there is no Keychain. Named so
+#                 the tool can leave it alone by name; it is never opened
 #   url_handler   bundle that registers the agent's deep-link scheme
 #   url_scheme    that scheme
 #   app_prefix    directory-name prefix for the desktop app's data dir
@@ -271,6 +304,7 @@ agent_def() {
                 state_file)   printf '%s\n' "$HOME/.claude.json" ;;
                 state_base)   printf '%s\n' ".claude.json" ;;
                 cred_service) printf '%s\n' "Claude Code-credentials" ;;
+                cred_base)    printf '%s\n' ".credentials.json" ;;
                 url_handler)  printf '%s\n' "$HOME/Applications/Claude Code URL Handler.app" ;;
                 url_scheme)   printf '%s\n' "claude-cli" ;;
                 app_prefix)   printf '%s\n' "Claude-" ;;
@@ -380,6 +414,37 @@ ides_for_command() {
     done
 }
 
+# ide_for_app <application name>: the IDE this tool knows by that name, or
+# empty. --app may name any editor, and only the ones in the VS Code family
+# take --user-data-dir, so what a flag means has to be read from the name
+# rather than from the subcommand (launch-paths G10).
+ide_for_app() {
+    for _ifa in $KNOWN_IDES; do
+        if [ "$(ide_def "$_ifa" app)" = "$1" ]; then
+            printf '%s\n' "$_ifa"
+            return 0
+        fi
+    done
+    return 0
+}
+
+# ide_apps_of_kind <kind>: the application names this tool knows in one
+# family, comma separated, for a message that has to name them.
+ide_apps_of_kind() {
+    _iak_out=""
+    for _iak in $KNOWN_IDES; do
+        if [ "$(ide_def "$_iak" kind)" = "$1" ]; then
+            _iak_name=$(ide_def "$_iak" app)
+            if [ -z "$_iak_out" ]; then
+                _iak_out="$_iak_name"
+            else
+                _iak_out="$_iak_out, $_iak_name"
+            fi
+        fi
+    done
+    printf '%s\n' "$_iak_out"
+}
+
 # ide_scan <ide>: every installed extension directory for that IDE, one per
 # line, empty when none is installed.
 #
@@ -443,8 +508,19 @@ warn() {
     printf '%s: %s\n' "$SELF" "$*" >&2
 }
 
+# need <command> [explanation]: refuse a missing dependency, in one shape.
+#
+# The explanation is for the one dependency a Mac can plausibly be without,
+# and it says what the command is used for and how to get it, because
+# "required command not found" is a dead end to somebody who has never
+# installed a developer tool.
 need() {
-    command -v "$1" >/dev/null 2>&1 || die "required command '$1' not found"
+    command -v "$1" >/dev/null 2>&1 && return 0
+    if [ $# -gt 1 ] && [ -n "$2" ]; then
+        die "required command '$1' not found
+$2"
+    fi
+    die "required command '$1' not found"
 }
 
 # ---------------------------------------------------------------------------
@@ -492,6 +568,22 @@ REPORT_LEVEL=normal   # always, normal or detail
 REPORT_FILE=""        # the captured record stream, empty when not capturing
 REPORT_PATH=""        # base path for --report, empty when writing no files
 
+# The rules that did not run on this machine, and the ones that ran with less
+# than their full reach, accumulated as they are emitted. A clean run names
+# them in one line, because "no problems found" is a much smaller claim on a
+# machine where six rules never ran than on one where they all did. A rule
+# that prints a line about itself, like D12 behind --keychain-scan, is not
+# named again here.
+DOCTOR_NOT_RUN=""
+DOCTOR_LIMITED=""
+
+# doctor_rule_names <ids>: the rule ids, deduplicated, sorted and separated
+# by commas, for a sentence. Empty in, empty out.
+doctor_rule_names() {
+    printf '%s' "$1" | tr ' ' '\n' | sed '/^$/d' | sort -u \
+        | tr '\n' ' ' | sed 's/ *$//; s/ /, /g'
+}
+
 # report_rank <level>: levels as numbers, so they can be compared.
 report_rank() {
     case "$1" in
@@ -516,6 +608,16 @@ report_shows() {
 # printed anywhere else.
 emit() {
     _em_level="$1"
+    # A rule that did not run is part of what a clean run has to say, so the
+    # one door counts it as it goes past. Five arguments means the record
+    # carries a reason and no prose of its own; a rule that announces itself
+    # is left to do that rather than being named twice.
+    if [ "$2" = "rule_status" ] && [ $# -le 5 ]; then
+        case "$4" in
+            not_run) DOCTOR_NOT_RUN="$DOCTOR_NOT_RUN $3" ;;
+            limited) DOCTOR_LIMITED="$DOCTOR_LIMITED $3" ;;
+        esac
+    fi
     case "$_em_level" in
         prose) ;;
         *) [ -z "$REPORT_FILE" ] || report_record "$@" ;;
@@ -668,13 +770,29 @@ report_cleanup() {
 report_finish() {
     [ -n "$REPORT_FILE" ] || return 0
     if [ -n "$REPORT_PATH" ]; then
+        # The directory the reader named is created rather than refused.
+        # ~/audits is the shape the guides use and it exists on nobody's Mac,
+        # so --report used to end in the shell's own redirect error followed
+        # by a message that did not name the cause (onboarding G10). Creating
+        # it is unambiguous for a path somebody has just typed, and the run
+        # says which directory it made.
+        _rf_dir=$(dirname "$REPORT_PATH")
+        _rf_made=""
+        if [ ! -d "$_rf_dir" ]; then
+            mkdir -p "$_rf_dir" 2>/dev/null || \
+                die "could not create the directory $_rf_dir for $REPORT_PATH.json and $REPORT_PATH.md"
+            _rf_made=1
+        fi
         # Create both files before announcing them, so a report that cannot be
-        # written fails here rather than after a line claiming it was.
-        : > "$REPORT_PATH.json" || die "could not write $REPORT_PATH.json"
-        : > "$REPORT_PATH.md" || die "could not write $REPORT_PATH.md"
+        # written fails here rather than after a line claiming it was. The
+        # shell's own error is dropped: the message below names the path and
+        # the reason, and two errors for one failure read as two failures.
+        : 2>/dev/null > "$REPORT_PATH.json" || die "could not write $REPORT_PATH.json"
+        : 2>/dev/null > "$REPORT_PATH.md" || die "could not write $REPORT_PATH.md"
         # Where the files went is a fact about this run, not about the machine
         # being audited, so it is said to the terminal and left out of the
         # documents themselves.
+        [ -z "$_rf_made" ] || emit prose text "Created $_rf_dir"
         emit prose text "Wrote $REPORT_PATH.json" "Wrote $REPORT_PATH.md"
         report_render json "$REPORT_FILE" > "$REPORT_PATH.json" || \
             die "could not write $REPORT_PATH.json"
@@ -1500,6 +1618,14 @@ $_mcp_usage"
 # ---------------------------------------------------------------------------
 
 cmd_new() {
+    # Every other command that reads JSON checks for python3; this is the one
+    # a fresh Mac meets first, and without the check canonical_path returns
+    # the empty string and the root is created at "" (onboarding G2).
+    need python3 "$SELF new uses python3 to canonicalise the root path, which is the
+string this profile's credential is keyed on. On macOS python3 comes with the
+Command Line Tools: xcode-select --install
+That download is several gigabytes and this is the one prerequisite this tool
+cannot avoid."
     _new_name=""
     _new_agent="claude"
     _new_root=""
@@ -1735,9 +1861,19 @@ print(os.path.normpath(unicodedata.normalize("NFC", sys.argv[1])))
 ' "$1"
 }
 
+# keychain_platform: does this platform keep the login in a Keychain?
+#
+# Separate from keychain_available because the two answer different
+# questions. Asking the Keychain needs security(1) on PATH; knowing that a
+# credential here is a Keychain entry rather than a file in the root, which is
+# what decides which delete command remove prints, needs only the platform.
+keychain_platform() {
+    [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]
+}
+
 # keychain_available: is there a Keychain to ask at all?
 keychain_available() {
-    [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ] && command -v security >/dev/null 2>&1
+    keychain_platform && command -v security >/dev/null 2>&1
 }
 
 # keychain_has <service>: does an entry exist? Existence only, never -g.
@@ -2000,6 +2136,41 @@ remove_delete() {
 "
 }
 
+# remove_delete_except <dir> <name>: delete everything inside a directory but
+# one entry, and leave the directory itself standing.
+#
+# The one entry is the agent's credential file. This tool never reads, writes
+# or moves a credential, so it is not moved out of the way and put back
+# either: everything around it goes, in the same move-then-delete way
+# remove_delete uses, and the file is left exactly where it was. Off macOS
+# that file is the login itself (docs/FACTS.md F09), and deleting it here
+# would be the one thing the purge screen promises not to do.
+#
+# Returns 0 when everything else is gone, 1 when something could not be
+# deleted, which is named as it happens.
+remove_delete_except() {
+    _rde_dir="$1"
+    _rde_keep="$2"
+    _rde_failed=""
+    for _rde_entry in "$_rde_dir"/* "$_rde_dir"/.[!.]* "$_rde_dir"/..?*; do
+        [ -e "$_rde_entry" ] || [ -L "$_rde_entry" ] || continue
+        [ "${_rde_entry##*/}" = "$_rde_keep" ] && continue
+        if purge_path "$_rde_entry"; then
+            continue
+        fi
+        if [ -e "$_rde_entry" ]; then
+            warn "could not delete $_rde_entry"
+            _rde_failed=1
+            continue
+        fi
+        _rm_stranded="$_rm_stranded$_pp_tmp
+"
+    done
+    [ -z "$_rde_failed" ] || return 1
+    printf 'Deleted everything in %s except %s\n' "$_rde_dir" "$_rde_keep"
+    return 0
+}
+
 # remove_left <label> <path> <note>: one entry of the closing list, with the
 # command that deletes it. The note says why it is still there, or is empty.
 remove_left() {
@@ -2030,6 +2201,12 @@ cmd_remove() {
     _rm_root=$(profile_root "$_rm_name")
     _rm_sessions=$(session_count "$_rm_root")
     _rm_service="$(agent_def "$_rm_agent" cred_service)-$(cred_info "$_rm_root" | cut -f2)"
+    # The credential's other form: a file inside the root, which is where the
+    # login lives on every platform without a Keychain. Named, never opened,
+    # and never deleted, here or anywhere else in this tool.
+    _rm_cred_base=$(agent_def "$_rm_agent" cred_base)
+    _rm_cred_file="$_rm_root/$_rm_cred_base"
+    _rm_cred_kept=""
 
     # A path the registry does not name is derived here for the report and
     # never for the deleting. Where an app data directory or a launcher would
@@ -2066,6 +2243,12 @@ without --purge to get the list of paths, and delete them yourself."
         if [ -e "$_rm_root" ]; then
             _rm_root_block=$(remove_blocker "$_rm_name" "$_rm_root")
         fi
+        # A root holding a credential file is emptied rather than deleted.
+        # The file stays where it is, and the directory around it has to stay
+        # too, because the file cannot be moved (portability gap 2).
+        if [ -z "$_rm_root_block" ] && [ -f "$_rm_cred_file" ]; then
+            _rm_cred_kept=1
+        fi
         if [ -e "$_rm_data" ]; then
             if [ -n "$_rm_data_note" ]; then
                 _rm_data_block="the registry entry does not name it"
@@ -2085,6 +2268,8 @@ without --purge to get the list of paths, and delete them yourself."
         if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
             printf '  %-12s %s\n' "config root" "$_rm_root"
             printf '  %-12s %s session(s)\n' "" "$_rm_sessions"
+            [ -z "$_rm_cred_kept" ] || \
+                printf '  %-12s %s\n' "" "everything in it except the credential file"
         fi
         if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
             printf '  %-12s %s\n' "app data" "$_rm_data"
@@ -2113,6 +2298,10 @@ without --purge to get the list of paths, and delete them yourself."
 
         printf 'The credential is not listed above, and never will be: this tool never\n'
         printf 'touches credentials. The command that deletes it is printed at the end.\n'
+        if [ -n "$_rm_cred_kept" ]; then
+            printf 'The credential here is a file inside the root, so the root itself stays as\n'
+            printf 'well, holding that one file and nothing else.\n'
+        fi
         printf '\n'
         printf 'This cannot be undone. Type the profile name to confirm: '
         _rm_typed=""
@@ -2127,7 +2316,11 @@ without --purge to get the list of paths, and delete them yourself."
         printf '\n'
 
         if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
-            remove_delete "$_rm_root"
+            if [ -n "$_rm_cred_kept" ]; then
+                remove_delete_except "$_rm_root" "$_rm_cred_base"
+            else
+                remove_delete "$_rm_root"
+            fi
         fi
         if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
             remove_delete "$_rm_data"
@@ -2150,10 +2343,16 @@ without --purge to get the list of paths, and delete them yourself."
     printf 'Left on this machine:\n\n'
     _rm_left=""
     if [ -e "$_rm_root" ]; then
-        _rm_note="$_rm_sessions session(s)"
-        [ -n "$_rm_root_block" ] && _rm_note="$_rm_note, not deleted: $_rm_root_block"
-        remove_left "config root" "$_rm_root" "$_rm_note"
-        _rm_left=1
+        if [ -n "$_rm_cred_kept" ]; then
+            # Still here because it was meant to be, so it is not one of the
+            # things that make a purge exit non-zero.
+            remove_left "config root" "$_rm_root" "emptied, apart from the credential below"
+        else
+            _rm_note="$_rm_sessions session(s)"
+            [ -n "$_rm_root_block" ] && _rm_note="$_rm_note, not deleted: $_rm_root_block"
+            remove_left "config root" "$_rm_root" "$_rm_note"
+            _rm_left=1
+        fi
     fi
     if [ -e "$_rm_data" ]; then
         _rm_note="$_rm_data_note"
@@ -2175,18 +2374,31 @@ without --purge to get the list of paths, and delete them yourself."
         _rm_left=1
     fi
 
-    printf '  %-12s %s\n' "credential" "$_rm_service"
-    printf '  %-12s %s\n' "" "This tool never touches credentials, so this one is yours to delete."
-    printf '  %-12s %s\n' "" "Until it is gone, doctor --keychain-scan counts it as a D12 orphan."
-    if [ -n "${USER:-}" ]; then
-        printf '  %-12s security delete-generic-password -s %s -a %s\n' \
-            "" "$(shell_quote "$_rm_service")" "$(shell_quote "$USER")"
-    else
-        # shellcheck disable=SC2016  # literal help text; the reader's shell expands it
-        printf '  %-12s security delete-generic-password -s %s -a "$USER"\n' \
-            "" "$(shell_quote "$_rm_service")"
+    # The credential, in whichever form this machine keeps it. On macOS that is
+    # a Keychain entry, which is why the command printed is a security(1)
+    # delete and why D12 will go on counting it. Everywhere else it is a file
+    # inside the root, which is why --purge left it standing and why the
+    # command printed is an rm. A machine with neither is told about neither:
+    # naming a Keychain service that cannot exist there sends the reader after
+    # something that was never on their disk (portability gap 2).
+    if keychain_platform; then
+        printf '  %-12s %s\n' "credential" "$_rm_service"
+        printf '  %-12s %s\n' "" "This tool never touches credentials, so this one is yours to delete."
+        printf '  %-12s %s\n' "" "Until it is gone, doctor --keychain-scan counts it as a D12 orphan."
+        if [ -n "${USER:-}" ]; then
+            printf '  %-12s security delete-generic-password -s %s -a %s\n' \
+                "" "$(shell_quote "$_rm_service")" "$(shell_quote "$USER")"
+        else
+            # shellcheck disable=SC2016  # literal help text; the reader's shell expands it
+            printf '  %-12s security delete-generic-password -s %s -a "$USER"\n' \
+                "" "$(shell_quote "$_rm_service")"
+        fi
+        printf '\n'
     fi
-    printf '\n'
+    if [ -f "$_rm_cred_file" ]; then
+        remove_left "credential" "$_rm_cred_file" \
+            "This tool never touches credentials, so this one is yours to delete."
+    fi
     if [ -z "$_rm_purge" ]; then
         # Said plainly, because the entry that named these paths is the thing
         # this command just deleted. There is no second chance to ask it.
@@ -2407,18 +2619,51 @@ applet_scan() {
         [ -n "$_as_script" ] || continue
         # Strip the four trailing path components back to the bundle.
         _as_app=${_as_script%/Contents/Resources/Scripts/main.scpt}
-        case "$(applet_current_line "$_as_app")" in
+        # Every launch line, not the first: an applet can pin on its
+        # second line and launch bare on its first.
+        case "$(applet_lines "$_as_app" | tr '\n' ' ')" in
             *"$_as_var="*) printf '%s\n' "$_as_app" ;;
         esac
     done | sort -u
 }
 
 # applet_pinned_root <agent> <applet>: the root an applet pins, or empty.
+#
+# The first line that pins anything answers for the applet, which is what D14
+# names the owning profile from.
 applet_pinned_root() {
     _apr_var=$(agent_def "$1" envvar)
-    _apr_line=$(applet_current_line "$2")
-    # Anchored on " --args" so a root containing spaces still comes back whole.
-    printf '%s' "$_apr_line" | sed -n "s/.*$_apr_var=\(.*\) --args.*/\1/p"
+    applet_lines "$2" | while IFS= read -r _apr_line; do
+        _apr_value=$(applet_env_value "$_apr_line" "$_apr_var")
+        if [ -n "$_apr_value" ]; then
+            printf '%s\n' "$_apr_value"
+            break
+        fi
+    done | head -1
+}
+
+# applet_env_value <line> <var>: what the first "--env VAR=" in a line carries.
+#
+# Parsed as one entry in a list of arguments rather than captured greedily up
+# to " --args": a second --env after the pin used to swallow the rest of the
+# line into the root, so a working hand-tuned launcher was reported as pinning
+# somewhere else (audit-coverage gap 9, E9a). A root may hold spaces, so the
+# value runs to the next argument open(1) would read rather than to the next
+# space: the next --env, the --args that ends open's own arguments, or the
+# redirection the line ends with. A path containing " > " would be misread,
+# and this tool refuses to write one.
+applet_env_value() {
+    case "$1" in
+        *"--env $2="*) ;;
+        *) return 0 ;;
+    esac
+    _aev_rest=${1#*"--env $2="}
+    _aev_rest=${_aev_rest%% --env *}
+    _aev_rest=${_aev_rest%% --args*}
+    case "$_aev_rest" in
+        *" > "*) _aev_rest=${_aev_rest%% > *} ;;
+    esac
+    printf '%s\n' "$_aev_rest"
 }
 
 # reg_set <name> <key> <value>: replace one key, leave every other one alone.
@@ -2451,13 +2696,25 @@ applet_line_norm() {
     sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\\"'
 }
 
-# applet_current_line <applet>: the applet's launch line, normalised, or empty.
-applet_current_line() {
+# applet_lines <applet>: every launch line it holds, normalised, one per line.
+#
+# Every one of them, because an applet is a script rather than a single
+# command: one whose first line is pinned and whose second launches the app
+# bare passed the audit while launching unpinned every time it was opened
+# (audit-coverage gap 9, E9b).
+applet_lines() {
     command -v osadecompile >/dev/null 2>&1 || return 0
     osadecompile "$(applet_script_path "$1")" 2>/dev/null \
         | sed -n 's/^[[:space:]]*//; /^do shell script /p' \
-        | head -1 \
-        | applet_line_norm
+        | while IFS= read -r _al_line; do
+            printf '%s\n' "$_al_line" | applet_line_norm
+        done
+}
+
+# applet_current_line <applet>: the first launch line, normalised, or empty.
+# What a reader sees quoted back at them; the audit reads them all.
+applet_current_line() {
+    applet_lines "$1" | head -1
 }
 
 # applet_verdict <applet> <bundle> <var> <root> <flag> <app-data>
@@ -2484,36 +2741,86 @@ applet_verdict() {
     [ -f "$(applet_script_path "$_av_applet")" ] || { printf 'no-script\n'; return 0; }
     command -v osadecompile >/dev/null 2>&1 || { printf 'unreadable\n'; return 0; }
 
-    _av_have=$(applet_current_line "$_av_applet")
-    [ -n "$_av_have" ] || { printf 'no-line\n'; return 0; }
+    _av_lines=$(applet_lines "$_av_applet")
+    [ -n "$_av_lines" ] || { printf 'no-line\n'; return 0; }
 
     _av_want=$(applet_launch_line "$_av_bundle" "$_av_var" "$_av_root" "$_av_flag" "$_av_data" \
         | applet_line_norm)
-    [ "$_av_have" = "$_av_want" ] && { printf 'ok\n'; return 0; }
 
-    case "$_av_have" in
-        *"--env $_av_var="*) ;;
+    # Every launch line is read, and the worst of them is the applet's
+    # verdict: a line that pins nothing, or the wrong root, is a finding even
+    # when another line beside it is exactly right.
+    _av_worst="ok"
+    _av_seen=""
+    while IFS= read -r _av_line; do
+        [ -n "$_av_line" ] || continue
+        # A line that neither launches the app nor names the variable is doing
+        # something else entirely, and has nothing to pin.
+        case "$_av_line" in
+            *"$_av_bundle"*|*"$_av_var="*) ;;
+            *) continue ;;
+        esac
+        _av_seen=1
+        _av_one=$(applet_line_verdict "$_av_line" "$_av_want" \
+            "$_av_var" "$_av_root" "$_av_flag" "$_av_data")
+        if [ "$(applet_verdict_rank "$_av_one")" -gt "$(applet_verdict_rank "$_av_worst")" ]; then
+            _av_worst="$_av_one"
+        fi
+    done <<AVEOF
+$_av_lines
+AVEOF
+
+    [ -n "$_av_seen" ] || { printf 'nopin\n'; return 0; }
+    printf '%s\n' "$_av_worst"
+}
+
+# applet_line_verdict <line> <want> <var> <root> <flag> <app-data>
+#
+# One launch line, judged on its own, in the words applet_verdict emits.
+applet_line_verdict() {
+    _alv_line="$1"; _alv_want="$2"; _alv_var="$3"
+    _alv_root="$4"; _alv_flag="$5"; _alv_data="$6"
+
+    [ "$_alv_line" = "$_alv_want" ] && { printf 'ok\n'; return 0; }
+
+    case "$_alv_line" in
+        *"--env $_alv_var="*) ;;
         *) printf 'nopin\n'; return 0 ;;
     esac
 
     # Everything after --args belongs to the application, so an --env that only
     # appears there is not a pin at all, however right it looks.
-    case "${_av_have%%--args*}" in
-        *"--env $_av_var="*) ;;
+    _alv_head=${_alv_line%%--args*}
+    case "$_alv_head" in
+        *"--env $_alv_var="*) ;;
         *) printf 'badorder\n'; return 0 ;;
     esac
 
-    case "$_av_have" in
-        *"--env $_av_var=$_av_root --args"*) ;;
-        *) printf 'wrongroot\n'; return 0 ;;
-    esac
+    # The whole line rather than the head: the value ends at " --args", and
+    # cutting there first would leave the space before it on the root.
+    [ "$(applet_env_value "$_alv_line" "$_alv_var")" = "$_alv_root" ] || \
+        { printf 'wrongroot\n'; return 0; }
 
-    case "$_av_have" in
-        *"$_av_flag=$_av_data "*) ;;
+    case "$_alv_line" in
+        *"$_alv_flag=$_alv_data "*) ;;
         *) printf 'wrongdata\n'; return 0 ;;
     esac
 
     printf 'differs\n'
+}
+
+# applet_verdict_rank <verdict>: how much of a leak it is, so that the worst
+# line in a multi-line applet is the one reported.
+applet_verdict_rank() {
+    case "$1" in
+        ok)        printf '0\n' ;;
+        differs)   printf '1\n' ;;
+        wrongdata) printf '2\n' ;;
+        badorder)  printf '3\n' ;;
+        nopin)     printf '4\n' ;;
+        wrongroot) printf '5\n' ;;
+        *)         printf '6\n' ;;
+    esac
 }
 
 # applet_verdict_says <verdict>: one sentence, shared by `app` and D13.
@@ -2715,16 +3022,27 @@ the default root, which is the leak this tool exists to prevent, so nothing was
 launched. See docs/FACTS.md F13 and F19."
     fi
 
-    # Which family this subcommand belongs to, read from the seam rather than
-    # from the application name, because --app may name any editor in it.
-    _ci_kind=$(ide_def "$(ides_for_command "$_ci_cmd" | head -1)" kind)
+    # Which family the application belongs to, read from the name rather than
+    # from the subcommand: --app may name any editor, including one this tool
+    # has never heard of, and the flag below is the one thing that depends on
+    # which family it is in.
+    _ci_ide=$(ide_for_app "$_ci_app")
+    _ci_kind=""
+    [ -z "$_ci_ide" ] || _ci_kind=$(ide_def "$_ci_ide" kind)
 
-    # A separate instance is a VS Code mechanism. A JetBrains IDE has no
-    # equivalent, and its plugin does not spawn the agent anyway (F19), so
-    # offering the flag there would be offering something that does nothing.
+    # A separate instance is a VS Code mechanism: it is --user-data-dir that
+    # makes the instance separate, and only that family understands it. A
+    # JetBrains IDE has no equivalent, and its plugin does not spawn the agent
+    # anyway (F19). Handing the flag to anything else would either fail in the
+    # editor or, worse, launch an instance that is not separate at all, which
+    # is exactly what the refusal this flag bypasses was protecting.
     if [ -n "$_ci_new" ] && [ "$_ci_kind" != "vscode" ]; then
         die "--new-instance is a VS Code mechanism and $_ci_app is not in that family.
-Quit the IDE and run this again, which is the only way to pin it."
+It works by passing --user-data-dir, which only that family understands. The
+editors this tool knows to take it are: $(ide_apps_of_kind vscode). An editor
+that ignores the flag opens a window that shares its state, so the instance
+would not be separate and the pin would not be what it looks like.
+Quit $_ci_app and run this again, which is the only way to pin it."
     fi
 
     # An editor that is already running will not be pinned by this launch: it
@@ -3170,6 +3488,8 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
 
     need python3
     DOCTOR_FINDINGS=0
+    DOCTOR_NOT_RUN=""
+    DOCTOR_LIMITED=""
     _doc_names=$(profile_names)
 
     if [ "$REPORT_FORMAT" != "text" ] || [ -n "$REPORT_PATH" ]; then
@@ -3307,8 +3627,9 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
         # doctor reads (D13):
         #   The AppleScript source of the applet named in the profile's
         #   registry entry, or its default conventional path if none is
-        #   registered, decompiled with `osadecompile`. Only its single
-        #   `do shell script` launch line is read.
+        #   registered, decompiled with `osadecompile`. Every
+        #   `do shell script` line in it is read, and the worst of them is
+        #   the verdict.
         _doc_applet=$(profile_applet "$_doc_name" "$_doc_agent")
         _doc_data=$(reg_get "$_doc_name" app_data)
         [ -n "$_doc_data" ] || _doc_data="$(agent_def "$_doc_agent" app_support)/$(agent_def "$_doc_agent" app_prefix)$(capitalize "$_doc_name")"
@@ -3759,6 +4080,25 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
             [ -n "$_doc_ext" ] || continue
             _doc_ide_label=$(ide_def "$_doc_ide" label)
             _doc_ide_cmd=$(ide_def "$_doc_ide" command)
+
+            # The remedy depends on the platform, because the launchers do.
+            # code and idea pin through open --env, which is macOS only, so
+            # off macOS a fix line naming them sends the reader at a command
+            # that refuses (portability gap 3). What does work there is the
+            # same mechanism by another door: the extension reads the root
+            # from the environment the editor was started with, so an editor
+            # started from a pinned shell inherits the pin.
+            if [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]; then
+                _doc_ide_fix=("Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]")
+            else
+                _doc_ide_fix=(
+                    "$SELF $_doc_ide_cmd pins through open --env and is macOS only, so pin"
+                    "a shell instead: $SELF shell <profile>, or, in the shell you are in,"
+                    "eval \"\$($SELF env <profile>)\". Start the editor from there: it reads"
+                    "the root from the environment it was started with."
+                )
+            fi
+
             case "$(ide_def "$_doc_ide" kind)" in
                 jetbrains)
                     finding "D16" "a Claude Code plugin for $_doc_ide_label is installed and cannot be pinned" \
@@ -3768,7 +4108,7 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
                         "root the IDE process was started with, which a Dock or Spotlight launch" \
                         "leaves unset. The plugin's own Config directory setting only chooses" \
                         "where it writes its lock file; it pins nothing." \
-                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                        "${_doc_ide_fix[@]}"
                     ;;
                 *)
                     finding "D16" "a Claude Code extension for $_doc_ide_label is installed and cannot be pinned" \
@@ -3778,7 +4118,7 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
                         "come from the environment the IDE was launched with. A Dock or" \
                         "Spotlight launch carries none, and every session started that way" \
                         "writes to the default root." \
-                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                        "${_doc_ide_fix[@]}"
                     ;;
             esac
         done < "$_doc_ide_scan"
@@ -3943,6 +4283,31 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     else
         emit always summary 2 findings "$DOCTOR_FINDINGS" exit_code "$_doc_exit" \
             "$DOCTOR_FINDINGS finding(s)."
+    fi
+
+    # What a clean run did not check. Off macOS six rules never run and two
+    # run with less reach, and until now that was in --json and --report only,
+    # so the same green line meant two different things on two machines
+    # (portability gap 5). It is a fact about this run rather than about the
+    # machine being audited, so it is prose: the document does not change.
+    # report_shows is the gate, so --quiet, which exists for cron, stays
+    # silent, and so does --json.
+    if [ "$DOCTOR_FINDINGS" -eq 0 ] && [ -n "$_doc_names" ] && report_shows normal; then
+        _doc_skipped=$(doctor_rule_names "$DOCTOR_NOT_RUN")
+        _doc_partial=$(doctor_rule_names "$DOCTOR_LIMITED")
+        if [ -n "$_doc_skipped" ] || [ -n "$_doc_partial" ]; then
+            _doc_note="Not every rule ran here:"
+            [ -z "$_doc_skipped" ] || _doc_note="$_doc_note $_doc_skipped did not run"
+            if [ -n "$_doc_partial" ]; then
+                [ -z "$_doc_skipped" ] || _doc_note="$_doc_note, and"
+                case "$_doc_partial" in
+                    *,*) _doc_note="$_doc_note $_doc_partial were limited" ;;
+                    *)   _doc_note="$_doc_note $_doc_partial was limited" ;;
+                esac
+            fi
+            emit prose text "$_doc_note." \
+                "Run \"$SELF doctor --json\" for the reason under each."
+        fi
     fi
 
     report_finish
@@ -4628,6 +4993,116 @@ GUARDFISH
 }
 
 # ---------------------------------------------------------------------------
+# shellrc
+#
+# The three lines worth having in a shell rc file, in the dialect of one
+# shell and no other.
+#
+# They used to be typed out wherever they were shown, and the block that came
+# out was half bash and half zsh: `eval "$(agpin completion bash)"` beside a
+# zsh `PROMPT=` (onboarding G5). Pasted whole into ~/.zshrc, which is what a
+# Mac has had for years, the second line sources a bash completion script
+# under zsh. Pasted into ~/.bashrc, the third sets a variable nothing reads.
+#
+# So the block is printed rather than written down, from here and nowhere
+# else, and it chooses its shell the way guard already does: --shell, else
+# what $SHELL names, else bash. The other two forms are one --explain away,
+# because the reader who is on the third shell should not have to guess.
+#
+# Nothing is written to any file. The tool never edits an rc file, for the
+# same reason it never installs a completion script: a copy in a dotfile
+# drifts from the tool, silently.
+# ---------------------------------------------------------------------------
+
+cmd_shellrc() {
+    _sr_asked=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --shell)   shift; [ $# -gt 0 ] || die "--shell needs a value"; _sr_asked="$1" ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+            *)         die "shellrc: unknown option '$1' (try: $SELF shellrc --shell bash|zsh|fish)" ;;
+        esac
+        shift
+    done
+
+    _sr_shell="$_sr_asked"
+    if [ -z "$_sr_shell" ]; then
+        _sr_env=${SHELL:-}
+        case "${_sr_env##*/}" in
+            fish) _sr_shell="fish" ;;
+            zsh)  _sr_shell="zsh" ;;
+            *)    _sr_shell="bash" ;;
+        esac
+    fi
+    case "$_sr_shell" in
+        bash|zsh|fish) ;;
+        *) die "shellrc: unknown shell '$_sr_shell' (known: bash, zsh, fish)" ;;
+    esac
+
+    # Resolved the way guard resolves it: these lines are pasted into a file
+    # another shell will read, so a name that is not on PATH there would make
+    # a block that fails at every shell start.
+    _sr_self=$(resolved_self)
+
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        for _sr_one in bash zsh fish; do
+            shellrc_block "$_sr_one" "$_sr_self" "asked"
+            printf '\n'
+        done
+        printf 'The first refuses to run the agent with nothing pinned. The second completes\n'
+        printf 'subcommands, flags and profile names, looked up when the shell asks rather\n'
+        printf 'than baked in. The third shows which profile this shell is pinned to, derived\n'
+        printf 'fresh on every prompt, so it can never name the wrong account.\n'
+        return "$EX_OK"
+    fi
+
+    shellrc_block "$_sr_shell" "$_sr_self" "$_sr_asked"
+    printf '\n'
+    printf 'Another shell: %s shellrc --shell bash|zsh|fish, or --explain for all three.\n' "$SELF"
+    return "$EX_OK"
+}
+
+# shellrc_block <shell> <self> <asked>: one shell's block, under a heading
+# naming the file it belongs in. <asked> is empty when the shell was read from
+# $SHELL rather than given, which is what the heading then says.
+shellrc_block() {
+    _srb_shell="$1"
+    _srb_self="$2"
+    _srb_how=""
+    # shellcheck disable=SC2016  # literal text: the reader's $SHELL, not ours
+    [ -n "${3:-}" ] || _srb_how=', from $SHELL'
+    case "$_srb_shell" in
+        bash)
+            printf 'Worth adding to ~/.bashrc (bash%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'BASHRC'
+  eval "$(@AP@ guard)"            # refuse to run the agent unpinned
+  eval "$(@AP@ completion bash)"  # tab-complete commands and profile names
+  PS1='$(@AP@ which --label 2>/dev/null) \w \$ '
+BASHRC
+            ;;
+        zsh)
+            printf 'Worth adding to ~/.zshrc (zsh%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'ZSHRC'
+  eval "$(@AP@ guard)"           # refuse to run the agent unpinned
+  eval "$(@AP@ completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(@AP@ which --label 2>/dev/null) %~ %# '
+ZSHRC
+            ;;
+        fish)
+            printf 'Worth adding to ~/.config/fish/config.fish (fish%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'FISHRC'
+  @AP@ guard --shell fish | source  # refuse to run the agent unpinned
+  @AP@ completion fish | source     # tab-complete commands and profile names
+  function fish_prompt
+      set -l p (@AP@ which --label 2>/dev/null)
+      echo -n "$p "(prompt_pwd)'> '
+  end
+FISHRC
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # completion
 #
 # Prints a completion script for bash, zsh or fish, covering every subcommand,
@@ -4668,7 +5143,7 @@ _@SELF@_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="new list ls remove mcp run shell env path which guard desktop code idea app doctor verify explain completion version help"
+    cmds="new list ls remove mcp run shell env path which guard shellrc desktop code idea app doctor verify explain completion version help"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
@@ -4717,6 +5192,12 @@ _@SELF@_complete() {
             esac
             COMPREPLY=( $(compgen -W "--shell" -- "$cur") )
             ;;
+        shellrc)
+            case "$prev" in
+                --shell) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "--shell --explain" -- "$cur") )
+            ;;
         doctor)
             COMPREPLY=( $(compgen -W "--keychain-scan --json --report --quiet --explain" -- "$cur") )
             ;;
@@ -4760,6 +5241,7 @@ _@SELF@() {
         'path:print the config root of a profile'
         'which:which profile this shell is pinned to'
         'guard:print the unpinned-run guard'
+        'shellrc:print the rc-file block for one shell'
         'desktop:launch the desktop app pinned to a profile'
         'code:launch VS Code pinned to a profile'
         'idea:launch a JetBrains IDE pinned to a profile'
@@ -4823,6 +5305,10 @@ _@SELF@() {
         guard)
             _arguments '--shell[shell to target]:shell:(bash zsh fish)'
             ;;
+        shellrc)
+            _arguments '--shell[shell to target]:shell:(bash zsh fish)' \
+                '--explain[print all three forms]'
+            ;;
         doctor)
             _arguments '--keychain-scan[also scan the whole login Keychain]' \
                 '--json[print the audit as one JSON document]' \
@@ -4871,6 +5357,7 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a env -d 'Print exports, for eval
 complete -c @SELF@ -n '__fish_use_subcommand' -a path -d 'Print the config root of a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a which -d 'Which profile this shell is pinned to'
 complete -c @SELF@ -n '__fish_use_subcommand' -a guard -d 'Print the unpinned-run guard'
+complete -c @SELF@ -n '__fish_use_subcommand' -a shellrc -d 'Print the rc-file block for one shell'
 complete -c @SELF@ -n '__fish_use_subcommand' -a desktop -d 'Launch the desktop app pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a code -d 'Launch VS Code pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a idea -d 'Launch a JetBrains IDE pinned to a profile'
@@ -4898,7 +5385,8 @@ complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l icon -d '1024px PNG'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l explain -d 'Restore the full rationale'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l label -d 'Print the bare label only'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l explain -d 'Add why an unpinned shell matters'
-complete -c @SELF@ -n '__fish_seen_subcommand_from guard' -l shell -d 'Shell to target' -a 'bash zsh fish'
+complete -c @SELF@ -n '__fish_seen_subcommand_from guard shellrc' -l shell -d 'Shell to target' -a 'bash zsh fish'
+complete -c @SELF@ -n '__fish_seen_subcommand_from shellrc' -l explain -d 'Print all three forms'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l keychain-scan -d 'Also scan the whole login Keychain'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor verify' -l json -d 'Print as one JSON document'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l report -d 'Write a dated audit to FILE.json and FILE.md'
@@ -5126,7 +5614,10 @@ IDEs
                           land in the running instance and be pinned to
                           whatever it was started with; --new-instance starts a
                           separate one, with its own settings kept under this
-                          profile, so the pin applies anyway.
+                          profile, so the pin applies anyway. --new-instance
+                          is refused for an --app outside the VS Code family,
+                          because it works by passing --user-data-dir and an
+                          editor that ignores that flag is not separate.
   idea <name> [path] [--app NAME]
                           The same for the JetBrains IDEs, IntelliJ IDEA by
                           default; --app PyCharm and so on. It refuses on a
@@ -5165,6 +5656,12 @@ SESSIONS SERVER
                           it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
+  shellrc [--shell bash|zsh|fish] [--explain]
+                          Print the three lines worth adding to your shell rc
+                          file, in one shell's dialect and no other, with the
+                          file they belong in. The shell comes from --shell,
+                          or from $SHELL; --explain prints all three forms and
+                          what each line does. Nothing is written anywhere.
   guard [--shell bash|zsh|fish]
                           Print a shell function that refuses to run the agent
                           unpinned, and turns a leading profile name into a
@@ -5259,6 +5756,7 @@ main() {
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
         guard)    cmd_guard "$@" ;;
+        shellrc)  cmd_shellrc "$@" ;;
         completion) cmd_completion "$@" ;;
         desktop)  cmd_desktop "$@" ;;
         code)     cmd_ide code "$@" ;;
