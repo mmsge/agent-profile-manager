@@ -442,7 +442,7 @@ session can ask what an earlier one did without leaving Claude Code:
 | `session_summary` | last reply, tool histogram, files touched, subagents; no conversation |
 | `get_session` | messages by record range, 2,000 characters each, tool results and thinking left out unless asked for, 40,000 characters per call at most |
 | `get_message` | one message whole, up to a hard cap |
-| `search` | substring or regex over prompts and replies, returning pointers |
+| `search` | case-insensitive substring over prompts and replies, returning pointers |
 
 `new` registers it, in the root's own state file and through `claude mcp add
 --scope user` pinned to that root, which is why the root is no longer
