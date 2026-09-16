@@ -91,7 +91,10 @@ IDEs
                           land in the running instance and be pinned to
                           whatever it was started with; --new-instance starts a
                           separate one, with its own settings kept under this
-                          profile, so the pin applies anyway.
+                          profile, so the pin applies anyway. --new-instance
+                          is refused for an --app outside the VS Code family,
+                          because it works by passing --user-data-dir and an
+                          editor that ignores that flag is not separate.
   idea <name> [path] [--app NAME]
                           The same for the JetBrains IDEs, IntelliJ IDEA by
                           default; --app PyCharm and so on. It refuses on a

@@ -522,6 +522,53 @@ case_new_instance_user_data_dir_sits_under_the_app_data_dir() {
     assert_contains "$out" "Application Support/Claude-Brygga/ide/Visual-Studio-Code"
 }
 
+# --new-instance passes --user-data-dir, which only the VS Code family
+# understands. The family came from the subcommand rather than from --app, so
+# --app Zed was handed a flag Zed does not take, and a flag that is ignored
+# means the instance is not separate at all, which is the refusal it was
+# meant to bypass (launch-paths G10).
+case_new_instance_is_refused_for_an_app_outside_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed --new-instance 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "VS Code mechanism" || return
+    assert_contains "$out" "Zed" || return
+    assert_not_contains "$out" "--env CLAUDE_CONFIG_DIR"
+}
+
+# The refusal names the editors the flag is known for, so the reader learns
+# what it is rather than only that they cannot have it.
+case_the_new_instance_refusal_names_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed --new-instance 2>&1)
+    assert_contains "$out" "Visual Studio Code" || return
+    assert_contains "$out" "Cursor"
+}
+
+# Cursor is in the family, so the flag still works for it and this is a
+# refusal about the application rather than about --app.
+case_new_instance_is_allowed_for_another_app_in_the_family() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" running
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Cursor --new-instance 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--user-data-dir" || return
+    assert_contains "$out" "/ide/Cursor"
+}
+
+# Without --new-instance, --app names any editor at all: the flag is the only
+# thing that needs the family, and open --env pins whatever it launches.
+case_an_app_outside_the_family_still_launches_pinned() {
+    ide_fixture
+    fake_pgrep "$HOME/fakebin" quiet
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga --app Zed 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga" || return
+    assert_not_contains "$out" "--user-data-dir"
+}
+
 case_new_instance_is_refused_for_jetbrains() {
     ide_fixture
     fake_pgrep "$HOME/fakebin" running
@@ -546,4 +593,8 @@ run_case "--new-instance launches past a running one" case_new_instance_launches
 run_case "--user-data-dir comes after --args"         case_new_instance_puts_user_data_dir_after_args
 run_case "the instance data sits under app data"      case_new_instance_user_data_dir_sits_under_the_app_data_dir
 run_case "--new-instance is refused for JetBrains"    case_new_instance_is_refused_for_jetbrains
+run_case "--new-instance is refused outside the family" case_new_instance_is_refused_for_an_app_outside_the_family
+run_case "that refusal names the VS Code family"     case_the_new_instance_refusal_names_the_family
+run_case "--new-instance works for Cursor"           case_new_instance_is_allowed_for_another_app_in_the_family
+run_case "--app outside the family still pins"       case_an_app_outside_the_family_still_launches_pinned
 run_case "idea refuses a running IDE"                 case_idea_refuses_when_the_ide_is_running

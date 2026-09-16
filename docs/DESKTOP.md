@@ -172,6 +172,12 @@ shared, so the Claude Code extension does not need installing again per
 profile. There is no `--new-instance` for `idea`: a JetBrains IDE has no
 equivalent, so quitting it is the only way.
 
+`--user-data-dir` is a VS Code family flag, so `--new-instance` is refused for
+an `--app` outside that family, naming the editors it is known for. An editor
+that ignored the flag would open a window that shares its state, which is the
+thing `--new-instance` exists to avoid. Without the flag, `--app` still names
+any editor at all: `open --env` pins whatever it launches.
+
 If the check cannot tell whether the editor is running, it refuses too. Being
 told to quit an editor that was already closed costs a moment; a session
 silently writing into another customer's root costs rather more.

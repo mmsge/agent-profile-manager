@@ -384,6 +384,37 @@ ides_for_command() {
     done
 }
 
+# ide_for_app <application name>: the IDE this tool knows by that name, or
+# empty. --app may name any editor, and only the ones in the VS Code family
+# take --user-data-dir, so what a flag means has to be read from the name
+# rather than from the subcommand (launch-paths G10).
+ide_for_app() {
+    for _ifa in $KNOWN_IDES; do
+        if [ "$(ide_def "$_ifa" app)" = "$1" ]; then
+            printf '%s\n' "$_ifa"
+            return 0
+        fi
+    done
+    return 0
+}
+
+# ide_apps_of_kind <kind>: the application names this tool knows in one
+# family, comma separated, for a message that has to name them.
+ide_apps_of_kind() {
+    _iak_out=""
+    for _iak in $KNOWN_IDES; do
+        if [ "$(ide_def "$_iak" kind)" = "$1" ]; then
+            _iak_name=$(ide_def "$_iak" app)
+            if [ -z "$_iak_out" ]; then
+                _iak_out="$_iak_name"
+            else
+                _iak_out="$_iak_out, $_iak_name"
+            fi
+        fi
+    done
+    printf '%s\n' "$_iak_out"
+}
+
 # ide_scan <ide>: every installed extension directory for that IDE, one per
 # line, empty when none is installed.
 #
@@ -2961,16 +2992,27 @@ the default root, which is the leak this tool exists to prevent, so nothing was
 launched. See docs/FACTS.md F13 and F19."
     fi
 
-    # Which family this subcommand belongs to, read from the seam rather than
-    # from the application name, because --app may name any editor in it.
-    _ci_kind=$(ide_def "$(ides_for_command "$_ci_cmd" | head -1)" kind)
+    # Which family the application belongs to, read from the name rather than
+    # from the subcommand: --app may name any editor, including one this tool
+    # has never heard of, and the flag below is the one thing that depends on
+    # which family it is in.
+    _ci_ide=$(ide_for_app "$_ci_app")
+    _ci_kind=""
+    [ -z "$_ci_ide" ] || _ci_kind=$(ide_def "$_ci_ide" kind)
 
-    # A separate instance is a VS Code mechanism. A JetBrains IDE has no
-    # equivalent, and its plugin does not spawn the agent anyway (F19), so
-    # offering the flag there would be offering something that does nothing.
+    # A separate instance is a VS Code mechanism: it is --user-data-dir that
+    # makes the instance separate, and only that family understands it. A
+    # JetBrains IDE has no equivalent, and its plugin does not spawn the agent
+    # anyway (F19). Handing the flag to anything else would either fail in the
+    # editor or, worse, launch an instance that is not separate at all, which
+    # is exactly what the refusal this flag bypasses was protecting.
     if [ -n "$_ci_new" ] && [ "$_ci_kind" != "vscode" ]; then
         die "--new-instance is a VS Code mechanism and $_ci_app is not in that family.
-Quit the IDE and run this again, which is the only way to pin it."
+It works by passing --user-data-dir, which only that family understands. The
+editors this tool knows to take it are: $(ide_apps_of_kind vscode). An editor
+that ignores the flag opens a window that shares its state, so the instance
+would not be separate and the pin would not be what it looks like.
+Quit $_ci_app and run this again, which is the only way to pin it."
     fi
 
     # An editor that is already running will not be pinned by this launch: it
@@ -5542,7 +5584,10 @@ IDEs
                           land in the running instance and be pinned to
                           whatever it was started with; --new-instance starts a
                           separate one, with its own settings kept under this
-                          profile, so the pin applies anyway.
+                          profile, so the pin applies anyway. --new-instance
+                          is refused for an --app outside the VS Code family,
+                          because it works by passing --user-data-dir and an
+                          editor that ignores that flag is not separate.
   idea <name> [path] [--app NAME]
                           The same for the JetBrains IDEs, IntelliJ IDEA by
                           default; --app PyCharm and so on. It refuses on a
