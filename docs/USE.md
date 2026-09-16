@@ -439,7 +439,7 @@ session can ask what an earlier one did without leaving Claude Code:
 | --- | --- |
 | `list_projects` | one row per working directory, with counts and the retention window |
 | `list_sessions` | identity columns and a 200-character first-prompt preview, filterable by project, date range, branch and a substring, paged |
-| `session_summary` | last reply, tool histogram, files touched, subagents; no conversation |
+| `session_summary` | last reply, tool histogram, files touched, subagents; no conversation. The last two are capped at 100 and 20, with the total beside each |
 | `get_session` | messages by record range, 2,000 characters each, tool results and thinking left out unless asked for, 40,000 characters per call at most |
 | `get_message` | one message whole, up to a hard cap |
 | `search` | case-insensitive substring over prompts and replies, returning pointers |
@@ -449,7 +449,8 @@ session can ask what an earlier one did without leaving Claude Code:
 strictly empty after `new` (docs/FACTS.md F23). The registered command is
 `agpin mcp serve --root <root>`: this tool's own launcher, at its installed
 path, which finds the server's Python environment beside itself and refuses
-to start unless `CLAUDE_CONFIG_DIR` names that same root. Claude Code hands a
+to start unless `CLAUDE_CONFIG_DIR` resolves to that same root, symlinks and
+all, which is the check the server itself makes. Claude Code hands a
 stdio server its own environment (F24), so the pin and the server's scope are
 the same variable in the same process tree, and a registration copied into
 another root fails visibly in `/mcp` instead of serving the wrong account's

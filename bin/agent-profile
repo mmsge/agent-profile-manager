@@ -2755,7 +2755,7 @@ applet_verdict() {
     while IFS= read -r _av_line; do
         [ -n "$_av_line" ] || continue
         # A line that neither launches the app nor names the variable is doing
-        # something else entirely, and pins nothing because it needs to.
+        # something else entirely, and has nothing to pin.
         case "$_av_line" in
             *"$_av_bundle"*|*"$_av_var="*) ;;
             *) continue ;;
