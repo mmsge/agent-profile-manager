@@ -248,6 +248,9 @@ KNOWN_AGENTS="claude"
 #   state_file    agent state file that sits beside the default root
 #   state_base    basename of that state file, as found inside a pinned root
 #   cred_service  Keychain service name, before the per-root suffix
+#   cred_base     basename of the credential file inside a root, which is
+#                 where the login lives where there is no Keychain. Named so
+#                 the tool can leave it alone by name; it is never opened
 #   url_handler   bundle that registers the agent's deep-link scheme
 #   url_scheme    that scheme
 #   app_prefix    directory-name prefix for the desktop app's data dir
@@ -271,6 +274,7 @@ agent_def() {
                 state_file)   printf '%s\n' "$HOME/.claude.json" ;;
                 state_base)   printf '%s\n' ".claude.json" ;;
                 cred_service) printf '%s\n' "Claude Code-credentials" ;;
+                cred_base)    printf '%s\n' ".credentials.json" ;;
                 url_handler)  printf '%s\n' "$HOME/Applications/Claude Code URL Handler.app" ;;
                 url_scheme)   printf '%s\n' "claude-cli" ;;
                 app_prefix)   printf '%s\n' "Claude-" ;;
@@ -1770,9 +1774,19 @@ print(os.path.normpath(unicodedata.normalize("NFC", sys.argv[1])))
 ' "$1"
 }
 
+# keychain_platform: does this platform keep the login in a Keychain?
+#
+# Separate from keychain_available because the two answer different
+# questions. Asking the Keychain needs security(1) on PATH; knowing that a
+# credential here is a Keychain entry rather than a file in the root, which is
+# what decides which delete command remove prints, needs only the platform.
+keychain_platform() {
+    [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]
+}
+
 # keychain_available: is there a Keychain to ask at all?
 keychain_available() {
-    [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ] && command -v security >/dev/null 2>&1
+    keychain_platform && command -v security >/dev/null 2>&1
 }
 
 # keychain_has <service>: does an entry exist? Existence only, never -g.
@@ -2035,6 +2049,41 @@ remove_delete() {
 "
 }
 
+# remove_delete_except <dir> <name>: delete everything inside a directory but
+# one entry, and leave the directory itself standing.
+#
+# The one entry is the agent's credential file. This tool never reads, writes
+# or moves a credential, so it is not moved out of the way and put back
+# either: everything around it goes, in the same move-then-delete way
+# remove_delete uses, and the file is left exactly where it was. Off macOS
+# that file is the login itself (docs/FACTS.md F09), and deleting it here
+# would be the one thing the purge screen promises not to do.
+#
+# Returns 0 when everything else is gone, 1 when something could not be
+# deleted, which is named as it happens.
+remove_delete_except() {
+    _rde_dir="$1"
+    _rde_keep="$2"
+    _rde_failed=""
+    for _rde_entry in "$_rde_dir"/* "$_rde_dir"/.[!.]* "$_rde_dir"/..?*; do
+        [ -e "$_rde_entry" ] || [ -L "$_rde_entry" ] || continue
+        [ "${_rde_entry##*/}" = "$_rde_keep" ] && continue
+        if purge_path "$_rde_entry"; then
+            continue
+        fi
+        if [ -e "$_rde_entry" ]; then
+            warn "could not delete $_rde_entry"
+            _rde_failed=1
+            continue
+        fi
+        _rm_stranded="$_rm_stranded$_pp_tmp
+"
+    done
+    [ -z "$_rde_failed" ] || return 1
+    printf 'Deleted everything in %s except %s\n' "$_rde_dir" "$_rde_keep"
+    return 0
+}
+
 # remove_left <label> <path> <note>: one entry of the closing list, with the
 # command that deletes it. The note says why it is still there, or is empty.
 remove_left() {
@@ -2065,6 +2114,12 @@ cmd_remove() {
     _rm_root=$(profile_root "$_rm_name")
     _rm_sessions=$(session_count "$_rm_root")
     _rm_service="$(agent_def "$_rm_agent" cred_service)-$(cred_info "$_rm_root" | cut -f2)"
+    # The credential's other form: a file inside the root, which is where the
+    # login lives on every platform without a Keychain. Named, never opened,
+    # and never deleted, here or anywhere else in this tool.
+    _rm_cred_base=$(agent_def "$_rm_agent" cred_base)
+    _rm_cred_file="$_rm_root/$_rm_cred_base"
+    _rm_cred_kept=""
 
     # A path the registry does not name is derived here for the report and
     # never for the deleting. Where an app data directory or a launcher would
@@ -2101,6 +2156,12 @@ without --purge to get the list of paths, and delete them yourself."
         if [ -e "$_rm_root" ]; then
             _rm_root_block=$(remove_blocker "$_rm_name" "$_rm_root")
         fi
+        # A root holding a credential file is emptied rather than deleted.
+        # The file stays where it is, and the directory around it has to stay
+        # too, because the file cannot be moved (portability gap 2).
+        if [ -z "$_rm_root_block" ] && [ -f "$_rm_cred_file" ]; then
+            _rm_cred_kept=1
+        fi
         if [ -e "$_rm_data" ]; then
             if [ -n "$_rm_data_note" ]; then
                 _rm_data_block="the registry entry does not name it"
@@ -2120,6 +2181,8 @@ without --purge to get the list of paths, and delete them yourself."
         if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
             printf '  %-12s %s\n' "config root" "$_rm_root"
             printf '  %-12s %s session(s)\n' "" "$_rm_sessions"
+            [ -z "$_rm_cred_kept" ] || \
+                printf '  %-12s %s\n' "" "everything in it except the credential file"
         fi
         if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
             printf '  %-12s %s\n' "app data" "$_rm_data"
@@ -2148,6 +2211,10 @@ without --purge to get the list of paths, and delete them yourself."
 
         printf 'The credential is not listed above, and never will be: this tool never\n'
         printf 'touches credentials. The command that deletes it is printed at the end.\n'
+        if [ -n "$_rm_cred_kept" ]; then
+            printf 'The credential here is a file inside the root, so the root itself stays as\n'
+            printf 'well, holding that one file and nothing else.\n'
+        fi
         printf '\n'
         printf 'This cannot be undone. Type the profile name to confirm: '
         _rm_typed=""
@@ -2162,7 +2229,11 @@ without --purge to get the list of paths, and delete them yourself."
         printf '\n'
 
         if [ -e "$_rm_root" ] && [ -z "$_rm_root_block" ]; then
-            remove_delete "$_rm_root"
+            if [ -n "$_rm_cred_kept" ]; then
+                remove_delete_except "$_rm_root" "$_rm_cred_base"
+            else
+                remove_delete "$_rm_root"
+            fi
         fi
         if [ -e "$_rm_data" ] && [ -z "$_rm_data_block" ]; then
             remove_delete "$_rm_data"
@@ -2185,10 +2256,16 @@ without --purge to get the list of paths, and delete them yourself."
     printf 'Left on this machine:\n\n'
     _rm_left=""
     if [ -e "$_rm_root" ]; then
-        _rm_note="$_rm_sessions session(s)"
-        [ -n "$_rm_root_block" ] && _rm_note="$_rm_note, not deleted: $_rm_root_block"
-        remove_left "config root" "$_rm_root" "$_rm_note"
-        _rm_left=1
+        if [ -n "$_rm_cred_kept" ]; then
+            # Still here because it was meant to be, so it is not one of the
+            # things that make a purge exit non-zero.
+            remove_left "config root" "$_rm_root" "emptied, apart from the credential below"
+        else
+            _rm_note="$_rm_sessions session(s)"
+            [ -n "$_rm_root_block" ] && _rm_note="$_rm_note, not deleted: $_rm_root_block"
+            remove_left "config root" "$_rm_root" "$_rm_note"
+            _rm_left=1
+        fi
     fi
     if [ -e "$_rm_data" ]; then
         _rm_note="$_rm_data_note"
@@ -2210,18 +2287,31 @@ without --purge to get the list of paths, and delete them yourself."
         _rm_left=1
     fi
 
-    printf '  %-12s %s\n' "credential" "$_rm_service"
-    printf '  %-12s %s\n' "" "This tool never touches credentials, so this one is yours to delete."
-    printf '  %-12s %s\n' "" "Until it is gone, doctor --keychain-scan counts it as a D12 orphan."
-    if [ -n "${USER:-}" ]; then
-        printf '  %-12s security delete-generic-password -s %s -a %s\n' \
-            "" "$(shell_quote "$_rm_service")" "$(shell_quote "$USER")"
-    else
-        # shellcheck disable=SC2016  # literal help text; the reader's shell expands it
-        printf '  %-12s security delete-generic-password -s %s -a "$USER"\n' \
-            "" "$(shell_quote "$_rm_service")"
+    # The credential, in whichever form this machine keeps it. On macOS that is
+    # a Keychain entry, which is why the command printed is a security(1)
+    # delete and why D12 will go on counting it. Everywhere else it is a file
+    # inside the root, which is why --purge left it standing and why the
+    # command printed is an rm. A machine with neither is told about neither:
+    # naming a Keychain service that cannot exist there sends the reader after
+    # something that was never on their disk (portability gap 2).
+    if keychain_platform; then
+        printf '  %-12s %s\n' "credential" "$_rm_service"
+        printf '  %-12s %s\n' "" "This tool never touches credentials, so this one is yours to delete."
+        printf '  %-12s %s\n' "" "Until it is gone, doctor --keychain-scan counts it as a D12 orphan."
+        if [ -n "${USER:-}" ]; then
+            printf '  %-12s security delete-generic-password -s %s -a %s\n' \
+                "" "$(shell_quote "$_rm_service")" "$(shell_quote "$USER")"
+        else
+            # shellcheck disable=SC2016  # literal help text; the reader's shell expands it
+            printf '  %-12s security delete-generic-password -s %s -a "$USER"\n' \
+                "" "$(shell_quote "$_rm_service")"
+        fi
+        printf '\n'
     fi
-    printf '\n'
+    if [ -f "$_rm_cred_file" ]; then
+        remove_left "credential" "$_rm_cred_file" \
+            "This tool never touches credentials, so this one is yours to delete."
+    fi
     if [ -z "$_rm_purge" ]; then
         # Said plainly, because the entry that named these paths is the thing
         # this command just deleted. There is no second chance to ask it.
