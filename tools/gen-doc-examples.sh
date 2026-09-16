@@ -782,6 +782,16 @@ ex_err_claude_not_on_path() {
     return 0
 }
 
+# A Mac with no Command Line Tools, which is every Mac issued to somebody
+# who is not a developer. PATH holds the stand-ins and nothing else, so
+# there is no python3 anywhere on it.
+scenario err-no-python3
+ex_err_no_python3() {
+    SHOWN='agpin new brygga'
+    in_fixture PATH="$H/bin" "$BASH_BIN" "$H/.local/bin/agpin" new brygga 2>&1
+    return 0
+}
+
 scenario err-already-registered
 ex_err_already_registered() {
     two_profiles

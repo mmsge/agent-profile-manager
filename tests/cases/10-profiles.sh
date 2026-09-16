@@ -84,6 +84,21 @@ case_new_refuses_to_repoint() {
     [ -d "$HOME/elsewhere" ] && fail "it created the new root anyway"
 }
 
+# A Mac that has never had Xcode or the Command Line Tools has no python3,
+# and new is the second command a newcomer types. Without the check it dies
+# inside canonical_path, with bash's own "command not found" and a root
+# created at the empty string (onboarding G2).
+case_new_refuses_without_python3() {
+    HOME=$(new_home); export HOME
+    mkdir -p "$HOME/nopybin"
+    out=$(PATH="$HOME/nopybin" "$AP" new nypy 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "required command 'python3' not found" || return
+    assert_contains "$out" "xcode-select --install" || return
+    assert_not_contains "$out" "could not create root" || return
+    [ -e "$HOME/.claude-nypy" ] && fail "it created a root without python3"
+}
+
 case_new_rejects_bad_names() {
     HOME=$(new_home); export HOME
     out=$("$AP" new "has space" 2>&1); status=$?
@@ -334,6 +349,7 @@ run_case "new reports tightening the app data mode"   case_new_reports_tightenin
 run_case "new writes exactly four registry keys"      case_new_writes_four_keys
 run_case "new is idempotent"                          case_new_is_idempotent
 run_case "new refuses to repoint an existing profile" case_new_refuses_to_repoint
+run_case "new refuses without python3"                case_new_refuses_without_python3
 run_case "new rejects invalid names"                  case_new_rejects_bad_names
 run_case "new rejects an unknown agent"               case_new_rejects_unknown_agent
 run_case "new warns a fresh root has no guardrails"   case_new_warns_root_has_no_guardrails

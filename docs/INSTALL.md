@@ -162,6 +162,14 @@ script, written to bash 3.2 because that is what `/bin/bash` is on macOS, and
 it uses `python3` from the Command Line Tools only to read JSON. No Homebrew,
 no `jq`.
 
+`python3` is the one prerequisite the tool cannot avoid. A Mac that has never
+had Xcode or the Command Line Tools has none, and `agpin new`, `agpin list`,
+`agpin doctor`, `agpin remove` and `agpin verify` all refuse without it,
+naming `xcode-select --install`. That download is several gigabytes, so it is
+worth doing before the first profile rather than in the middle of one. `uv`
+does not help here: it brings its own Python for the sessions server and puts
+nothing on your `PATH`.
+
 Installing adds nothing to that: `curl`, `shasum` and `tar` are on every Mac,
 and neither `tools/install.sh` nor `agpin version --check` calls `python3`,
 because on a fresh Mac that opens the Command Line Tools dialog and an

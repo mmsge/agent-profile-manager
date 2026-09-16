@@ -92,6 +92,32 @@ Fix: install Claude Code, or fix `PATH`. `new` in the same state still
 creates the profile, and says the sessions server was not registered; run
 `agpin mcp on <name>` once `claude` is on `PATH`.
 
+## "required command 'python3' not found"
+
+<!-- BEGIN GENERATED: example err-no-python3 (tools/gen-doc-examples.sh) -->
+```sh
+agpin new brygga
+```
+
+```
+agpin: required command 'python3' not found
+agpin new uses python3 to canonicalise the root path, which is the
+string this profile's credential is keyed on. On macOS python3 comes with the
+Command Line Tools: xcode-select --install
+That download is several gigabytes and this is the one prerequisite this tool
+cannot avoid.
+```
+<!-- END GENERATED: example err-no-python3 -->
+
+Cause: every command that reads JSON uses `python3`, and a Mac that has never
+had Xcode or the Command Line Tools has none. `new` is where a fresh machine
+meets that first, because it canonicalises the root path before creating it;
+`list`, `doctor`, `remove` and `verify` refuse the same way.
+
+Fix: `xcode-select --install`. It is a several gigabyte download and the one
+prerequisite this tool cannot avoid. `uv` does not help here: it brings its
+own Python for the sessions server and puts nothing on your `PATH`.
+
 ## "profile '\<name\>' is already registered with root '...'. Refusing to repoint it..."
 
 <!-- BEGIN GENERATED: example err-already-registered (tools/gen-doc-examples.sh) -->

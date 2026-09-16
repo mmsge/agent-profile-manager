@@ -70,6 +70,7 @@ Check each of these. The command beside it is how.
 | A Mac. The tool is macOS only; see [Windows](INSTALL.md#windows). | `uname` prints `Darwin` |
 | Claude Code installed, with `claude` on `PATH` | `command -v claude` prints a path |
 | Claude Desktop, if the desktop app is to be pinned | `ls /Applications/Claude.app` |
+| `python3`, which every command that reads JSON uses | `python3 --version` prints one; `xcode-select --install` if it does not |
 | `cosign`, so the installer can check the release signature | `brew install cosign` |
 | `uv`, so the sessions server's environment builds without the Command Line Tools dialogue | `brew install uv` |
 | The list of accounts, and a profile name for each | Ask. Letters, digits, dash and underscore only |
