@@ -679,13 +679,29 @@ report_cleanup() {
 report_finish() {
     [ -n "$REPORT_FILE" ] || return 0
     if [ -n "$REPORT_PATH" ]; then
+        # The directory the reader named is created rather than refused.
+        # ~/audits is the shape the guides use and it exists on nobody's Mac,
+        # so --report used to end in the shell's own redirect error followed
+        # by a message that did not name the cause (onboarding G10). Creating
+        # it is unambiguous for a path somebody has just typed, and the run
+        # says which directory it made.
+        _rf_dir=$(dirname "$REPORT_PATH")
+        _rf_made=""
+        if [ ! -d "$_rf_dir" ]; then
+            mkdir -p "$_rf_dir" 2>/dev/null || \
+                die "could not create the directory $_rf_dir for $REPORT_PATH.json and $REPORT_PATH.md"
+            _rf_made=1
+        fi
         # Create both files before announcing them, so a report that cannot be
-        # written fails here rather than after a line claiming it was.
-        : > "$REPORT_PATH.json" || die "could not write $REPORT_PATH.json"
-        : > "$REPORT_PATH.md" || die "could not write $REPORT_PATH.md"
+        # written fails here rather than after a line claiming it was. The
+        # shell's own error is dropped: the message below names the path and
+        # the reason, and two errors for one failure read as two failures.
+        : 2>/dev/null > "$REPORT_PATH.json" || die "could not write $REPORT_PATH.json"
+        : 2>/dev/null > "$REPORT_PATH.md" || die "could not write $REPORT_PATH.md"
         # Where the files went is a fact about this run, not about the machine
         # being audited, so it is said to the terminal and left out of the
         # documents themselves.
+        [ -z "$_rf_made" ] || emit prose text "Created $_rf_dir"
         emit prose text "Wrote $REPORT_PATH.json" "Wrote $REPORT_PATH.md"
         report_render json "$REPORT_FILE" > "$REPORT_PATH.json" || \
             die "could not write $REPORT_PATH.json"

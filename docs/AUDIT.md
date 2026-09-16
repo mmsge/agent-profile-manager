@@ -159,7 +159,9 @@ function, and neither format is written anywhere else. The design is in
 `doctor --report FILE` writes both `FILE.json` and `FILE.md` side by side, the
 same document twice, one for a machine and one for a person. Either extension
 on the argument is dropped, so `--report audit.json` writes `audit.json` and
-`audit.md` rather than `audit.json.json`:
+`audit.md` rather than `audit.json.json`. A directory in the path that is not
+there yet is created, and the run says which one; a path it cannot create
+fails naming that directory, before anything claims to have been written:
 
 <!-- BEGIN GENERATED: example doctor-report (tools/gen-doc-examples.sh) -->
 ```sh
@@ -170,6 +172,7 @@ agpin doctor --report ~/audits/brygga-2026-09-08
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Created /Users/alex/audits
 Wrote /Users/alex/audits/brygga-2026-09-08.json
 Wrote /Users/alex/audits/brygga-2026-09-08.md
 ```

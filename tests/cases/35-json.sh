@@ -281,12 +281,40 @@ case_doctor_report_does_not_double_the_extension() {
     fi
 }
 
+# ~/audits exists on nobody's Mac, and it is the path the guides tell the
+# reader to use. The directory is created rather than refused, and the run
+# says so (onboarding G10).
+case_doctor_report_creates_the_directory_it_needs() {
+    HOME=$(new_home); export HOME
+    json_two_profiles
+    out=$("$AP" doctor --report "$HOME/audits/first" 2>&1); status=$?
+    assert_status 2 "$status" "$out" || return
+    assert_contains "$out" "Created $HOME/audits" || return
+    assert_contains "$out" "Wrote $HOME/audits/first.json" || return
+    assert_not_contains "$out" "No such file or directory" || return
+    [ -f "$HOME/audits/first.json" ] || { fail "no first.json"; return; }
+    [ -f "$HOME/audits/first.md" ] || fail "no first.md"
+}
+
+# And it says nothing about creating a directory that was already there.
+case_doctor_report_is_quiet_about_a_directory_that_exists() {
+    HOME=$(new_home); export HOME
+    json_two_profiles
+    mkdir -p "$HOME/audits"
+    out=$("$AP" doctor --report "$HOME/audits/first" 2>&1)
+    assert_not_contains "$out" "Created" || return
+    assert_contains "$out" "Wrote $HOME/audits/first.json"
+}
+
 case_doctor_report_refuses_a_path_it_cannot_write() {
     HOME=$(new_home); export HOME
     json_two_profiles
-    out=$("$AP" doctor --report "$HOME/nosuchdir/audit" 2>&1); status=$?
+    printf 'in the way\n' > "$HOME/afile"
+    out=$("$AP" doctor --report "$HOME/afile/audit" 2>&1); status=$?
     assert_status 1 "$status" || return
-    assert_contains "$out" "could not write"
+    assert_contains "$out" "$HOME/afile" || return
+    assert_not_contains "$out" "No such file or directory" || return
+    assert_not_contains "$out" "Not a directory"
 }
 
 case_doctor_report_needs_a_file() {
@@ -359,6 +387,8 @@ run_case "doctor --json is honest about D13 and D14"   case_doctor_json_is_hones
 run_case "doctor --json runs D13 when it can"          case_doctor_json_runs_the_desktop_rules_when_it_can
 run_case "doctor --report writes both files"           case_doctor_report_writes_both_files
 run_case "doctor --report keeps one extension"         case_doctor_report_does_not_double_the_extension
+run_case "doctor --report creates the directory"       case_doctor_report_creates_the_directory_it_needs
+run_case "doctor --report is quiet about an old one"   case_doctor_report_is_quiet_about_a_directory_that_exists
 run_case "doctor --report refuses an unwritable path"  case_doctor_report_refuses_a_path_it_cannot_write
 run_case "doctor --report needs a file"                case_doctor_report_needs_a_file
 run_case "list --json is one JSON document"            case_list_json_is_one_document

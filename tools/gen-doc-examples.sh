@@ -675,9 +675,10 @@ print(json.dumps([r for r in rules if r["rule"] == "D12"][0], indent=2))'
 }
 
 scenario doctor-report
+# ~/audits is not there to begin with, which is the state every reader's Mac
+# is in, so the example shows the directory being made.
 ex_doctor_report() {
     two_profiles
-    mkdir -p "$H/audits"
     SHOWN='agpin doctor --report ~/audits/brygga-2026-09-08'
     agpin doctor --report "$H/audits/brygga-2026-09-08"
 }
