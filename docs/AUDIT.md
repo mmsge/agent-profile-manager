@@ -46,6 +46,8 @@ agpin doctor
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
 ```
 <!-- END GENERATED: example doctor-clean -->
 
@@ -149,7 +151,10 @@ print(json.dumps([r for r in rules if r["rule"] == "D12"][0], indent=2))'
 `limited`, because it falls back to a weaker question, and so is `D17` on macOS
 itself: it reads the Dock, and the login items cannot be listed without root or
 a consent dialogue. A clean `doctor` on a Linux box is a much smaller claim than
-a clean `doctor` on a Mac, and the document is where that shows.
+a clean `doctor` on a Mac, so a clean run says which rules did not run and
+which ran with less than their full reach, and the document says why for each.
+That line is about the run rather than about the machine, so it stays out of
+the document itself, and out of `--quiet`.
 
 Prose and JSON cannot drift apart, because they are two renderings of one
 record stream: every line these three commands produce goes through a single
@@ -172,6 +177,8 @@ agpin doctor --report ~/audits/brygga-2026-09-08
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
 Created /Users/alex/audits
 Wrote /Users/alex/audits/brygga-2026-09-08.json
 Wrote /Users/alex/audits/brygga-2026-09-08.md

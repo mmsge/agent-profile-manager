@@ -507,6 +507,22 @@ REPORT_LEVEL=normal   # always, normal or detail
 REPORT_FILE=""        # the captured record stream, empty when not capturing
 REPORT_PATH=""        # base path for --report, empty when writing no files
 
+# The rules that did not run on this machine, and the ones that ran with less
+# than their full reach, accumulated as they are emitted. A clean run names
+# them in one line, because "no problems found" is a much smaller claim on a
+# machine where six rules never ran than on one where they all did. A rule
+# that prints a line about itself, like D12 behind --keychain-scan, is not
+# named again here.
+DOCTOR_NOT_RUN=""
+DOCTOR_LIMITED=""
+
+# doctor_rule_names <ids>: the rule ids, deduplicated, sorted and separated
+# by commas, for a sentence. Empty in, empty out.
+doctor_rule_names() {
+    printf '%s' "$1" | tr ' ' '\n' | sed '/^$/d' | sort -u \
+        | tr '\n' ' ' | sed 's/ *$//; s/ /, /g'
+}
+
 # report_rank <level>: levels as numbers, so they can be compared.
 report_rank() {
     case "$1" in
@@ -531,6 +547,16 @@ report_shows() {
 # printed anywhere else.
 emit() {
     _em_level="$1"
+    # A rule that did not run is part of what a clean run has to say, so the
+    # one door counts it as it goes past. Five arguments means the record
+    # carries a reason and no prose of its own; a rule that announces itself
+    # is left to do that rather than being named twice.
+    if [ "$2" = "rule_status" ] && [ $# -le 5 ]; then
+        case "$4" in
+            not_run) DOCTOR_NOT_RUN="$DOCTOR_NOT_RUN $3" ;;
+            limited) DOCTOR_LIMITED="$DOCTOR_LIMITED $3" ;;
+        esac
+    fi
     case "$_em_level" in
         prose) ;;
         *) [ -z "$REPORT_FILE" ] || report_record "$@" ;;
@@ -3295,6 +3321,8 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
 
     need python3
     DOCTOR_FINDINGS=0
+    DOCTOR_NOT_RUN=""
+    DOCTOR_LIMITED=""
     _doc_names=$(profile_names)
 
     if [ "$REPORT_FORMAT" != "text" ] || [ -n "$REPORT_PATH" ]; then
@@ -4087,6 +4115,31 @@ $_doc_base-$(cred_info "$_doc_r" | cut -f2)"
     else
         emit always summary 2 findings "$DOCTOR_FINDINGS" exit_code "$_doc_exit" \
             "$DOCTOR_FINDINGS finding(s)."
+    fi
+
+    # What a clean run did not check. Off macOS six rules never run and two
+    # run with less reach, and until now that was in --json and --report only,
+    # so the same green line meant two different things on two machines
+    # (portability gap 5). It is a fact about this run rather than about the
+    # machine being audited, so it is prose: the document does not change.
+    # report_shows is the gate, so --quiet, which exists for cron, stays
+    # silent, and so does --json.
+    if [ "$DOCTOR_FINDINGS" -eq 0 ] && [ -n "$_doc_names" ] && report_shows normal; then
+        _doc_skipped=$(doctor_rule_names "$DOCTOR_NOT_RUN")
+        _doc_partial=$(doctor_rule_names "$DOCTOR_LIMITED")
+        if [ -n "$_doc_skipped" ] || [ -n "$_doc_partial" ]; then
+            _doc_note="Not every rule ran here:"
+            [ -z "$_doc_skipped" ] || _doc_note="$_doc_note $_doc_skipped did not run"
+            if [ -n "$_doc_partial" ]; then
+                [ -z "$_doc_skipped" ] || _doc_note="$_doc_note, and"
+                case "$_doc_partial" in
+                    *,*) _doc_note="$_doc_note $_doc_partial were limited" ;;
+                    *)   _doc_note="$_doc_note $_doc_partial was limited" ;;
+                esac
+            fi
+            emit prose text "$_doc_note." \
+                "Run \"$SELF doctor --json\" for the reason under each."
+        fi
     fi
 
     report_finish

@@ -173,6 +173,8 @@ agpin doctor
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
 ```
 <!-- END GENERATED: example doctor-clean -->
 

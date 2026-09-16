@@ -27,6 +27,69 @@ case_clean_exits_zero() {
     assert_contains "$DOUT" "No isolation problems found"
 }
 
+# A clean run off macOS is a much smaller claim than a clean run on one, and
+# the terminal did not say so: the rules that did not run and the two that ran
+# with less than their full reach were in --json and --report only
+# (portability gap 5). One line now names them, in the shape the D12 skip note
+# already has.
+case_a_clean_run_says_which_rules_did_not_run() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    doctor_out
+    assert_status 0 "$DSTATUS" "$DOUT" || return
+    assert_contains "$DOUT" "did not run" || return
+    assert_contains "$DOUT" "D17" || return
+    assert_contains "$DOUT" "D18" || return
+    assert_contains "$DOUT" "were limited" || return
+    assert_contains "$DOUT" "D16" || return
+    assert_contains "$DOUT" "doctor --json"
+}
+
+# Every rule it names has to be one the document really reports that way, or
+# the line is a second place where the truth is written down.
+case_the_rules_a_clean_run_names_are_the_ones_the_document_skipped() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    doctor_out
+    named=$(printf '%s\n' "$DOUT" | grep 'did not run' | grep -o 'D[0-9][0-9]' | sort -u | tr '\n' ' ')
+    [ -n "$named" ] || { fail "the clean run named no rule at all" "$DOUT"; return; }
+    for rule in $named; do
+        status=$("$AP" doctor --json 2>/dev/null | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+for rule in doc["rules"]:
+    if rule["rule"] == sys.argv[1]:
+        print(rule["status"])
+        break
+' "$rule")
+        case "$status" in
+            not_run|limited) ;;
+            *) fail "the clean run named a rule the document calls $status" "rule: $rule" ;;
+        esac
+    done
+}
+
+# With a finding the terminal has something to say already, and this line is
+# not it.
+case_a_run_with_findings_does_not_list_the_skipped_rules() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    chmod 755 "$HOME/.claude-brygga"
+    doctor_out
+    assert_status 2 "$DSTATUS" || return
+    assert_contains "$DOUT" "D07" || return
+    assert_not_contains "$DOUT" "did not run"
+}
+
+# The line is about this run, not about the machine, so it stays out of the
+# document the way the "Wrote ..." lines do.
+case_the_skipped_rule_line_is_not_in_the_document() {
+    HOME=$(new_home); export HOME
+    two_clean_profiles
+    out=$("$AP" doctor --json 2>/dev/null)
+    assert_not_contains "$out" "did not run on this platform"
+}
+
 case_d01_unpinned_default_root() {
     HOME=$(new_home); export HOME
     two_clean_profiles
@@ -105,7 +168,10 @@ case_d05_quiet_when_signed_in_via_keychain() {
     "$AP" new brygga >/dev/null 2>&1
     fixture_account "$HOME/.claude-brygga" "m@brygga.no" "org-b"
     doctor_out
-    assert_not_contains "$DOUT" "D05"
+    # The finding shape, two spaces after the rule id, rather than the bare
+    # id: a clean run names D05 in the line about which rules were limited,
+    # and that line is not a finding.
+    assert_not_contains "$DOUT" "D05  "
 }
 
 case_d06_unregistered_root() {
@@ -289,6 +355,10 @@ PY
 }
 
 run_case "a clean machine exits 0"                    case_clean_exits_zero
+run_case "a clean run says which rules were skipped"  case_a_clean_run_says_which_rules_did_not_run
+run_case "the rules it names are the skipped ones"    case_the_rules_a_clean_run_names_are_the_ones_the_document_skipped
+run_case "a run with findings omits that line"        case_a_run_with_findings_does_not_list_the_skipped_rules
+run_case "the skipped-rule line is not in the doc"    case_the_skipped_rule_line_is_not_in_the_document
 run_case "D01 the default root holds sessions"        case_d01_unpinned_default_root
 run_case "D02 a stray state file"                     case_d02_stray_state_file
 run_case "D03 the same project under two roots"       case_d03_same_project_under_two_roots

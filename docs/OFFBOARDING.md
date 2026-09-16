@@ -187,6 +187,8 @@ agpin doctor --report ~/audits/brygga-2026-09-08
 Orphaned Keychain entries were not checked (D12). Run "agpin doctor --keychain-scan" to check them.
 
 No isolation problems found across 2 profile(s).
+Not every rule ran here: D17 was limited.
+Run "agpin doctor --json" for the reason under each.
 Created /Users/alex/audits
 Wrote /Users/alex/audits/brygga-2026-09-08.json
 Wrote /Users/alex/audits/brygga-2026-09-08.md
