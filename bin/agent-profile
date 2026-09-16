@@ -3884,6 +3884,25 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
             [ -n "$_doc_ext" ] || continue
             _doc_ide_label=$(ide_def "$_doc_ide" label)
             _doc_ide_cmd=$(ide_def "$_doc_ide" command)
+
+            # The remedy depends on the platform, because the launchers do.
+            # code and idea pin through open --env, which is macOS only, so
+            # off macOS a fix line naming them sends the reader at a command
+            # that refuses (portability gap 3). What does work there is the
+            # same mechanism by another door: the extension reads the root
+            # from the environment the editor was started with, so an editor
+            # started from a pinned shell inherits the pin.
+            if [ "$AGENT_PROFILE_PLATFORM" = "Darwin" ]; then
+                _doc_ide_fix=("Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]")
+            else
+                _doc_ide_fix=(
+                    "$SELF $_doc_ide_cmd pins through open --env and is macOS only, so pin"
+                    "a shell instead: $SELF shell <profile>, or, in the shell you are in,"
+                    "eval \"\$($SELF env <profile>)\". Start the editor from there: it reads"
+                    "the root from the environment it was started with."
+                )
+            fi
+
             case "$(ide_def "$_doc_ide" kind)" in
                 jetbrains)
                     finding "D16" "a Claude Code plugin for $_doc_ide_label is installed and cannot be pinned" \
@@ -3893,7 +3912,7 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
                         "root the IDE process was started with, which a Dock or Spotlight launch" \
                         "leaves unset. The plugin's own Config directory setting only chooses" \
                         "where it writes its lock file; it pins nothing." \
-                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                        "${_doc_ide_fix[@]}"
                     ;;
                 *)
                     finding "D16" "a Claude Code extension for $_doc_ide_label is installed and cannot be pinned" \
@@ -3903,7 +3922,7 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
                         "come from the environment the IDE was launched with. A Dock or" \
                         "Spotlight launch carries none, and every session started that way" \
                         "writes to the default root." \
-                        "Launch it pinned instead: $SELF $_doc_ide_cmd <profile> [path]"
+                        "${_doc_ide_fix[@]}"
                     ;;
             esac
         done < "$_doc_ide_scan"

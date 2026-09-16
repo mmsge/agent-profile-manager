@@ -17,7 +17,11 @@ launch paths, with the rule that catches each.
   extension unpinned and every session in it writes to the default root;
   those two commands are the only launches that carry a root, `doctor`'s D16
   reports that an extension is installed, and `docs/FACTS.md` F19 to F21
-  record what each family does.
+  record what each family does. Both pin through `open --env`, so off macOS
+  neither exists: there the only way to carry a root into an editor is to
+  start it from a shell that is already pinned, with `agpin shell <profile>`
+  or `eval "$(agpin env <profile>)"`, which is what D16 says on that
+  platform.
 - **An IDE extension pinned by its own settings rather than by its launch.**
   VS Code's `claudeCode.environmentVariables` does reach the agent the
   extension spawns, but not the extension's own config home, so its settings,
