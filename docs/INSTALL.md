@@ -31,10 +31,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install -->
 
@@ -85,10 +88,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-no-cosign -->
 
@@ -117,7 +123,8 @@ Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 
 `agpin shellrc --shell bash|zsh|fish` prints another shell's form, and
 `agpin shellrc --explain` prints all three with a line on what each does. The
-installer's own block above is the bash and zsh mixture this command replaces.
+installer prints the same block at the end of an install, by calling this
+command, so there is one copy of it.
 
 See [Refusing to run unpinned](USE.md#refusing-to-run-unpinned) and
 [Completions](USE.md#completions) for what each line does.
@@ -152,10 +159,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-again -->
 
@@ -388,10 +398,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install-dev -->
 

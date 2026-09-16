@@ -90,10 +90,13 @@ Next:
   agpin doctor
   agpin version --check
 
-Worth adding to your shell rc file:
-  eval "$(agpin guard)"      # refuse to run the agent unpinned
-  eval "$(agpin completion bash)"  # tab-complete commands and profile names
-  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(/Users/alex/.local/bin/agpin guard)"           # refuse to run the agent unpinned
+  eval "$(/Users/alex/.local/bin/agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(/Users/alex/.local/bin/agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 ```
 <!-- END GENERATED: example install -->
 
