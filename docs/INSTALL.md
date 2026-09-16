@@ -96,24 +96,28 @@ If `~/.local/bin` is already on your `PATH`, the warning about it is replaced
 by a line saying so. The tool names itself by whichever name you invoke:
 run it as `agpin` and every message, error and suggested fix says `agpin`.
 
-Worth adding to your shell rc file. In bash or zsh:
+Worth adding to your shell rc file, and `agpin shellrc` prints it for the
+shell `$SHELL` names rather than leaving you to translate one:
 
+<!-- BEGIN GENERATED: example shellrc (tools/gen-doc-examples.sh) -->
 ```sh
-eval "$(agpin guard)"
-eval "$(agpin completion bash)"   # or: agpin completion zsh
-PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+agpin shellrc
 ```
 
-In fish, in `~/.config/fish/config.fish`:
-
-```fish
-agpin guard --shell fish | source
-agpin completion fish | source
-function fish_prompt
-    set -l p (agpin which --label 2>/dev/null)
-    echo -n "$p "(prompt_pwd)'> '
-end
 ```
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(agpin guard)"           # refuse to run the agent unpinned
+  eval "$(agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
+```
+<!-- END GENERATED: example shellrc -->
+
+`agpin shellrc --shell bash|zsh|fish` prints another shell's form, and
+`agpin shellrc --explain` prints all three with a line on what each does. The
+installer's own block above is the bash and zsh mixture this command replaces.
 
 See [Refusing to run unpinned](USE.md#refusing-to-run-unpinned) and
 [Completions](USE.md#completions) for what each line does.

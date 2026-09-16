@@ -726,6 +726,14 @@ ex_mcp_on() {
     agpin mcp on brygga
 }
 
+# The rc block, in the dialect of one shell. The fixture's $SHELL is zsh,
+# which is what a Mac has, so this is the block a reader will see.
+scenario shellrc
+ex_shellrc() {
+    SHOWN='agpin shellrc'
+    agpin shellrc
+}
+
 scenario guard-refusal
 ex_guard_refusal() {
     two_profiles

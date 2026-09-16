@@ -4647,6 +4647,116 @@ GUARDFISH
 }
 
 # ---------------------------------------------------------------------------
+# shellrc
+#
+# The three lines worth having in a shell rc file, in the dialect of one
+# shell and no other.
+#
+# They used to be typed out wherever they were shown, and the block that came
+# out was half bash and half zsh: `eval "$(agpin completion bash)"` beside a
+# zsh `PROMPT=` (onboarding G5). Pasted whole into ~/.zshrc, which is what a
+# Mac has had for years, the second line sources a bash completion script
+# under zsh. Pasted into ~/.bashrc, the third sets a variable nothing reads.
+#
+# So the block is printed rather than written down, from here and nowhere
+# else, and it chooses its shell the way guard already does: --shell, else
+# what $SHELL names, else bash. The other two forms are one --explain away,
+# because the reader who is on the third shell should not have to guess.
+#
+# Nothing is written to any file. The tool never edits an rc file, for the
+# same reason it never installs a completion script: a copy in a dotfile
+# drifts from the tool, silently.
+# ---------------------------------------------------------------------------
+
+cmd_shellrc() {
+    _sr_asked=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --shell)   shift; [ $# -gt 0 ] || die "--shell needs a value"; _sr_asked="$1" ;;
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+            *)         die "shellrc: unknown option '$1' (try: $SELF shellrc --shell bash|zsh|fish)" ;;
+        esac
+        shift
+    done
+
+    _sr_shell="$_sr_asked"
+    if [ -z "$_sr_shell" ]; then
+        _sr_env=${SHELL:-}
+        case "${_sr_env##*/}" in
+            fish) _sr_shell="fish" ;;
+            zsh)  _sr_shell="zsh" ;;
+            *)    _sr_shell="bash" ;;
+        esac
+    fi
+    case "$_sr_shell" in
+        bash|zsh|fish) ;;
+        *) die "shellrc: unknown shell '$_sr_shell' (known: bash, zsh, fish)" ;;
+    esac
+
+    # Resolved the way guard resolves it: these lines are pasted into a file
+    # another shell will read, so a name that is not on PATH there would make
+    # a block that fails at every shell start.
+    _sr_self=$(resolved_self)
+
+    if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
+        for _sr_one in bash zsh fish; do
+            shellrc_block "$_sr_one" "$_sr_self" "asked"
+            printf '\n'
+        done
+        printf 'The first refuses to run the agent with nothing pinned. The second completes\n'
+        printf 'subcommands, flags and profile names, looked up when the shell asks rather\n'
+        printf 'than baked in. The third shows which profile this shell is pinned to, derived\n'
+        printf 'fresh on every prompt, so it can never name the wrong account.\n'
+        return "$EX_OK"
+    fi
+
+    shellrc_block "$_sr_shell" "$_sr_self" "$_sr_asked"
+    printf '\n'
+    printf 'Another shell: %s shellrc --shell bash|zsh|fish, or --explain for all three.\n' "$SELF"
+    return "$EX_OK"
+}
+
+# shellrc_block <shell> <self> <asked>: one shell's block, under a heading
+# naming the file it belongs in. <asked> is empty when the shell was read from
+# $SHELL rather than given, which is what the heading then says.
+shellrc_block() {
+    _srb_shell="$1"
+    _srb_self="$2"
+    _srb_how=""
+    # shellcheck disable=SC2016  # literal text: the reader's $SHELL, not ours
+    [ -n "${3:-}" ] || _srb_how=', from $SHELL'
+    case "$_srb_shell" in
+        bash)
+            printf 'Worth adding to ~/.bashrc (bash%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'BASHRC'
+  eval "$(@AP@ guard)"            # refuse to run the agent unpinned
+  eval "$(@AP@ completion bash)"  # tab-complete commands and profile names
+  PS1='$(@AP@ which --label 2>/dev/null) \w \$ '
+BASHRC
+            ;;
+        zsh)
+            printf 'Worth adding to ~/.zshrc (zsh%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'ZSHRC'
+  eval "$(@AP@ guard)"           # refuse to run the agent unpinned
+  eval "$(@AP@ completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(@AP@ which --label 2>/dev/null) %~ %# '
+ZSHRC
+            ;;
+        fish)
+            printf 'Worth adding to ~/.config/fish/config.fish (fish%s):\n\n' "$_srb_how"
+            sed "s|@AP@|$_srb_self|g" <<'FISHRC'
+  @AP@ guard --shell fish | source  # refuse to run the agent unpinned
+  @AP@ completion fish | source     # tab-complete commands and profile names
+  function fish_prompt
+      set -l p (@AP@ which --label 2>/dev/null)
+      echo -n "$p "(prompt_pwd)'> '
+  end
+FISHRC
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # completion
 #
 # Prints a completion script for bash, zsh or fish, covering every subcommand,
@@ -4687,7 +4797,7 @@ _@SELF@_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="new list ls remove mcp run shell env path which guard desktop code idea app doctor verify explain completion version help"
+    cmds="new list ls remove mcp run shell env path which guard shellrc desktop code idea app doctor verify explain completion version help"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
@@ -4736,6 +4846,12 @@ _@SELF@_complete() {
             esac
             COMPREPLY=( $(compgen -W "--shell" -- "$cur") )
             ;;
+        shellrc)
+            case "$prev" in
+                --shell) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return 0 ;;
+            esac
+            COMPREPLY=( $(compgen -W "--shell --explain" -- "$cur") )
+            ;;
         doctor)
             COMPREPLY=( $(compgen -W "--keychain-scan --json --report --quiet --explain" -- "$cur") )
             ;;
@@ -4779,6 +4895,7 @@ _@SELF@() {
         'path:print the config root of a profile'
         'which:which profile this shell is pinned to'
         'guard:print the unpinned-run guard'
+        'shellrc:print the rc-file block for one shell'
         'desktop:launch the desktop app pinned to a profile'
         'code:launch VS Code pinned to a profile'
         'idea:launch a JetBrains IDE pinned to a profile'
@@ -4842,6 +4959,10 @@ _@SELF@() {
         guard)
             _arguments '--shell[shell to target]:shell:(bash zsh fish)'
             ;;
+        shellrc)
+            _arguments '--shell[shell to target]:shell:(bash zsh fish)' \
+                '--explain[print all three forms]'
+            ;;
         doctor)
             _arguments '--keychain-scan[also scan the whole login Keychain]' \
                 '--json[print the audit as one JSON document]' \
@@ -4890,6 +5011,7 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a env -d 'Print exports, for eval
 complete -c @SELF@ -n '__fish_use_subcommand' -a path -d 'Print the config root of a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a which -d 'Which profile this shell is pinned to'
 complete -c @SELF@ -n '__fish_use_subcommand' -a guard -d 'Print the unpinned-run guard'
+complete -c @SELF@ -n '__fish_use_subcommand' -a shellrc -d 'Print the rc-file block for one shell'
 complete -c @SELF@ -n '__fish_use_subcommand' -a desktop -d 'Launch the desktop app pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a code -d 'Launch VS Code pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a idea -d 'Launch a JetBrains IDE pinned to a profile'
@@ -4917,7 +5039,8 @@ complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l icon -d '1024px PNG'
 complete -c @SELF@ -n '__fish_seen_subcommand_from app' -l explain -d 'Restore the full rationale'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l label -d 'Print the bare label only'
 complete -c @SELF@ -n '__fish_seen_subcommand_from which' -l explain -d 'Add why an unpinned shell matters'
-complete -c @SELF@ -n '__fish_seen_subcommand_from guard' -l shell -d 'Shell to target' -a 'bash zsh fish'
+complete -c @SELF@ -n '__fish_seen_subcommand_from guard shellrc' -l shell -d 'Shell to target' -a 'bash zsh fish'
+complete -c @SELF@ -n '__fish_seen_subcommand_from shellrc' -l explain -d 'Print all three forms'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l keychain-scan -d 'Also scan the whole login Keychain'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor verify' -l json -d 'Print as one JSON document'
 complete -c @SELF@ -n '__fish_seen_subcommand_from doctor' -l report -d 'Write a dated audit to FILE.json and FILE.md'
@@ -5184,6 +5307,12 @@ SESSIONS SERVER
                           it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
+  shellrc [--shell bash|zsh|fish] [--explain]
+                          Print the three lines worth adding to your shell rc
+                          file, in one shell's dialect and no other, with the
+                          file they belong in. The shell comes from --shell,
+                          or from $SHELL; --explain prints all three forms and
+                          what each line does. Nothing is written anywhere.
   guard [--shell bash|zsh|fish]
                           Print a shell function that refuses to run the agent
                           unpinned, and turns a leading profile name into a
@@ -5278,6 +5407,7 @@ main() {
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
         guard)    cmd_guard "$@" ;;
+        shellrc)  cmd_shellrc "$@" ;;
         completion) cmd_completion "$@" ;;
         desktop)  cmd_desktop "$@" ;;
         code)     cmd_ide code "$@" ;;

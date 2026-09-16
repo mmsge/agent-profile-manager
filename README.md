@@ -132,23 +132,35 @@ that profile's own transcripts. [The sessions server](docs/USE.md#the-sessions-s
 says what it does and how to turn it off. If `claude` was not on your `PATH`
 yet, `new` says so and `agpin mcp on brygga` does it later.
 
-**3. Add these to your shell rc file.**
+**3. Add these to your shell rc file.** `agpin shellrc` prints them, in the
+dialect of the shell your `$SHELL` names and no other:
 
+<!-- BEGIN GENERATED: example shellrc (tools/gen-doc-examples.sh) -->
 ```sh
-eval "$(agpin guard)"
-eval "$(agpin completion bash)"   # or: completion zsh
-PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+agpin shellrc
 ```
+
+```
+Worth adding to ~/.zshrc (zsh, from $SHELL):
+
+  eval "$(agpin guard)"           # refuse to run the agent unpinned
+  eval "$(agpin completion zsh)"  # tab-complete commands and profile names
+  PROMPT='$(agpin which --label 2>/dev/null) %~ %# '
+
+Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
+```
+<!-- END GENERATED: example shellrc -->
 
 The first refuses to run `claude` with nothing pinned. The second tab-completes
 subcommands, flags and profile names. The third shows which profile a pinned
 shell is using, so a prompt can never claim the wrong account. Open a new
 shell, or `source` the rc file, before the next step.
 
-fish uses `| source` rather than `eval "$(...)"`; see
-[Completions](docs/USE.md#completions) and
-[Refusing to run unpinned](docs/USE.md#refusing-to-run-unpinned) for the fish
-forms of both.
+`agpin shellrc --shell bash|zsh|fish` prints another shell's form and
+`agpin shellrc --explain` prints all three. fish uses `| source` rather than
+`eval "$(...)"`; see [Completions](docs/USE.md#completions) and
+[Refusing to run unpinned](docs/USE.md#refusing-to-run-unpinned) for what each
+line does.
 
 **4. Check the separation actually holds.**
 

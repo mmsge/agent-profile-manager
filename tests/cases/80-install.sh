@@ -225,6 +225,100 @@ case_guard_shell_needs_a_value() {
     assert_contains "$out" "--shell needs a value"
 }
 
+# ---------------------------------------------------------------------------
+# shellrc: the rc block, in one shell's dialect
+#
+# The block the installer and the documentation show was half bash and half
+# zsh: an `eval "$(agpin completion bash)"` line beside a zsh `PROMPT=`
+# (onboarding G5). Pasted whole into ~/.zshrc, which is what a Mac has, the
+# second line sources a bash completion script under zsh; pasted into
+# ~/.bashrc the third sets a variable nothing reads. The block is printed from
+# one place now, and picks its shell the way guard does.
+# ---------------------------------------------------------------------------
+
+# shellrc_completion_arg <block>: the shell the printed completion line names.
+shellrc_completion_arg() {
+    printf '%s\n' "$1" | sed -n 's/.*completion \([a-z][a-z]*\).*/\1/p' | head -1
+}
+
+case_shellrc_reads_the_shell_from_the_environment() {
+    HOME=$(new_home); export HOME
+    out=$(SHELL=/bin/zsh "$AP" shellrc 2>&1); status=$?
+    assert_status 0 "$status" "$out" || return
+    assert_contains "$out" ".zshrc" || return
+    assert_contains "$out" "completion zsh" || return
+    assert_contains "$out" "PROMPT=" || return
+    assert_not_contains "$out" "completion bash" || return
+    assert_not_contains "$out" "PS1="
+}
+
+case_shellrc_prints_the_bash_form_for_bash() {
+    HOME=$(new_home); export HOME
+    out=$(SHELL=/bin/bash "$AP" shellrc 2>&1)
+    assert_contains "$out" ".bashrc" || return
+    assert_contains "$out" "completion bash" || return
+    assert_contains "$out" "PS1=" || return
+    assert_not_contains "$out" "PROMPT=" || return
+    assert_not_contains "$out" "completion zsh"
+}
+
+# --shell wins over $SHELL, the same way it does for guard.
+case_shellrc_shell_flag_overrides_the_environment() {
+    HOME=$(new_home); export HOME
+    out=$(SHELL=/bin/zsh "$AP" shellrc --shell fish 2>&1)
+    assert_contains "$out" "config.fish" || return
+    assert_contains "$out" "completion fish | source" || return
+    assert_contains "$out" "fish_prompt" || return
+    assert_not_contains "$out" "PROMPT=" || return
+    assert_not_contains "$out" "PS1="
+}
+
+# The regression itself, as a shape rather than as a sentence: no block may
+# name one shell's completion beside another shell's prompt.
+case_shellrc_never_mixes_two_shells() {
+    HOME=$(new_home); export HOME
+    for _sr_shell in bash zsh fish; do
+        out=$("$AP" shellrc --shell "$_sr_shell" 2>&1)
+        got=$(shellrc_completion_arg "$out")
+        assert_equals "$_sr_shell" "$got" || return
+        case "$_sr_shell" in
+            bash) assert_not_contains "$out" "PROMPT=" || return ;;
+            zsh)  assert_not_contains "$out" "PS1=" || return ;;
+            fish) assert_not_contains "$out" "PROMPT=" || return
+                  assert_not_contains "$out" "PS1=" || return ;;
+        esac
+    done
+}
+
+# Every completion argument the block names has to be one completion accepts,
+# or the reader pastes a line that fails at their next shell start.
+case_shellrc_names_a_completion_the_tool_prints() {
+    HOME=$(new_home); export HOME
+    for _sr_shell in bash zsh fish; do
+        out=$("$AP" shellrc --shell "$_sr_shell" 2>&1)
+        got=$(shellrc_completion_arg "$out")
+        [ -n "$got" ] || { fail "no completion line in the $_sr_shell block" "$out"; return; }
+        "$AP" completion "$got" >/dev/null 2>&1 || \
+            { fail "shellrc names a completion the tool refuses" "named: completion $got"; return; }
+    done
+}
+
+case_shellrc_explain_prints_all_three() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" shellrc --explain 2>&1)
+    assert_contains "$out" "completion bash" || return
+    assert_contains "$out" "completion zsh" || return
+    assert_contains "$out" "completion fish" || return
+    assert_contains "$out" "config.fish"
+}
+
+case_shellrc_refuses_an_unknown_shell() {
+    HOME=$(new_home); export HOME
+    out=$("$AP" shellrc --shell tcsh 2>&1); status=$?
+    assert_status 1 "$status" "$out" || return
+    assert_contains "$out" "unknown shell 'tcsh'"
+}
+
 fish_guard() {
     "$AP" guard --shell fish 2>&1
 }
@@ -673,6 +767,13 @@ run_case "guard --shell overrides the env"        case_guard_shell_flag_override
 run_case "guard --shell bash and zsh match"       case_guard_shell_bash_and_zsh_produce_the_same_form
 run_case "guard refuses an unknown shell"         case_guard_refuses_an_unknown_shell
 run_case "guard --shell needs a value"            case_guard_shell_needs_a_value
+run_case "shellrc reads the shell from the env"    case_shellrc_reads_the_shell_from_the_environment
+run_case "shellrc prints the bash form for bash"  case_shellrc_prints_the_bash_form_for_bash
+run_case "shellrc --shell overrides the env"      case_shellrc_shell_flag_overrides_the_environment
+run_case "shellrc never mixes two shells"         case_shellrc_never_mixes_two_shells
+run_case "shellrc names a real completion"        case_shellrc_names_a_completion_the_tool_prints
+run_case "shellrc --explain prints all three"     case_shellrc_explain_prints_all_three
+run_case "shellrc refuses an unknown shell"       case_shellrc_refuses_an_unknown_shell
 run_case "fish guard defines a function per agent" case_fish_guard_defines_a_function_per_agent
 run_case "fish guard checks the env var is unset" case_fish_guard_checks_the_env_var_is_unset
 run_case "fish guard refuses unpinned"            case_fish_guard_refuses_unpinned_and_names_the_binary

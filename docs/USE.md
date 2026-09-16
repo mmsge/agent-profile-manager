@@ -25,9 +25,9 @@ agpin desktop brygga      # launch the desktop app pinned
 agpin app brygga          # build its Dock launcher
 agpin code brygga ~/src/x   # launch VS Code pinned, --app Cursor for Cursor
 agpin idea brygga ~/src/x   # the same for the JetBrains IDEs
+agpin shellrc             # the rc-file lines, in your own shell's dialect
 eval "$(agpin guard)"     # refuse to run the agent unpinned
 claude brygga             # with the guard on, this pins and runs
-eval "$(agpin completion bash)"  # tab-complete commands and profiles
 ```
 
 Adding a fourth account is one command and no edit to any file.
@@ -130,6 +130,12 @@ SESSIONS SERVER
                           it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
+  shellrc [--shell bash|zsh|fish] [--explain]
+                          Print the three lines worth adding to your shell rc
+                          file, in one shell's dialect and no other, with the
+                          file they belong in. The shell comes from --shell,
+                          or from $SHELL; --explain prints all three forms and
+                          what each line does. Nothing is written anywhere.
   guard [--shell bash|zsh|fish]
                           Print a shell function that refuses to run the agent
                           unpinned, and turns a leading profile name into a
@@ -389,7 +395,8 @@ except when a new release adds a subcommand.
 
 Printed rather than installed, for the same reason `guard` is: this tool never
 writes to a completion directory or your rc file. Add the line above to it
-yourself, once.
+yourself, once, and `agpin shellrc` prints it beside the other two lines worth
+having, already in the right dialect for your shell.
 
 ## Output levels
 

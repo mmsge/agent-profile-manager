@@ -43,7 +43,7 @@ complete_for() {
 case_bash_completion_lists_every_subcommand_at_the_first_word() {
     HOME=$(new_home); export HOME
     out=$(complete_for agent-profile "")
-    for c in new list ls remove mcp run shell env path which guard desktop app \
+    for c in new list ls remove mcp run shell env path which guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "$c" || return
     done
@@ -173,7 +173,7 @@ case_zsh_completion_has_the_compdef_pragma() {
 case_zsh_completion_lists_every_subcommand() {
     HOME=$(new_home); export HOME
     out=$("$AP" completion zsh 2>&1)
-    for c in new list ls remove mcp run shell env path which guard desktop app \
+    for c in new list ls remove mcp run shell env path which guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "'$c:" || return
     done
@@ -217,7 +217,7 @@ case_fish_completion_registers_the_command() {
 case_fish_completion_lists_every_subcommand() {
     HOME=$(new_home); export HOME
     out=$("$AP" completion fish 2>&1)
-    for c in new list ls remove mcp run shell env path which guard desktop app \
+    for c in new list ls remove mcp run shell env path which guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "-a $c " || return
     done
