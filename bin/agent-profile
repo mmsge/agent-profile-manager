@@ -128,9 +128,27 @@ if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
         exit 1
     fi
     _ms_pinned=${CLAUDE_CONFIG_DIR:-}
-    if [ -z "$_ms_pinned" ] || [ "${_ms_pinned%/}" != "${_ms_root%/}" ]; then
+    # Both sides are resolved before they are compared. The Python half
+    # compares real paths, and comparing these two as strings meant a root
+    # reachable by a second spelling, a symlinked home or a symlinked volume,
+    # was refused by one guard and accepted by the other, with a message that
+    # did not say why (sessions-server gap 12). `cd && pwd -P` is the bash 3.2
+    # way to ask, and it is what this block already does to find its own tree.
+    # A path that does not exist resolves to itself, and the Python half
+    # refuses it a moment later for not being a directory.
+    _ms_real_pinned=$(cd "$_ms_pinned" 2>/dev/null && pwd -P)
+    [ -n "$_ms_real_pinned" ] || _ms_real_pinned="${_ms_pinned%/}"
+    _ms_real_root=$(cd "$_ms_root" 2>/dev/null && pwd -P)
+    [ -n "$_ms_real_root" ] || _ms_real_root="${_ms_root%/}"
+    if [ -z "$_ms_pinned" ] || [ "$_ms_real_pinned" != "$_ms_real_root" ]; then
         printf '%s mcp serve: refusing to start: CLAUDE_CONFIG_DIR is %s, --root is %s\n' \
             "$_ms_self" "${_ms_pinned:-unset}" "$_ms_root" >&2
+        # Both spellings as they were given, and what they resolved to when
+        # that is a different answer, so a refusal over a symlink says so.
+        if [ -n "$_ms_pinned" ] && \
+           { [ "$_ms_real_pinned" != "${_ms_pinned%/}" ] || [ "$_ms_real_root" != "${_ms_root%/}" ]; }; then
+            printf 'Resolved: %s and %s\n' "$_ms_real_pinned" "$_ms_real_root" >&2
+        fi
         exit 1
     fi
     _ms_python=${AGENT_PROFILE_SERVER_PYTHON:-}
@@ -156,8 +174,15 @@ if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
         printf 'Run tools/install.sh again, or brew reinstall agpin, to build it.\n' >&2
         exit 1
     fi
-    PYTHONPATH="$_ms_pkg${PYTHONPATH:+:$PYTHONPATH}" \
-        exec "$_ms_python" -m agent_profile_sessions --root "$_ms_root"
+    # The package directory is the whole path, rather than the head of
+    # whatever the session had. A stdio server inherits its parent's
+    # environment (docs/FACTS.md F24), and a root's own settings.json can set
+    # variables for a session, so extending PYTHONPATH here would let a
+    # transcript that talked a model into writing that file choose what
+    # `import fastmcp` finds (sessions-server gap 13). Nothing needs the
+    # inherited value: the environment beside this script is self-contained.
+    PYTHONPATH="$_ms_pkg" \
+        exec "$_ms_python" -s -m agent_profile_sessions --root "$_ms_root"
 fi
 
 AGENT_PROFILE_VERSION="0.11.0"
@@ -207,6 +232,11 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 # suite points the first at a stand-in that edits a state file the way the CLI
 # does, and the second at a script that records what it was asked to run, so
 # no test starts the agent or a Python interpreter.
+#
+# AGENT_PROFILE_SERVER_PYTHON is a test hook and a way to point at a
+# hand-built environment. A real install never sets it: the launcher finds the
+# interpreter beside itself, and a variable naming another one is a variable
+# that chooses what code the sessions server runs.
 : "${AGENT_PROFILE_MCP_REGISTRAR:=}"
 : "${AGENT_PROFILE_SERVER_PYTHON:=}"
 

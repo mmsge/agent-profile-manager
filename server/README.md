@@ -19,11 +19,22 @@ it belongs to, and the launcher execs this server:
 claude  ->  agpin mcp serve --root <root>  ->  python -m agent_profile_sessions --root <root>
 ```
 
-Both halves make the same check: `CLAUDE_CONFIG_DIR` must be set and must
-resolve to the same directory as `--root`. When it does not, the server prints
-one line on stderr and exits 2, so a registration that was copied into another
+Both halves make the same check, the same way: `CLAUDE_CONFIG_DIR` must be set
+and must resolve to the same directory as `--root`, symlinks and all, so a
+root reachable by two spellings is not accepted by one half and refused by the
+other. When it does not resolve to the same directory, the server prints one
+line on stderr and exits 2, naming both paths as they were given and what they
+resolved to when that differs, so a registration that was copied into another
 root fails visibly in `/mcp` rather than serving one account's transcripts to
 another. Transport is stdio only.
+
+The launcher execs the interpreter with `PYTHONPATH` set to this package
+directory alone, dropping whatever the session had, and with `-s`, so the user
+site directory is out too. A stdio server inherits its parent's environment,
+and a root's own `settings.json` can set variables for a session, so an
+inherited `PYTHONPATH` would be one way to choose what `import fastmcp` finds.
+`AGENT_PROFILE_SERVER_PYTHON` overrides the interpreter for the test suite and
+for a hand-built environment; a real install never sets it.
 
 ## The tools
 
