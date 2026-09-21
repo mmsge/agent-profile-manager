@@ -1,5 +1,12 @@
 # Proposal: a sessions MCP server in every profile
 
+> **Held back to 1.1.** The implementation this note describes was in the
+> tree from 15 to 21 September 2026 and was taken out again before the 1.0
+> release, so that the release has no Python in it. The code is preserved on
+> the [`sessions-server` branch](https://github.com/mmsge/agent-profile-manager/tree/sessions-server)
+> and returns, renamed, with issues #84, #86 and #87. The rest of this note is
+> the record as it was written.
+
 > Give a Claude Code session structured, read-only access to the transcripts
 > in its own profile's config root, through an MCP server that every profile
 > gets registered at `new` time and that `agpin mcp on|off|status` controls.

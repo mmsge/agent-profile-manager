@@ -72,7 +72,6 @@ Check each of these. The command beside it is how.
 | Claude Desktop, if the desktop app is to be pinned | `ls /Applications/Claude.app` |
 | `python3`, which every command that reads JSON uses | `python3 --version` prints one; `xcode-select --install` if it does not |
 | `cosign`, so the installer can check the release signature | `brew install cosign` |
-| `uv`, so the sessions server's environment builds without the Command Line Tools dialogue | `brew install uv` |
 | The list of accounts, and a profile name for each | Ask. Letters, digits, dash and underscore only |
 
 Then decide which path you are on:
@@ -138,12 +137,8 @@ Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 <!-- END GENERATED: example install -->
 
 If `~/.local/bin` is already on your `PATH`, the warning is replaced by a line
-saying so. On a Mac with the sessions server's dependencies to build, the
-lines `Building the sessions server's environment with uv, from server/uv.lock ...`
-and `Built .../server/.venv` appear before the links are made; without `uv`
-the installer says it will use `python3` instead, and why that opens the
-Command Line Tools dialogue. If the `WARNING` about `PATH` appeared, add the
-`export PATH` line it printed to the shell rc file and open a new shell.
+saying so. If the `WARNING` about `PATH` appeared, add the `export PATH` line
+it printed to the shell rc file and open a new shell.
 
 Without `cosign` the checksum is still checked, and the installer says
 loudly what went unverified; [Install](INSTALL.md) has that output and what
@@ -174,7 +169,6 @@ agpin new brygga
 
 ```
 Created profile brygga
-Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
 Next: agpin run brygga   (it will ask you to log in)
 ```
 <!-- END GENERATED: example new -->
@@ -193,8 +187,6 @@ Created profile brygga
   root      /Users/alex/.claude-brygga
   app data  /Users/alex/Library/Application Support/Claude-Brygga
 
-Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
-
 The root holds nothing from any other profile, which is the point: nothing is
 shared between profiles. That also means it has no settings, no hooks and
 none of the guardrails your other profiles may have. Set those up here
@@ -203,24 +195,6 @@ directly; do not copy them across.
 Next: agpin run brygga   (it will ask you to log in)
 ```
 <!-- END GENERATED: example new-explain -->
-
-The sessions server line is the one thing `new` writes into the root: a
-registration, made by Claude Code's own CLI, for a small read-only server over
-that profile's own transcripts. If `claude` is not on `PATH` yet, `new` says
-so and the registration can be made later:
-
-<!-- BEGIN GENERATED: example new-no-claude (tools/gen-doc-examples.sh) -->
-```sh
-agpin new brygga
-```
-
-```
-Created profile brygga
-Sessions server: not registered, because claude is not on PATH.
-  Once it is:  agpin mcp on brygga
-Next: agpin run brygga   (it will ask you to log in)
-```
-<!-- END GENERATED: example new-no-claude -->
 
 Running `new` again for a name that exists is safe and says so; running it
 with a different `--root` is refused, because that would invalidate the
@@ -239,14 +213,12 @@ brygga
   root      /Users/alex/.claude-brygga
   account   (not signed in)
   sessions  0
-  mcp       on
 
 havnelab
   agent     claude
   root      /Users/alex/.claude-havnelab
   account   (not signed in)
   sessions  0
-  mcp       on
 
 ```
 <!-- END GENERATED: example list-fresh -->
@@ -279,7 +251,6 @@ brygga
   account   alex@brygga.example
   org       org-brygga
   sessions  1
-  mcp       on
 
 havnelab
   agent     claude
@@ -287,7 +258,6 @@ havnelab
   account   alex@havnelab.example
   org       org-havnelab
   sessions  1
-  mcp       on
 
 ```
 <!-- END GENERATED: example list -->
@@ -566,7 +536,6 @@ agpin new torg --root ~/.claude-torg
 
 ```
 Created profile torg
-Sessions server: on (registered in /Users/alex/.claude-torg/.claude.json)
 That root already held data, so it was adopted rather than created: 2 session(s).
 The one change: mode 755 became 700, which is what doctor D07 wants.
 Next: agpin doctor    (audit the isolation)
@@ -588,13 +557,9 @@ Created profile torg
   root      /Users/alex/.claude-torg
   app data  /Users/alex/Library/Application Support/Claude-Torg
 
-Sessions server: on (registered in /Users/alex/.claude-torg/.claude.json)
-
 That root already held data, so it was adopted rather than created: 2 session(s).
 Nothing was copied, moved, seeded or removed: whatever settings, hooks and
 skills were already there are exactly as they were.
-The one line added is the sessions server registration above, in the
-root's own state file (docs/FACTS.md F23); agpin mcp off torg takes it out.
 The one change: mode 755 became 700, which is what doctor D07 wants.
 
 Next: agpin doctor    (audit the isolation)
@@ -743,13 +708,9 @@ Created profile main
   root      /Users/alex/.claude
   app data  /Users/alex/Library/Application Support/Claude-Main
 
-Sessions server: on (registered in /Users/alex/.claude/.claude.json)
-
 That root already held data, so it was adopted rather than created: 1 session(s).
 Nothing was copied, moved, seeded or removed: whatever settings, hooks and
 skills were already there are exactly as they were.
-The one line added is the sessions server registration above, in the
-root's own state file (docs/FACTS.md F23); agpin mcp off main takes it out.
 The one change: mode 755 became 700, which is what doctor D07 wants.
 
 Next: agpin doctor    (audit the isolation)

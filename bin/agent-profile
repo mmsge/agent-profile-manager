@@ -7,10 +7,7 @@
 # own config root, and audits that the separation actually holds.
 #
 # Written to bash 3.2, the system bash on macOS. No associative arrays, no
-# mapfile, no ${var^^}. python3 is used only to read JSON. The one other
-# program this starts on purpose is the sessions server, a separate Python
-# process that `mcp serve` execs from the environment the installer builds
-# beside this script; see server/README.md and docs/proposals/.
+# mapfile, no ${var^^}. python3 is used only to read JSON.
 
 set -u
 
@@ -78,113 +75,6 @@ if [ "${1:-}" = "which" ] && [ "${2:-}" = "--label" ]; then
     exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Fast path: `mcp serve --root PATH`
-#
-# This is what Claude Code runs at every session start, from the registration
-# `new` puts into a root's state file (docs/FACTS.md F23), so it sits in the
-# same early block as `which --label` and for the same reason: it needs two
-# string comparisons and an exec, not the rest of this file parsed first.
-#
-# It is the launcher for the sessions server and the first of its guards. The
-# server must only ever see the root whose Claude Code started it. Claude Code
-# hands a stdio server its own environment (F24), so the pinned variable is
-# compared with the root the registration was written for, and a state file
-# copied into another root, or restored into the wrong place, fails here with
-# one line on stderr, which /mcp shows, rather than serving one account's
-# transcripts to another. The Python side repeats the same check.
-#
-# Where the server lives is the installer's business, not the root's. The
-# registration names this launcher, and this launcher finds the environment
-# built beside it, <tree>/server/.venv, by resolving its own path through any
-# symlink the installer or Homebrew made. AGENT_PROFILE_SERVER_PYTHON overrides
-# that lookup, for the test suite and for a hand-built environment.
-if [ "${1:-}" = "mcp" ] && [ "${2:-}" = "serve" ]; then
-    shift 2
-    _ms_self=${0##*/}
-    case "$_ms_self" in
-        ''|*[!A-Za-z0-9_.-]*) _ms_self="agent-profile" ;;
-    esac
-    _ms_root=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --root)
-                shift
-                if [ $# -eq 0 ]; then
-                    printf '%s mcp serve: --root needs a value\n' "$_ms_self" >&2
-                    exit 1
-                fi
-                _ms_root="$1"
-                ;;
-            *)
-                printf '%s mcp serve: unknown argument %s\n' "$_ms_self" "$1" >&2
-                exit 1
-                ;;
-        esac
-        shift
-    done
-    if [ -z "$_ms_root" ]; then
-        printf 'usage: %s mcp serve --root PATH\n' "$_ms_self" >&2
-        exit 1
-    fi
-    _ms_pinned=${CLAUDE_CONFIG_DIR:-}
-    # Both sides are resolved before they are compared. The Python half
-    # compares real paths, and comparing these two as strings meant a root
-    # reachable by a second spelling, a symlinked home or a symlinked volume,
-    # was refused by one guard and accepted by the other, with a message that
-    # did not say why (sessions-server gap 12). `cd && pwd -P` is the bash 3.2
-    # way to ask, and it is what this block already does to find its own tree.
-    # A path that does not exist resolves to itself, and the Python half
-    # refuses it a moment later for not being a directory.
-    _ms_real_pinned=$(cd "$_ms_pinned" 2>/dev/null && pwd -P)
-    [ -n "$_ms_real_pinned" ] || _ms_real_pinned="${_ms_pinned%/}"
-    _ms_real_root=$(cd "$_ms_root" 2>/dev/null && pwd -P)
-    [ -n "$_ms_real_root" ] || _ms_real_root="${_ms_root%/}"
-    if [ -z "$_ms_pinned" ] || [ "$_ms_real_pinned" != "$_ms_real_root" ]; then
-        printf '%s mcp serve: refusing to start: CLAUDE_CONFIG_DIR is %s, --root is %s\n' \
-            "$_ms_self" "${_ms_pinned:-unset}" "$_ms_root" >&2
-        # Both spellings as they were given, and what they resolved to when
-        # that is a different answer, so a refusal over a symlink says so.
-        if [ -n "$_ms_pinned" ] && \
-           { [ "$_ms_real_pinned" != "${_ms_pinned%/}" ] || [ "$_ms_real_root" != "${_ms_root%/}" ]; }; then
-            printf 'Resolved: %s and %s\n' "$_ms_real_pinned" "$_ms_real_root" >&2
-        fi
-        exit 1
-    fi
-    _ms_python=${AGENT_PROFILE_SERVER_PYTHON:-}
-    _ms_pkg=""
-    if [ -z "$_ms_python" ]; then
-        _ms_path=$0
-        while [ -L "$_ms_path" ]; do
-            _ms_link=$(readlink "$_ms_path")
-            case "$_ms_link" in
-                /*) _ms_path=$_ms_link ;;
-                *)  _ms_path=$(dirname "$_ms_path")/$_ms_link ;;
-            esac
-        done
-        _ms_tree=$(cd "$(dirname "$_ms_path")/.." 2>/dev/null && pwd -P)
-        _ms_pkg="$_ms_tree/server"
-        _ms_python="$_ms_pkg/.venv/bin/python"
-    else
-        _ms_pkg=$(cd "$(dirname "$_ms_python")/../.." 2>/dev/null && pwd -P)
-    fi
-    if [ ! -x "$_ms_python" ]; then
-        printf '%s mcp serve: the sessions server is not installed: no interpreter at %s\n' \
-            "$_ms_self" "$_ms_python" >&2
-        printf 'Run tools/install.sh again, or brew reinstall agpin, to build it.\n' >&2
-        exit 1
-    fi
-    # The package directory is the whole path, rather than the head of
-    # whatever the session had. A stdio server inherits its parent's
-    # environment (docs/FACTS.md F24), and a root's own settings.json can set
-    # variables for a session, so extending PYTHONPATH here would let a
-    # transcript that talked a model into writing that file choose what
-    # `import fastmcp` finds (sessions-server gap 13). Nothing needs the
-    # inherited value: the environment beside this script is self-contained.
-    PYTHONPATH="$_ms_pkg" \
-        exec "$_ms_python" -s -m agent_profile_sessions --root "$_ms_root"
-fi
-
 AGENT_PROFILE_VERSION="0.11.0"
 AGENT_PROFILE_LICENSE="GPL-3.0-or-later"
 
@@ -225,20 +115,6 @@ EX_UNCHECKED=4 # verify could not check something it wanted to check
 # less than it appears to be.
 : "${AGENT_PROFILE_APPLET_DIRS:=$AGENT_PROFILE_APPS_DIR:$HOME/Desktop:/Applications}"
 : "${AGENT_PROFILE_DRY_RUN:=}"
-
-# The command that registers a sessions server in a root, and the interpreter
-# `mcp serve` execs. Both default to the real thing: the agent's own CLI on
-# PATH, and the environment the installer built beside this script. The test
-# suite points the first at a stand-in that edits a state file the way the CLI
-# does, and the second at a script that records what it was asked to run, so
-# no test starts the agent or a Python interpreter.
-#
-# AGENT_PROFILE_SERVER_PYTHON is a test hook and a way to point at a
-# hand-built environment. A real install never sets it: the launcher finds the
-# interpreter beside itself, and a variable naming another one is a variable
-# that chooses what code the sessions server runs.
-: "${AGENT_PROFILE_MCP_REGISTRAR:=}"
-: "${AGENT_PROFILE_SERVER_PYTHON:=}"
 
 # Set by --explain on a command that takes it, or directly by whoever wants
 # the long form every time rather than typing the flag on every command.
@@ -652,7 +528,7 @@ report_prose() {
             done
             ;;
         profile)
-            # name agent root root_exists app_data account org sessions mcp
+            # name agent root root_exists app_data account org sessions
             printf '%s\n' "$1"
             printf '  agent     %s\n' "$2"
             printf '  root      %s' "$3"
@@ -668,7 +544,6 @@ report_prose() {
             fi
             [ -z "$7" ] || printf '  org       %s\n' "$7"
             printf '  sessions  %s\n' "$8"
-            [ -z "${9:-}" ] || printf '  mcp       %s\n' "$9"
             printf '\n'
             ;;
         finding)
@@ -863,7 +738,6 @@ for _level, kind, args in records:
             "account": args[5] or None,
             "organization": args[6] or None,
             "sessions": int(args[7]),
-            "sessions_server": args[8] if len(args) > 8 and args[8] else None,
         })
     elif kind == "finding":
         findings.append({
@@ -982,17 +856,16 @@ if command in ("doctor", "list"):
     out.append("## Profiles")
     out.append("")
     if profiles:
-        out.append("| Profile | Agent | Root | App data | Account | Organisation | Sessions | Sessions server |")
-        out.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+        out.append("| Profile | Agent | Root | App data | Account | Organisation | Sessions |")
+        out.append("| --- | --- | --- | --- | --- | --- | --- |")
         for entry in profiles:
-            out.append("| %s | %s | %s | %s | %s | %s | %d | %s |" % (
+            out.append("| %s | %s | %s | %s | %s | %s | %d |" % (
                 cell(entry["name"]), cell(entry["agent"]),
                 cell(entry["root"]) + ("" if entry["root_exists"] else " (missing)"),
                 cell(entry["app_data"] or ""),
                 cell(entry["account"] or "not signed in"),
                 cell(entry["organization"] or ""),
-                entry["sessions"],
-                cell(entry.get("sessions_server") or "")))
+                entry["sessions"]))
     else:
         out.append("No profiles are registered.")
     out.append("")
@@ -1342,278 +1215,6 @@ session_count() {
 }
 
 # ---------------------------------------------------------------------------
-# The sessions server registration
-#
-# Every profile gets a stdio MCP server over its own transcripts, so a session
-# can ask what an earlier one did without leaving Claude Code. The server is
-# a separate Python program under server/; what this tool owns is the one
-# line that tells Claude Code to start it, and that line lives in the root's
-# own state file, <root>/.claude.json, under mcpServers (docs/FACTS.md F23).
-#
-# It is written and removed by the agent's own CLI, `claude mcp add` and
-# `claude mcp remove` pinned to the root, never by this tool editing the file:
-# the state file is Claude Code's, it rewrites it and keeps backups of it, and
-# the statusline paragraph in docs/DESIGN.md says why this tool will not merge
-# a key into it by hand. What this tool does read from it, for `list`, `mcp
-# status` and doctor's D19, is the one entry under mcpServers and nothing else.
-#
-# The registered command is this tool's own launcher, at its absolute path,
-# with `mcp serve --root <root>`: no interpreter path, no version and no cache
-# location ever lands in a root, so an upgrade needs no re-registration, and
-# the launcher's own check (the fast path at the top of this file) refuses a
-# registration that has wandered into another root.
-#
-# No registry key records any of this. The state file is where Claude Code
-# reads the registration from, so it is the only place worth reading it back
-# from; a second copy would drift, for the same reason the prompt label is
-# derived rather than stored.
-# ---------------------------------------------------------------------------
-
-MCP_SERVER_NAME="sessions"
-
-# mcp_registrar <agent>: the command that edits a root's MCP registrations,
-# on stdout. Returns 1, printing nothing, when it is not installed.
-mcp_registrar() {
-    _mr_bin=${AGENT_PROFILE_MCP_REGISTRAR:-$(agent_def "$1" binary)}
-    command -v "$_mr_bin" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$_mr_bin"
-}
-
-# launcher_path: the absolute path a registration names for this tool. The
-# installed link when there is one, because that path survives an upgrade,
-# and otherwise the script itself.
-launcher_path() {
-    _lp=$(command -v "$SELF" 2>/dev/null)
-    case "$_lp" in
-        /*) printf '%s\n' "$_lp"; return 0 ;;
-    esac
-    _lp_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
-    printf '%s/%s\n' "$_lp_dir" "${0##*/}"
-}
-
-# mcp_registration <state_base> <dir> <expected-root>: what the state file
-# under <dir> says about the sessions server, as one tab-separated line:
-#
-#     state <TAB> command <TAB> args <TAB> reason
-#
-# state is none, on, stale or foreign. "on" is an entry of exactly the shape
-# this tool writes, naming <expected-root> and a command that exists. "stale"
-# has that shape but names another root, a missing command or a transport
-# other than stdio. "foreign" is a sessions entry somebody else put there,
-# which this tool reports and never touches. Only the mcpServers block is
-# read; the oauthAccount block and every other key are left unparsed.
-mcp_registration() {
-    python3 - "$1" "$2" "$3" "$MCP_SERVER_NAME" <<'PY'
-import json, os, sys
-
-state_base, root, expected, name = sys.argv[1:5]
-path = os.path.join(root, state_base)
-
-
-def out(state, command="", args="", reason=""):
-    print("\t".join([state, command, args, reason]))
-    sys.exit(0)
-
-
-if not os.path.isfile(path):
-    out("none")
-try:
-    with open(path) as fh:
-        data = json.load(fh)
-except Exception:
-    out("none", reason="the state file could not be parsed")
-servers = data.get("mcpServers") if isinstance(data, dict) else None
-entry = servers.get(name) if isinstance(servers, dict) else None
-if not isinstance(entry, dict):
-    out("none")
-command = str(entry.get("command") or "")
-args = entry.get("args") or []
-args = [str(a) for a in args] if isinstance(args, list) else []
-joined = " ".join(args)
-if not (len(args) == 4 and args[:3] == ["mcp", "serve", "--root"]):
-    out("foreign", command, joined, "not a sessions server this tool registered")
-if entry.get("type", "stdio") != "stdio" or entry.get("url"):
-    out("stale", command, joined, "the entry is not a stdio server")
-if args[3].rstrip("/") != expected.rstrip("/"):
-    out("stale", command, joined, "it names another root: %s" % args[3])
-if not (command and os.path.isabs(command) and os.access(command, os.X_OK)):
-    out("stale", command, joined,
-        "its command is missing or not executable: %s" % (command or "(none)"))
-out("on", command, joined, "")
-PY
-}
-
-# mcp_state <state_base> <root>: the state word alone, with "none" rendered
-# as "off", which is what list and status print.
-mcp_state() {
-    _mst=$(mcp_registration "$1" "$2" "$2" | cut -f1)
-    case "$_mst" in
-        none|"") printf 'off\n' ;;
-        *)       printf '%s\n' "$_mst" ;;
-    esac
-}
-
-# mcp_register <agent> <name> <root>: register the sessions server for a
-# profile, idempotently, and say what happened. Returns 0 when the profile
-# ends up registered and 1 otherwise. Never dies: new calls this, and a
-# registrar that misbehaves must not cost the profile.
-mcp_register() {
-    _mreg_agent="$1"; _mreg_name="$2"; _mreg_root="$3"
-    _mreg_base=$(agent_def "$_mreg_agent" state_base)
-    _mreg_file="$_mreg_root/$_mreg_base"
-    if ! _mreg_bin=$(mcp_registrar "$_mreg_agent"); then
-        printf 'Sessions server: not registered, because %s is not on PATH.\n' \
-            "$(agent_def "$_mreg_agent" binary)"
-        printf '  Once it is:  %s mcp on %s\n' "$SELF" "$_mreg_name"
-        return 1
-    fi
-    _mreg_before=$(mcp_registration "$_mreg_base" "$_mreg_root" "$_mreg_root")
-    case "$(printf '%s' "$_mreg_before" | cut -f1)" in
-        on)
-            printf 'Sessions server: on (already registered in %s)\n' "$_mreg_file"
-            return 0
-            ;;
-        foreign)
-            printf 'Sessions server: not registered. %s already has a "%s" entry\n' \
-                "$_mreg_file" "$MCP_SERVER_NAME"
-            printf "that is not this tool's (%s %s), and it is left alone.\n" \
-                "$(printf '%s' "$_mreg_before" | cut -f2)" \
-                "$(printf '%s' "$_mreg_before" | cut -f3)"
-            return 1
-            ;;
-        stale)
-            # The CLI refuses to add a name that exists, so a stale entry is
-            # taken out first. It is this tool's own shape, so that is safe.
-            if ! _mreg_out=$(CLAUDE_CONFIG_DIR="$_mreg_root" "$_mreg_bin" mcp remove \
-                    --scope user "$MCP_SERVER_NAME" 2>&1); then
-                printf 'Sessions server: could not replace the stale entry in %s:\n' "$_mreg_file"
-                printf '%s\n' "$_mreg_out" | sed 's/^/  /'
-                return 1
-            fi
-            ;;
-    esac
-    _mreg_launcher=$(launcher_path)
-    if ! _mreg_out=$(CLAUDE_CONFIG_DIR="$_mreg_root" "$_mreg_bin" mcp add --scope user \
-            "$MCP_SERVER_NAME" -- "$_mreg_launcher" mcp serve --root "$_mreg_root" 2>&1); then
-        printf 'Sessions server: not registered. %s mcp add failed:\n' "$_mreg_bin"
-        printf '%s\n' "$_mreg_out" | sed 's/^/  /'
-        printf '  Try again with:  %s mcp on %s\n' "$SELF" "$_mreg_name"
-        return 1
-    fi
-    _mreg_after=$(mcp_registration "$_mreg_base" "$_mreg_root" "$_mreg_root")
-    if [ "$(printf '%s' "$_mreg_after" | cut -f1)" != "on" ]; then
-        printf 'Sessions server: the registration did not take: %s\n' \
-            "$(printf '%s' "$_mreg_after" | cut -f4)"
-        return 1
-    fi
-    printf 'Sessions server: on (registered in %s)\n' "$_mreg_file"
-    return 0
-}
-
-# mcp_unregister <agent> <name> <root>: the reverse. "Off" has to mean gone
-# from the state file, not hidden, so the file is read back before this says
-# so. Returns 0 when no registration of this tool's remains, 1 otherwise.
-mcp_unregister() {
-    _munr_agent="$1"; _munr_name="$2"; _munr_root="$3"
-    _munr_base=$(agent_def "$_munr_agent" state_base)
-    _munr_file="$_munr_root/$_munr_base"
-    _munr_before=$(mcp_registration "$_munr_base" "$_munr_root" "$_munr_root")
-    case "$(printf '%s' "$_munr_before" | cut -f1)" in
-        none)
-            printf 'Sessions server: off (nothing registered in %s)\n' "$_munr_file"
-            return 0
-            ;;
-        foreign)
-            printf 'Sessions server: left alone. The "%s" entry in %s\n' \
-                "$MCP_SERVER_NAME" "$_munr_file"
-            printf "is not this tool's (%s %s), so it is yours to remove.\n" \
-                "$(printf '%s' "$_munr_before" | cut -f2)" \
-                "$(printf '%s' "$_munr_before" | cut -f3)"
-            return 1
-            ;;
-    esac
-    if ! _munr_bin=$(mcp_registrar "$_munr_agent"); then
-        printf 'Sessions server: still on. Removing it needs %s on PATH.\n' \
-            "$(agent_def "$_munr_agent" binary)"
-        return 1
-    fi
-    if ! _munr_out=$(CLAUDE_CONFIG_DIR="$_munr_root" "$_munr_bin" mcp remove \
-            --scope user "$MCP_SERVER_NAME" 2>&1); then
-        printf 'Sessions server: still on. %s mcp remove failed:\n' "$_munr_bin"
-        printf '%s\n' "$_munr_out" | sed 's/^/  /'
-        return 1
-    fi
-    _munr_after=$(mcp_registration "$_munr_base" "$_munr_root" "$_munr_root" | cut -f1)
-    if [ "$_munr_after" != "none" ]; then
-        printf 'Sessions server: still on. The entry is still in %s after the remove.\n' "$_munr_file"
-        return 1
-    fi
-    printf 'Sessions server: off (removed from %s)\n' "$_munr_file"
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# mcp
-# ---------------------------------------------------------------------------
-
-cmd_mcp() {
-    _mcp_usage="usage: $SELF mcp on <name> | off <name> | status [name]"
-    [ $# -gt 0 ] || die "$_mcp_usage"
-    _mcp_sub="$1"; shift
-    case "$_mcp_sub" in
-        on|off)
-            [ $# -eq 1 ] || die "$_mcp_usage"
-            case "$1" in -*) die "unknown option '$1'" ;; esac
-            require_profile "$1"
-            need python3
-            _mcp_agent=$(profile_agent "$1")
-            _mcp_root=$(profile_root "$1")
-            [ -d "$_mcp_root" ] || die "the root of profile '$1' does not exist: $_mcp_root"
-            if [ "$_mcp_sub" = "on" ]; then
-                mcp_register "$_mcp_agent" "$1" "$_mcp_root" || return "$EX_ERR"
-            else
-                mcp_unregister "$_mcp_agent" "$1" "$_mcp_root" || return "$EX_ERR"
-            fi
-            return "$EX_OK"
-            ;;
-        status)
-            [ $# -le 1 ] || die "$_mcp_usage"
-            need python3
-            if [ $# -eq 1 ]; then
-                case "$1" in -*) die "unknown option '$1'" ;; esac
-                require_profile "$1"
-                _mcp_names="$1"
-            else
-                _mcp_names=$(profile_names)
-                [ -n "$_mcp_names" ] || die "no profiles registered. Create one:  $SELF new <name>"
-            fi
-            for _mcp_name in $_mcp_names; do
-                _mcp_agent=$(profile_agent "$_mcp_name")
-                _mcp_root=$(profile_root "$_mcp_name")
-                _mcp_base=$(agent_def "$_mcp_agent" state_base)
-                _mcp_reg=$(mcp_registration "$_mcp_base" "$_mcp_root" "$_mcp_root")
-                _mcp_st=$(printf '%s' "$_mcp_reg" | cut -f1)
-                case "$_mcp_st" in
-                    none) printf '%-14s off\n' "$_mcp_name" ;;
-                    on)   printf '%-14s on      %s\n' "$_mcp_name" "$_mcp_root/$_mcp_base" ;;
-                    *)    printf '%-14s %-7s %s\n' "$_mcp_name" "$_mcp_st" \
-                              "$(printf '%s' "$_mcp_reg" | cut -f4)" ;;
-                esac
-            done
-            return "$EX_OK"
-            ;;
-        serve)
-            # Handled before this file is read; see the fast path at the top.
-            die "internal: mcp serve reached the slow path"
-            ;;
-        *)
-            die "unknown mcp subcommand '$_mcp_sub'
-$_mcp_usage"
-            ;;
-    esac
-}
-
-# ---------------------------------------------------------------------------
 # new
 # ---------------------------------------------------------------------------
 
@@ -1679,10 +1280,8 @@ if you really mean to start over."
         printf 'Profile %s is already registered.\n' "$_new_name"
     fi
 
-    # Nothing is copied or seeded into the root from anywhere. The one thing
-    # new adds, on the created path and the adopted path alike, is the
-    # sessions server registration, through the agent's own CLI, below.
-    # Whether this root already held data decides what to say at the end.
+    # Nothing is copied or seeded into the root from anywhere. Whether this
+    # root already held data decides what to say at the end.
     # Adopting a populated root is a supported and lossless thing to do, and
     # the report has to match: telling someone their live root "is empty" is
     # both false and alarming.
@@ -1731,16 +1330,6 @@ if you really mean to start over."
         [ -z "$AGENT_PROFILE_EXPLAIN" ] || printf '\n'
     fi
 
-    # The sessions server, registered in the root's own state file by the
-    # agent's own CLI (docs/FACTS.md F23). On a created root this is the one
-    # thing the root holds before the first login; on an adopted root it is
-    # the one line added to a live account's state, and the message under
-    # --explain says so. A registrar that is missing or fails costs a line of
-    # output and never the profile.
-    _new_mcp_ok=""
-    mcp_register "$_new_agent" "$_new_name" "$_new_root" && _new_mcp_ok=1
-    [ -z "$AGENT_PROFILE_EXPLAIN" ] || printf '\n'
-
     if [ -n "$_new_adopted" ]; then
         # Say exactly what was and was not done. This command is the entry
         # point for a machine that was set up by hand, so the one thing it
@@ -1750,11 +1339,6 @@ if you really mean to start over."
         if [ -n "$AGENT_PROFILE_EXPLAIN" ]; then
             printf 'Nothing was copied, moved, seeded or removed: whatever settings, hooks and\n'
             printf 'skills were already there are exactly as they were.\n'
-            if [ -n "$_new_mcp_ok" ]; then
-                printf 'The one line added is the sessions server registration above, in the\n'
-                printf "root's own state file (docs/FACTS.md F23); %s mcp off %s takes it out.\n" \
-                    "$SELF" "$_new_name"
-            fi
         fi
         if [ -n "$_new_had_mode" ] && [ "$_new_had_mode" != "700" ]; then
             printf 'The one change: mode %s became 700, which is what doctor D07 wants.\n' "$_new_had_mode"
@@ -1962,8 +1546,7 @@ emit_profiles() {
                 "$(reg_get "$_ep_name" app_data)" \
                 "$(printf '%s' "$_ep_line" | cut -f2)" \
                 "$(printf '%s' "$_ep_line" | cut -f3)" \
-                "$(session_count "$_ep_root")" \
-                "$(mcp_state "$_ep_state" "$_ep_root")"
+                "$(session_count "$_ep_root")"
         done
     done
 }
@@ -3439,8 +3022,7 @@ doctor_rule_catalog() {
         "D15	More than one profile is registered at the same root" \
         "D16	A Claude Code IDE extension is installed and cannot be pinned" \
         "D17	The desktop app itself is in the Dock, so it can be launched unpinned" \
-        "D18	The default app data directory has been written to by an unpinned launch" \
-        "D19	A sessions server registration is stale, or sits in the stray state file"
+        "D18	The default app data directory has been written to by an unpinned launch"
 }
 
 cmd_doctor() {
@@ -3708,65 +3290,6 @@ Try: $SELF doctor [--json] [--report FILE] [--keychain-scan] [--quiet] [--explai
                 "per-project trust decisions and personal MCP servers for whichever" \
                 "account last ran unpinned, which need not be any profile here."
         fi
-    done
-
-    # ---- D19: the sessions server registration ----------------------------
-    #
-    # new writes one line into a root, the sessions server registration, and
-    # this is the rule that checks the line still says what new wrote. A
-    # registration naming another root would serve that root's transcripts to
-    # this profile's sessions, which is the leak the launcher refuses at start
-    # and this reports before then; one whose command is gone starts nothing.
-    # A profile with no registration is not a finding: that is a choice, and
-    # list and mcp status show it as off. The same entry in the stray state
-    # file beside the default root is the other half: only an unpinned run
-    # reads that file, so a server there serves whatever leaked into the
-    # default root to a session no profile owns.
-    #
-    # doctor reads (D19):
-    #   The `mcpServers` block of each registered root's state file, and of
-    #   the stray state file beside the default root: the `sessions` entry's
-    #   command and arguments only, never the `oauthAccount` block or any
-    #   other key.
-    for _doc_name in $_doc_names; do
-        _doc_agent=$(profile_agent "$_doc_name")
-        _doc_root=$(profile_root "$_doc_name")
-        [ -d "$_doc_root" ] || continue
-        _doc_base=$(agent_def "$_doc_agent" state_base)
-        _doc_reg=$(mcp_registration "$_doc_base" "$_doc_root" "$_doc_root")
-        [ "$(printf '%s' "$_doc_reg" | cut -f1)" = "stale" ] || continue
-        finding "D19" "the sessions server registered for $_doc_name is stale" \
-            "$_doc_root/$_doc_base" \
-            "$(printf '%s' "$_doc_reg" | cut -f4)" \
-            "A registration naming another root would serve that root's transcripts" \
-            "to this profile's sessions, and one whose command is gone starts nothing." \
-            "Either way it is not what new wrote. Re-registering replaces it." \
-            "Fix with: $SELF mcp on $_doc_name"
-    done
-    for _doc_agent in $KNOWN_AGENTS; do
-        _doc_state=$(agent_def "$_doc_agent" state_file)
-        [ -f "$_doc_state" ] || continue
-        _doc_inside=""
-        for _doc_name in $_doc_names; do
-            _doc_r=$(reg_get "$_doc_name" root)
-            [ -n "$_doc_r" ] || continue
-            case "$_doc_state" in
-                "$_doc_r"/*) _doc_inside=1 ;;
-            esac
-        done
-        [ -z "$_doc_inside" ] || continue
-        _doc_reg=$(mcp_registration "$(agent_def "$_doc_agent" state_base)" "$HOME" "")
-        case "$(printf '%s' "$_doc_reg" | cut -f1)" in
-            on|stale) ;;
-            *) continue ;;
-        esac
-        finding "D19" "a sessions server is registered in the stray $_doc_agent state file" \
-            "$_doc_state" \
-            "command: $(printf '%s' "$_doc_reg" | cut -f2) $(printf '%s' "$_doc_reg" | cut -f3)" \
-            "Only an unpinned run reads this file, so this server would serve whatever" \
-            "the default root holds to a session no profile owns. The file itself is" \
-            "what D02 reports. Remove the entry, unpinned, with" \
-            "  $(agent_def "$_doc_agent" binary) mcp remove --scope user $MCP_SERVER_NAME"
     done
 
     # ---- D06: an unregistered root ----------------------------------------
@@ -4349,10 +3872,9 @@ for root in roots:
             account = data.get("oauthAccount") or {}
             if account.get("emailAddress"):
                 with_account += 1
-            # A state file the sessions server registration created, in a
-            # root nobody has logged in to yet, holds no account under any
-            # name. Only a file that shows some sign of a login can say
-            # anything about where the identity key lives.
+            # A state file in a root nobody has logged in to yet holds no
+            # account under any name. Only a file that shows some sign of a
+            # login can say anything about where the identity key lives.
             if isinstance(data, dict) and any(
                 any(word in key.lower() for word in ("account", "email", "oauth"))
                 for key in data
@@ -4514,9 +4036,8 @@ Try: $SELF verify [--json] [--quiet] [--explain]" ;;
         eval "$(verify_scan "$_ver_state" "${_ver_roots[@]}")"
 
         # F07: account identity key. A state file with no account under any
-        # name is a root nobody has logged in to: new writes one when it
-        # registers the sessions server (docs/FACTS.md F23), so its existence
-        # no longer means a login happened.
+        # name is a root nobody has logged in to, so its existence alone does
+        # not mean a login happened.
         if [ "$state_files" -eq 0 ]; then
             vunchecked "F07" "no root holds a state file yet" \
                 "Sign in to a profile, then run verify again."
@@ -4794,11 +4315,7 @@ No symlinks, no shared parent, no copied settings, no seeding a new root from an
 old one, no template. A new root holds nothing from any other profile. That
 means it also has none of the hooks or guardrails your other profiles have, and
 the fix for that is to set them up in the new root directly, never to copy them
-across. The one thing new does put into a root is a registration for the root's
-own sessions server, one line in the root's state file written by the agent's
-own CLI: it names this tool and this root, it is the same shape in every root,
-and it points at nothing outside the root, so two roots still share no file and
-no content. mcp off takes it out again.
+across.
 
 WHAT THIS TOOL STORES
 
@@ -4810,10 +4327,7 @@ derived from the pinned root every time it is needed, so it cannot drift away
 from the root it names.
 
 The tool never reads, writes or moves a credential, never edits the agent's own
-state files by hand, and never migrates data between roots. The one change it
-makes to a state file, the sessions server registration, goes through the
-agent's own CLI pinned to the root, so the file is only ever written by the
-program that owns it.
+state files, and never migrates data between roots.
 
 PROSE
 
@@ -5143,7 +4657,7 @@ _@SELF@_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="new list ls remove mcp run shell env path which guard shellrc desktop code idea app doctor verify explain completion version help"
+    cmds="new list ls remove run shell env path which guard shellrc desktop code idea app doctor verify explain completion version help"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
@@ -5160,13 +4674,6 @@ _@SELF@_complete() {
             ;;
         remove)
             COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) --purge" -- "$cur") )
-            ;;
-        mcp)
-            if [ "$COMP_CWORD" -eq 2 ]; then
-                COMPREPLY=( $(compgen -W "on off status" -- "$cur") )
-            else
-                COMPREPLY=( $(compgen -W "$(__@SELF@_profiles)" -- "$cur") )
-            fi
             ;;
         run|shell|env|path|desktop)
             COMPREPLY=( $(compgen -W "$(__@SELF@_profiles)" -- "$cur") )
@@ -5234,7 +4741,6 @@ _@SELF@() {
         'list:list every profile'
         'ls:list every profile'
         'remove:retire a profile'
-        'mcp:turn a profile'"'"'s sessions server on or off, or show its state'
         'run:run the agent pinned to a profile'
         'shell:open a subshell pinned to a profile'
         'env:print exports, for eval'
@@ -5272,14 +4778,6 @@ _@SELF@() {
             profiles=(${(f)"$(__@SELF@_profiles)"})
             _describe -t profiles 'profile' profiles
             _arguments '--purge[delete everything, after a typed confirmation]'
-            ;;
-        mcp)
-            if (( CURRENT == 3 )); then
-                _values 'subcommand' on off status
-            else
-                profiles=(${(f)"$(__@SELF@_profiles)"})
-                _describe -t profiles 'profile' profiles
-            fi
             ;;
         run|shell|env|path|desktop)
             profiles=(${(f)"$(__@SELF@_profiles)"})
@@ -5350,7 +4848,6 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a new -d 'Create a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a list -d 'List every profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a ls -d 'List every profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a remove -d 'Retire a profile'
-complete -c @SELF@ -n '__fish_use_subcommand' -a mcp -d 'Sessions server on, off or status'
 complete -c @SELF@ -n '__fish_use_subcommand' -a run -d 'Run the agent pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a shell -d 'Open a subshell pinned to a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a env -d 'Print exports, for eval'
@@ -5371,8 +4868,6 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a help -d 'Show help'
 complete -c @SELF@ -n '__fish_use_subcommand' -a '(__@SELF@_profiles)' -d Profile
 
 complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app code idea' -a '(__@SELF@_profiles)' -d Profile
-complete -c @SELF@ -n '__fish_seen_subcommand_from mcp; and not __fish_seen_subcommand_from on off status' -a 'on off status'
-complete -c @SELF@ -n '__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from on off status' -a '(__@SELF@_profiles)' -d Profile
 
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l agent -d Agent -a claude
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l root -d 'Config root path'
@@ -5579,13 +5074,12 @@ USAGE
 PROFILES
   new <name> [--agent NAME] [--root PATH] [--app-data PATH] [--explain]
                           Create a config root, an app data dir and a registry
-                          entry, and register the profile's sessions server in
-                          the root. Nothing is copied into the root from
-                          anywhere. Safe to run twice. Default output is a few
-                          lines: what happened and the next command. --explain
+                          entry. Nothing is copied into the root from anywhere.
+                          Safe to run twice. Default output is a few lines:
+                          what happened and the next command. --explain
                           restores the full rationale.
-  list [--json]           Every profile with its root, account, session count
-                          and whether its sessions server is on.
+  list [--json]           Every profile with its root, account and session
+                          count.
   remove <name> [--purge] Retire a profile. It removes the registry entry and
                           prints everything else the profile still has on this
                           machine, with the command that deletes each one.
@@ -5640,20 +5134,6 @@ DESKTOP
                           distinct colour per account are legible. --explain
                           restores the full rationale and how to confirm the
                           pin actually took.
-
-SESSIONS SERVER
-  mcp on <name>           Register the profile's sessions server: an MCP
-                          server, started by Claude Code inside that profile's
-                          sessions, that answers questions about the
-                          transcripts in that profile's root and nothing else.
-                          new does this already; this is for a profile that
-                          was turned off, or created before claude was on PATH.
-  mcp off <name>          Remove it from the root's state file. Off means gone,
-                          not hidden, and the file is read back to check.
-  mcp status [name]       on, off or stale for each profile, read from the
-                          root's state file. Nothing is written.
-  mcp serve --root PATH   What the registration runs. Claude Code starts it;
-                          it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
   shellrc [--shell bash|zsh|fish] [--explain]
@@ -5749,7 +5229,6 @@ main() {
         new)      cmd_new "$@" ;;
         list|ls)  cmd_list "$@" ;;
         remove)   cmd_remove "$@" ;;
-        mcp)      cmd_mcp "$@" ;;
         run)      cmd_run "$@" ;;
         shell)    cmd_shell "$@" ;;
         env)      cmd_env "$@" ;;

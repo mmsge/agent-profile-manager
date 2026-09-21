@@ -89,8 +89,7 @@ Cause: `run`, `shell` and the guard all check for the agent's binary before
 pinning it, and Claude Code is not installed or not on `PATH` in this shell.
 
 Fix: install Claude Code, or fix `PATH`. `new` in the same state still
-creates the profile, and says the sessions server was not registered; run
-`agpin mcp on <name>` once `claude` is on `PATH`.
+creates the profile.
 
 ## "required command 'python3' not found"
 
@@ -115,8 +114,7 @@ meets that first, because it canonicalises the root path before creating it;
 `list`, `doctor`, `remove` and `verify` refuse the same way.
 
 Fix: `xcode-select --install`. It is a several gigabyte download and the one
-prerequisite this tool cannot avoid. `uv` does not help here: it brings its
-own Python for the sessions server and puts nothing on your `PATH`.
+prerequisite this tool cannot avoid.
 
 ## "profile '\<name\>' is already registered with root '...'. Refusing to repoint it..."
 
@@ -148,9 +146,7 @@ agpin new brygga
 
 ```
 Profile brygga is already registered.
-Sessions server: on (already registered in /Users/alex/.claude-brygga/.claude.json)
-That root already held data, so it was adopted rather than created: 0 session(s).
-Next: agpin doctor    (audit the isolation)
+Next: agpin run brygga   (it will ask you to log in)
 ```
 <!-- END GENERATED: example new-again -->
 
