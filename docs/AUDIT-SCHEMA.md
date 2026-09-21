@@ -115,10 +115,7 @@ Adds `profiles`, `rules` and `findings`.
 One entry per registered profile, in registry order. `account` and
 `organization` are the account identity `list` already prints, and are `null`
 when the profile is not signed in. `app_data` is `null` when the registry entry
-records none. `sessions_server` is `on`, `off`, `stale` or `foreign`: whether
-the root's state file carries this tool's registration for the profile's
-sessions server, read from the `mcpServers` block and nothing else, the same
-answer `mcp status` prints.
+records none.
 
 ### `rules`
 

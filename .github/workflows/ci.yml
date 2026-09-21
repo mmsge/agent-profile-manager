@@ -102,40 +102,6 @@ jobs:
         run: |
           "${{ steps.sh.outputs.path }}" tools/gen-doc-examples.sh --check
 
-  # The sessions server under server/ is Python, tested with pytest against
-  # generated fixtures. It runs on both platforms the tool ships to, from the
-  # lockfile the release ships, so a dependency that resolves differently on a
-  # Mac is caught here rather than at a coworker's install.
-  server:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: server (${{ matrix.os }})
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v6
-
-      - name: Install the locked environment
-        working-directory: server
-        run: uv sync --frozen --group dev
-
-      - name: Run the server tests
-        working-directory: server
-        run: uv run --frozen --group dev pytest -q
-
-      # What the installer does on a Mac with uv, against the same lockfile,
-      # and what the launcher then execs. A broken lockfile fails here.
-      - name: Build the environment the way the installer does
-        working-directory: server
-        run: |
-          rm -rf .venv
-          uv sync --frozen --no-dev --no-install-project
-          test -x .venv/bin/python
-          CLAUDE_CONFIG_DIR=/tmp/none PYTHONPATH=. .venv/bin/python -m agent_profile_sessions --root /tmp/none 2>&1 | grep -q "refusing to start"
-
   lint:
     runs-on: ubuntu-latest
     steps:

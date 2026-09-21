@@ -67,7 +67,7 @@ case_table_matches_the_source() {
     # of bin/agent-profile right now.
     gen_reads "$ROOT" --check
     assert_status 0 "$GRSTATUS" "$GROUT" || return
-    assert_contains "$GROUT" "19 rules"
+    assert_contains "$GROUT" "18 rules"
 }
 
 case_a_hand_edited_row_fails_by_name() {

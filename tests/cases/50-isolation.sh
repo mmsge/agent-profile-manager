@@ -19,39 +19,9 @@ case_a_second_profile_does_not_inherit_the_first() {
     printf '{"model":"opus"}\n' > "$HOME/.claude-brygga/settings.json"
     mkdir -p "$HOME/.claude-brygga/skills/example"
     "$AP" new havnelab >/dev/null 2>&1
-    # The new root holds its own sessions server registration and nothing
-    # else: no settings, no skills, nothing the first root has. And the one
-    # file it does hold names its own root, not the first profile's.
-    assert_equals ".claude.json" "$(ls -A "$HOME/.claude-havnelab" 2>/dev/null)" || return
-    assert_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" "$HOME/.claude-havnelab" || return
-    assert_not_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" ".claude-brygga" || return
-    assert_not_contains "$(cat "$HOME/.claude-havnelab/.claude.json")" "opus"
-}
-
-# The registration is the one thing new writes into a root, and it must never
-# be written into any root but the one being registered.
-case_registering_one_profile_never_touches_another_root() {
-    HOME=$(new_home); export HOME
-    "$AP" new brygga >/dev/null 2>&1
-    "$AP" new havnelab >/dev/null 2>&1
-    before=$(cat "$HOME/.claude-havnelab/.claude.json")
-    "$AP" mcp off brygga >/dev/null 2>&1
-    "$AP" mcp on brygga >/dev/null 2>&1
-    assert_equals "$before" "$(cat "$HOME/.claude-havnelab/.claude.json")"
-}
-
-# Off means gone from the state file, not hidden in it, and nothing else in
-# the root moves.
-case_mcp_off_leaves_no_registration_and_nothing_else_changed() {
-    HOME=$(new_home); export HOME
-    "$AP" new brygga >/dev/null 2>&1
-    printf '{"model":"opus"}\n' > "$HOME/.claude-brygga/settings.json"
-    "$AP" mcp off brygga >/dev/null 2>&1
-    assert_not_contains "$(cat "$HOME/.claude-brygga/.claude.json")" "mcp serve" || return
-    assert_not_contains "$(cat "$HOME/.claude-brygga/.claude.json")" "disabledMcpServers" || return
-    assert_equals '{"model":"opus"}' "$(cat "$HOME/.claude-brygga/settings.json")" || return
-    assert_equals ".claude.json settings.json" \
-        "$(find "$HOME/.claude-brygga" -mindepth 1 -maxdepth 1 | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')"
+    # The new root holds nothing: no settings, no skills, nothing the first
+    # root has.
+    assert_equals "" "$(ls -A "$HOME/.claude-havnelab" 2>/dev/null)"
 }
 
 case_registry_lives_outside_every_root() {
@@ -113,8 +83,6 @@ case_no_command_writes_to_the_agents_state_file() {
     "$AP" doctor >/dev/null 2>&1
     "$AP" verify >/dev/null 2>&1
     "$AP" explain >/dev/null 2>&1
-    "$AP" mcp status >/dev/null 2>&1
-    "$AP" mcp status brygga >/dev/null 2>&1
     after=$(cat "$HOME/.claude-brygga/.claude.json")
     assert_equals "$before" "$after"
 }
@@ -132,7 +100,6 @@ case_no_document_carries_a_credential() {
     assert_not_contains "$("$AP" doctor --json 2>&1)" "CANARY" || return
     assert_not_contains "$("$AP" list --json 2>&1)" "CANARY" || return
     assert_not_contains "$("$AP" verify --json 2>&1)" "CANARY" || return
-    assert_not_contains "$("$AP" mcp status 2>&1)" "CANARY" || return
     "$AP" doctor --report "$HOME/audit" >/dev/null 2>&1
     assert_not_contains "$(cat "$HOME/audit.json")" "CANARY" || return
     assert_not_contains "$(cat "$HOME/audit.md")" "CANARY"
@@ -159,8 +126,6 @@ case_help_and_version() {
 
 run_case "no symlinks under any root"                 case_no_symlinks_anywhere_under_a_root
 run_case "a second profile inherits nothing"          case_a_second_profile_does_not_inherit_the_first
-run_case "registering one profile never touches another root" case_registering_one_profile_never_touches_another_root
-run_case "mcp off leaves no registration and nothing else changed" case_mcp_off_leaves_no_registration_and_nothing_else_changed
 run_case "the registry lives outside every root"      case_registry_lives_outside_every_root
 run_case "the source never copies between roots"      case_source_never_copies_or_links_between_roots
 run_case "the source never reads credentials"         case_source_never_reads_credential_content

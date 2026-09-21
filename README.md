@@ -42,10 +42,7 @@ transcripts, auto memory, commands, skills, agents, plugins, plans, backups,
 the credential and the state file. Two profiles therefore share no file at
 all. Nothing is ever shared between two config roots, on purpose and without
 exception; the reasoning is in
-[Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared). The one thing
-this tool puts into a root is the registration for that root's own
-[sessions server](docs/USE.md#the-sessions-server), which names the root and
-nothing outside it.
+[Why nothing is shared](docs/DESIGN.md#why-nothing-is-shared).
 
 The credential is keyed to the root path, which is why a root can never be
 moved or renamed once it has a login, and why the app's own login and the
@@ -101,9 +98,8 @@ Another shell: agpin shellrc --shell bash|zsh|fish, or --explain for all three.
 <!-- END GENERATED: example install -->
 
 If `~/.local/bin` is already on your `PATH`, the warning is replaced by a line
-saying so instead. On a Mac with the sessions server's dependencies to build,
-two more lines say so before the links are made. Install `cosign` first if you
-want the signature checked, and you do: `brew install cosign`. See
+saying so instead. Install `cosign` first if you want the signature checked,
+and you do: `brew install cosign`. See
 [Install](docs/INSTALL.md) for what is verified, `--prefix`, `--name` and
 Homebrew.
 
@@ -116,7 +112,6 @@ agpin new brygga
 
 ```
 Created profile brygga
-Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
 Next: agpin run brygga   (it will ask you to log in)
 ```
 <!-- END GENERATED: example new -->
@@ -128,12 +123,6 @@ holds nothing from any other profile, which is the point. It has no settings,
 no hooks and none of the guardrails your other profiles may have; set those up
 in the new root directly, and do not copy them across. How a team gives every
 new profile a baseline without copying is [issue #22](https://github.com/mmsge/agent-profile-manager/issues/22).
-
-The sessions server line is the one thing `new` writes into a root: a
-registration, made by Claude Code's own CLI, for a small read-only server over
-that profile's own transcripts. [The sessions server](docs/USE.md#the-sessions-server)
-says what it does and how to turn it off. If `claude` was not on your `PATH`
-yet, `new` says so and `agpin mcp on brygga` does it later.
 
 **3. Add these to your shell rc file.** `agpin shellrc` prints them, in the
 dialect of the shell your `$SHELL` names and no other:
@@ -221,7 +210,7 @@ time; see [Just asking](docs/USE.md#just-asking).
 | Guide | Who it is for |
 | --- | --- |
 | [Setting up a Mac](docs/SETUP.md) | A person setting up their own machine, or a Claude Code session doing it for them. Every step with its command, the output to expect, and how to check it worked. Both the clean machine and the one that has run unpinned for months. |
-| [Daily use](docs/USE.md) | Everyone, after setup. Every command, the guard, the picker, pinning a shell, completions, output levels and the sessions server. |
+| [Daily use](docs/USE.md) | Everyone, after setup. Every command, the guard, the picker, pinning a shell, completions and output levels. |
 | [Install](docs/INSTALL.md) | Anyone deciding what to trust. The one-liner and what it verifies, Homebrew, the options, staying current, the development install and the Windows status. |
 | [The desktop and the IDEs](docs/DESKTOP.md) | Anyone who opens Claude anywhere but a terminal. Which launch paths carry a pin, which leak, and which rule catches each. |
 | [The audit](docs/AUDIT.md) | Anyone who has to prove the separation holds. The rules, what each one reads, the JSON document, `verify`, the leak test and the exit codes. |
@@ -252,10 +241,9 @@ brew tap mmsge/agpin
 brew install agpin
 ```
 
-No dependencies beyond a stock macOS for the tool itself: one bash 3.2 script,
-with `python3` from the Command Line Tools used only to read JSON. What each
-step trusts and verifies, the options, and the sessions server's Python
-environment are in [Install](docs/INSTALL.md).
+No dependencies beyond a stock macOS: one bash 3.2 script, with `python3`
+from the Command Line Tools used only to read JSON. What each step trusts and
+verifies, and the options, are in [Install](docs/INSTALL.md).
 
 ## Exit codes
 
