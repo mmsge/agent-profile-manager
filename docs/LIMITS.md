@@ -64,11 +64,13 @@ launch paths, with the rule that catches each.
   for good and only D02 and D03 still watch. `new` says so when you do it, and
   [the setup guide](SETUP.md#part-2-a-machine-that-has-run-unpinned) shows the
   note.
-- **Windows.** The tool is a bash script written for macOS paths and macOS
-  mechanisms (Keychain, `open`, AppleScript applets); none of it runs on
-  Windows, so a machine used from both platforms gets no isolation from this
-  tool at all on the Windows side. [Install](INSTALL.md#windows) has the
-  status of a port.
+- **Windows, Linux and WSL.** The tool is a bash script written for macOS
+  paths and macOS mechanisms (Keychain, `open --env`, AppleScript applets).
+  None of it runs on Windows, so a machine used from both platforms gets no
+  isolation from this tool at all on the Windows side. On Linux and WSL the
+  shell half runs and the desktop, IDE and Keychain halves do not.
+  [Install](INSTALL.md#windows) has the Windows status and
+  [Linux and WSL](INSTALL.md#linux-and-wsl) the exact list.
 
 ## Three things that are not what they look like
 

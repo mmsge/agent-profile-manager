@@ -57,6 +57,19 @@ It is named for agents rather than for Claude because the same problem will
 arrive with ollama, codex and whatever comes next. Claude is the only agent
 implemented today.
 
+## Platforms
+
+| | |
+| --- | --- |
+| **macOS** | Supported. Everything on this page. |
+| **Windows** | Not yet. Nothing in this tool has run on Windows, and a launcher that pins nothing looks exactly like one that works, so none ships until the facts a port needs are settled. [Install](docs/INSTALL.md#windows) has the status and the probe script that settles them. |
+| **Linux and WSL** | Not supported yet. The shell half runs there, and the test suite runs there on every change, but nobody has used it on a real Linux machine, and the desktop, IDE and Keychain halves do not exist there. [Install](docs/INSTALL.md#linux-and-wsl) says exactly which commands and which audit rules that leaves. |
+
+The roadmap is short on purpose, and the issue tracker carries the rest:
+
+- Windows: the facts first, [issue #89](https://github.com/mmsge/agent-profile-manager/issues/89), then the port, [issue #15](https://github.com/mmsge/agent-profile-manager/issues/15).
+- Linux and WSL: [issue #88](https://github.com/mmsge/agent-profile-manager/issues/88), a supported shell half with an audit that says what it could not check.
+
 ## Ten-minute start
 
 Five steps, on a Mac with Claude Code already installed. Every output below
@@ -222,7 +235,7 @@ time; see [Just asking](docs/USE.md#just-asking).
 | --- | --- |
 | [Setting up a Mac](docs/SETUP.md) | A person setting up their own machine, or a Claude Code session doing it for them. Every step with its command, the output to expect, and how to check it worked. Both the clean machine and the one that has run unpinned for months. |
 | [Daily use](docs/USE.md) | Everyone, after setup. Every command, the guard, the picker, pinning a shell, completions, output levels and the sessions server. |
-| [Install](docs/INSTALL.md) | Anyone deciding what to trust. The one-liner and what it verifies, Homebrew, the options, staying current, the development install and the Windows status. |
+| [Install](docs/INSTALL.md) | Anyone deciding what to trust. The one-liner and what it verifies, Homebrew, the options, staying current, the development install, and where Windows, Linux and WSL stand. |
 | [The desktop and the IDEs](docs/DESKTOP.md) | Anyone who opens Claude anywhere but a terminal. Which launch paths carry a pin, which leak, and which rule catches each. |
 | [The audit](docs/AUDIT.md) | Anyone who has to prove the separation holds. The rules, what each one reads, the JSON document, `verify`, the leak test and the exit codes. |
 | [What this does not protect against](docs/LIMITS.md) | A security-minded reader. Every gap that is still open, one honest paragraph each, and three things that are not what they look like. |
