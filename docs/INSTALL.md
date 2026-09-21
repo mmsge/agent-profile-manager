@@ -181,38 +181,13 @@ no `jq`.
 had Xcode or the Command Line Tools has none, and `agpin new`, `agpin list`,
 `agpin doctor`, `agpin remove` and `agpin verify` all refuse without it,
 naming `xcode-select --install`. That download is several gigabytes, so it is
-worth doing before the first profile rather than in the middle of one. `uv`
-does not help here: it brings its own Python for the sessions server and puts
-nothing on your `PATH`.
+worth doing before the first profile rather than in the middle of one.
 
 Installing adds nothing to that: `curl`, `shasum` and `tar` are on every Mac,
 and neither `tools/install.sh` nor `agpin version --check` calls `python3`,
 because on a fresh Mac that opens the Command Line Tools dialog and an
 installer is the worst place to meet it. `cosign` is the one optional piece,
 and the only thing that goes unchecked without it is the signature.
-
-### The sessions server's environment
-
-**The sessions server is the exception, and the installer says so before it
-touches it.** [That server](USE.md#the-sessions-server) is Python, and its
-environment is built at install time into `server/.venv` beside the installed
-tree, from `server/uv.lock` when `uv` is installed and otherwise from
-`server/requirements.txt` with `python3 -m venv` and `pip install
---require-hashes`. Both files ship inside the signed tarball, so every
-dependency byte is pinned by the release even though the bytes come from
-PyPI. `uv` brings its own Python and needs no developer tools;
-`brew install uv` is the lighter path on a fresh Mac. Without `uv`, the
-`python3` that builds the environment is the one that opens the Command Line
-Tools dialogue, and the installer prints that before it happens. A failed
-build costs the server and nothing else: the tool is installed and linked, the
-failure is printed in full, the installer exits 1, and `agpin mcp serve` says
-the server is not installed until the installer is run again.
-`tools/install.sh --no-server` skips the build on purpose.
-
-The examples on this page are generated from a release tarball without the
-`server/` directory, so they show none of those lines. On a real install the
-line `Building the sessions server's environment with uv, from server/uv.lock ...`
-and then `Built .../server/.venv` appear before the links are made.
 
 ## What you are trusting, step by step
 
@@ -298,12 +273,6 @@ is an improvement and not the end of it: whoever can push to the tap can change
 the URL and the sum together. The Sigstore check is the one that survives that.
 See [`packaging/homebrew/README.md`](../packaging/homebrew/README.md).
 
-The formula depends on Homebrew's `python@3.13` and `uv`, and builds the
-sessions server's environment into its own `libexec/server/.venv` during
-`brew install`, from the lockfile in the tarball. That step downloads the
-pinned dependencies from PyPI, which is fine for a tap and is why this formula
-is not a homebrew-core candidate.
-
 ## Options
 
 ```sh
@@ -312,7 +281,6 @@ tools/install.sh --prefix ~/bin     # where the two links go
 tools/install.sh --name apx         # a different short command name
 tools/install.sh --uninstall        # remove the links, and nothing else
 tools/install.sh --dev              # link a git checkout instead
-tools/install.sh --no-server        # do not build the sessions server's environment
 ```
 
 `--version` never asks the API which release is newest, so it is what you want

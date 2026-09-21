@@ -33,10 +33,6 @@ DEV_TARGET="$ROOT/bin/$LONG_NAME"
 # Overridable so the test suite can serve a release from a local directory over
 # a file:// URL, and so someone can install from a fork without editing this
 # file. The defaults are the only place the project's own URLs appear.
-#
-# AGENT_PROFILE_INSTALL_SERVER=no is --no-server as an environment variable,
-# which is how the test suite installs without building a Python environment.
-: "${AGENT_PROFILE_INSTALL_SERVER:=yes}"
 : "${AGENT_PROFILE_RELEASE_BASE_URL:=https://github.com/mmsge/agent-profile-manager/releases}"
 : "${AGENT_PROFILE_RELEASE_API_URL:=https://api.github.com/repos/mmsge/agent-profile-manager/releases/latest}"
 : "${AGENT_PROFILE_SHARE_DIR:=$HOME/.local/share/agent-profile}"
@@ -59,7 +55,7 @@ WORKDIR=""
 usage() {
     cat <<USAGE
 usage: tools/install.sh [--version vX.Y.Z] [--dev] [--prefix DIR] [--name NAME]
-                        [--no-server] [--uninstall]
+                        [--uninstall]
 
   --version TAG  install this release instead of the newest one
   --dev          link a git checkout rather than installing a release, so the
@@ -67,8 +63,6 @@ usage: tools/install.sh [--version vX.Y.Z] [--dev] [--prefix DIR] [--name NAME]
   --prefix DIR   where to put the links (default: the first writable of
                  ~/.local/bin, /usr/local/bin)
   --name NAME    the short command name (default: $SHORT_NAME)
-  --no-server    do not build the sessions server's Python environment; the
-                 tool works without it and 'agpin mcp serve' says so
   --uninstall    remove links this script created, and nothing else
 
 By default this downloads the newest tagged release, verifies its checksum,
@@ -77,10 +71,6 @@ $AGENT_PROFILE_SHARE_DIR/<version>/.
 
 Both '$SHORT_NAME' and '$LONG_NAME' are linked, so scripts and muscle memory
 can use either. The tool names itself by whichever you invoke.
-
-The sessions server's environment is built beside the installed tree, in
-server/.venv, from the lockfile the release ships: with uv when it is
-installed, otherwise with python3 3.10 or newer and the hashed requirements.
 USAGE
 }
 
@@ -102,93 +92,12 @@ cleanup() {
     WORKDIR=""
 }
 
-# ---------------------------------------------------------------------------
-# The sessions server's environment
-#
-# server/ in the installed tree is a Python program, the MCP server every
-# profile's Claude Code starts over that profile's own transcripts. Its
-# dependencies are built into server/.venv here, at install time, so that a
-# session start never resolves or downloads anything, and a failure happens
-# where a person is watching. The launcher, `agpin mcp serve`, execs the
-# interpreter in that directory and puts the source tree beside it on
-# PYTHONPATH, so nothing is installed into the environment but the pinned
-# dependencies.
-#
-# Two builders, in order of preference. uv reads server/uv.lock, which pins a
-# hash for every wheel, and downloads a Python of its own when the machine has
-# none, so a Mac with no developer tools never meets the Command Line Tools
-# dialogue. Without uv, python3 3.10 or newer builds a venv and pip installs
-# server/requirements.txt with --require-hashes, which is the same pins in the
-# form pip reads; that python3 is the one that opens the dialogue on a fresh
-# Mac, and this says so before it does.
-#
-# A failure here does not undo the install. The tool is linked anyway, because
-# everything but the server works without it, the failure is printed in full,
-# and the script exits non-zero at the end so a scripted install notices.
-# ---------------------------------------------------------------------------
-
-SERVER_BUILD_FAILED=""
-
-server_warn() {
-    printf 'WARNING: the sessions server was not built.\n' >&2
-    for _sw_line in "$@"; do printf '         %s\n' "$_sw_line" >&2; done
-    printf '         Everything else is installed and works. Until the server is built,\n' >&2
-    printf "         'agpin mcp serve' says it is not installed and sessions run without it.\n" >&2
-    printf '         Run this script again once the cause is fixed.\n' >&2
-    SERVER_BUILD_FAILED=1
-}
-
-# build_server_env <tree>: build <tree>/server/.venv, or say why not.
-build_server_env() {
-    _bse_dir="$1/server"
-    [ -d "$_bse_dir" ] || return 0
-    if [ "$AGENT_PROFILE_INSTALL_SERVER" != "yes" ]; then
-        say "Skipped building the sessions server (--no-server). 'agpin mcp serve' will say"
-        say "it is not installed until this script is run again without that flag."
-        return 0
-    fi
-    [ -f "$_bse_dir/uv.lock" ] || { server_warn "$_bse_dir has no uv.lock, so there is nothing to build from."; return 0; }
-    if command -v uv >/dev/null 2>&1; then
-        say "Building the sessions server's environment with uv, from server/uv.lock ..."
-        if (cd "$_bse_dir" && uv sync --frozen --no-dev --no-install-project); then
-            say "Built $_bse_dir/.venv"
-        else
-            server_warn "uv sync --frozen failed in $_bse_dir; its output is above."
-        fi
-        return 0
-    fi
-    if ! command -v python3 >/dev/null 2>&1; then
-        server_warn "neither uv nor python3 is installed." \
-            "brew install uv is the lighter fix: it brings its own Python and needs no developer tools."
-        return 0
-    fi
-    say "uv is not installed, so the sessions server's environment is built with python3."
-    say "On a Mac with no developer tools this is the step that opens the Command Line"
-    say "Tools dialogue; brew install uv avoids it."
-    if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        server_warn "python3 is older than 3.10, which the server needs." \
-            "brew install uv, or a newer python3, and run this script again."
-        return 0
-    fi
-    rm -rf "$_bse_dir/.venv"
-    if python3 -m venv "$_bse_dir/.venv" \
-        && "$_bse_dir/.venv/bin/python" -m pip install --quiet --require-hashes \
-            -r "$_bse_dir/requirements.txt"; then
-        say "Built $_bse_dir/.venv"
-    else
-        rm -rf "$_bse_dir/.venv"
-        server_warn "python3 -m venv or pip install --require-hashes failed in $_bse_dir; its output is above."
-    fi
-    return 0
-}
-
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix)    shift; [ $# -gt 0 ] || fail "--prefix needs a value"; PREFIX="$1" ;;
         --name)      shift; [ $# -gt 0 ] || fail "--name needs a value"; SHORT_NAME="$1" ;;
         --version)   shift; [ $# -gt 0 ] || fail "--version needs a value"; VERSION="$1" ;;
         --dev)       MODE="dev" ;;
-        --no-server) AGENT_PROFILE_INSTALL_SERVER=no ;;
         --uninstall) UNINSTALL=1 ;;
         -h|--help)   usage; exit 0 ;;
         *)           echo "unknown option '$1'" >&2; usage >&2; exit 1 ;;
@@ -403,7 +312,6 @@ Nothing was installed."
 
     TARGET="$_dest/bin/$LONG_NAME"
     say "Unpacked $_tag into $_dest"
-    build_server_env "$_dest"
     printf '\n'
 }
 
@@ -411,7 +319,6 @@ if [ "$MODE" = "dev" ]; then
     [ -x "$DEV_TARGET" ] || fail "cannot find an executable at $DEV_TARGET
 --dev installs from a git checkout. Drop --dev to install a release instead."
     TARGET="$DEV_TARGET"
-    build_server_env "$ROOT"
 else
     install_release
 fi
@@ -474,11 +381,3 @@ printf '\n'
 # writes nothing. The install has already succeeded by this line, so a shellrc
 # that cannot run must not make it look otherwise.
 "$PREFIX/$SHORT_NAME" shellrc || true
-
-# The links are in place whatever happened to the server build, so the tool
-# works; the status is how a scripted install learns the server did not.
-if [ -n "$SERVER_BUILD_FAILED" ]; then
-    printf '\n'
-    printf 'The sessions server was not built; see the WARNING above. Exiting 1 for that.\n' >&2
-    exit 1
-fi

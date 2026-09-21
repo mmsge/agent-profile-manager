@@ -19,8 +19,7 @@
 # the hashes it would derive from the /Users/alex form, so the output reads
 # as one machine's rather than one run's. Nothing here reads a real config
 # root, a real Keychain or a real Dock: the platform is pinned, every macOS
-# command the tool would call has a stand-in first on PATH, and the agent's
-# own CLI is a stand-in that only knows `mcp add` and `mcp remove`.
+# command the tool would call has a stand-in first on PATH.
 #
 # The documentation marks a block like this:
 #
@@ -137,10 +136,9 @@ SHOWN=""
 fixture_home() {
     H=$(mktemp -d "$WORK/homes/$1.XXXXXX") || die "could not create a fixture HOME for $1"
     H=$(cd "$H" && pwd)
-    mkdir -p "$H/bin" "$H/.local/bin" "$H/claudebin"
+    mkdir -p "$H/bin" "$H/.local/bin"
     ln -sf "$SCRIPT" "$H/.local/bin/agpin"
     ln -sf "$SCRIPT" "$H/.local/bin/agent-profile"
-    stand_in_claude "$H/claudebin/claude"
     stand_in_osa "$H/bin"
     # A launch is never what an example wants. If a scenario reaches open(1)
     # anyway, this says so and launches nothing.
@@ -153,61 +151,6 @@ fixture_home() {
     # example; the stand-in refuses a -g or a -w outright.
     stand_in_keychain
     stand_in_defaults
-}
-
-# stand_in_claude <path>: the agent's CLI as the registrar of the sessions
-# server, which is the one thing new and mcp on run it for. It edits the
-# pinned root's state file the way the real one does and knows nothing else.
-stand_in_claude() {
-    cat > "$1" <<'REGEOF'
-#!/bin/sh
-state="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
-[ "${1:-}" = "mcp" ] || { echo "stand-in claude: only mcp is implemented" >&2; exit 64; }
-shift
-op="${1:-}"; shift
-scope="local"; name=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --scope|-s) shift; scope="$1" ;;
-        --) shift; break ;;
-        *) [ -n "$name" ] || name="$1" ;;
-    esac
-    shift
-done
-[ "$scope" = "user" ] || { echo "stand-in claude: scope $scope is not what the tool should use" >&2; exit 65; }
-export state name op
-python3 - "$@" <<'PY'
-import json, os, sys
-state, name, op = os.environ["state"], os.environ["name"], os.environ["op"]
-data = {}
-if os.path.isfile(state):
-    with open(state) as fh:
-        data = json.load(fh)
-servers = data.setdefault("mcpServers", {})
-if op == "add":
-    if name in servers:
-        print("MCP server %s already exists in user config" % name)
-        sys.exit(1)
-    servers[name] = {"type": "stdio", "command": sys.argv[1], "args": sys.argv[2:], "env": {}}
-    print("Added stdio MCP server %s with command: %s to user config" % (name, " ".join(sys.argv[1:])))
-elif op == "remove":
-    if name not in servers:
-        print('No MCP server named "%s" in user scope' % name)
-        sys.exit(1)
-    del servers[name]
-    print("Removed MCP server %s from user config" % name)
-elif op == "get":
-    print(json.dumps(servers.get(name)))
-    sys.exit(0)
-else:
-    print("stand-in claude: mcp %s is not implemented" % op)
-    sys.exit(66)
-with open(state, "w") as fh:
-    json.dump(data, fh)
-print("File modified: %s" % state)
-PY
-REGEOF
-    chmod +x "$1"
 }
 
 # stand_in_osa <bindir>: osacompile stores its -e lines verbatim and
@@ -317,9 +260,7 @@ fixture_applet() {
 
 # fixture_release: a release laid out the way GitHub lays one out, served
 # over file:// so the installer's real download, checksum and unpack path
-# runs. The tarball holds this checkout's bin, tools and docs and no server
-# directory, so the installer has no Python environment to build and the
-# example shows the tool's own install and nothing downloaded from PyPI.
+# runs. The tarball holds this checkout's bin, tools and docs.
 fixture_release() {
     _fr_dir="$H/release/download/v$VERSION"
     mkdir -p "$_fr_dir"
@@ -367,7 +308,7 @@ COSEOF
 # has never had a tool installed there starts out. The install examples
 # use it, so the installer's warning about it is part of what they show.
 fresh_path() {
-    printf '%s\n' "$H/bin:$H/claudebin:$PY_DIR:/usr/bin:/bin"
+    printf '%s\n' "$H/bin:$PY_DIR:/usr/bin:/bin"
 }
 
 # in_fixture [VAR=value ...] <command...>: run a command with nothing but the
@@ -380,10 +321,9 @@ in_fixture() {
         USER="$DOC_USER" \
         SHELL="/bin/zsh" \
         TMPDIR="$WORK" \
-        PATH="$H/bin:$H/.local/bin:$H/claudebin:$PY_DIR:/usr/bin:/bin" \
+        PATH="$H/bin:$H/.local/bin:$PY_DIR:/usr/bin:/bin" \
         AGENT_PROFILE_PLATFORM="Darwin" \
         AGENT_PROFILE_APPLET_DIRS="$H/Applications:$H/Desktop" \
-        AGENT_PROFILE_INSTALL_SERVER="no" \
         AGENT_PROFILE_RELEASE_BASE_URL="file://$H/release" \
         AGENT_PROFILE_RELEASE_API_URL="file://$H/release/latest.json" \
         "$@"
@@ -531,14 +471,6 @@ scenario new-explain
 ex_new_explain() {
     SHOWN='agpin new brygga --explain'
     agpin new brygga --explain
-}
-
-scenario new-no-claude
-ex_new_no_claude() {
-    SHOWN='agpin new brygga'
-    in_fixture PATH="$H/bin:$H/.local/bin:$PY_DIR:/usr/bin:/bin" \
-        "$BASH_BIN" "$H/.local/bin/agpin" new brygga 2>&1
-    return 0
 }
 
 scenario new-again
@@ -703,28 +635,6 @@ ex_app_explain() {
     quiet app brygga
     SHOWN='agpin app brygga --explain'
     agpin app brygga --explain
-}
-
-scenario mcp-status
-ex_mcp_status() {
-    two_profiles
-    SHOWN='agpin mcp status'
-    agpin mcp status
-}
-
-scenario mcp-off
-ex_mcp_off() {
-    two_profiles
-    SHOWN='agpin mcp off brygga'
-    agpin mcp off brygga
-}
-
-scenario mcp-on
-ex_mcp_on() {
-    two_profiles
-    quiet mcp off brygga
-    SHOWN='agpin mcp on brygga'
-    agpin mcp on brygga
 }
 
 # The rc block, in the dialect of one shell. The fixture's $SHELL is zsh,

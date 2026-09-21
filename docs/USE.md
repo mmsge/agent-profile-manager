@@ -1,7 +1,7 @@
 # Daily use
 
 Everything after setup: the commands, the guard, the picker, pinning a
-shell, completions, the output levels and the sessions server. Every output
+shell, completions and the output levels. Every output
 shown is generated from a real run of the tool.
 
 ## The commands
@@ -14,9 +14,7 @@ agpin run brygga          # the same thing, spelled out
 agpin shell brygga        # a subshell pinned to that profile
 eval "$(agpin env brygga)"  # pin the shell you are already in
 agpin which               # what am I pinned to?
-agpin list                # every profile, its account, sessions and server state
-agpin mcp status          # is each profile's sessions server on, off or stale?
-agpin mcp off brygga      # turn one off; mcp on turns it back on
+agpin list                # every profile, its account and sessions
 agpin doctor              # is the separation actually holding?
 agpin doctor --json       # the same audit, as one JSON document
 agpin doctor --report audit  # audit.json and audit.md, dated, to hand over
@@ -56,13 +54,12 @@ USAGE
 PROFILES
   new <name> [--agent NAME] [--root PATH] [--app-data PATH] [--explain]
                           Create a config root, an app data dir and a registry
-                          entry, and register the profile's sessions server in
-                          the root. Nothing is copied into the root from
-                          anywhere. Safe to run twice. Default output is a few
-                          lines: what happened and the next command. --explain
+                          entry. Nothing is copied into the root from anywhere.
+                          Safe to run twice. Default output is a few lines:
+                          what happened and the next command. --explain
                           restores the full rationale.
-  list [--json]           Every profile with its root, account, session count
-                          and whether its sessions server is on.
+  list [--json]           Every profile with its root, account and session
+                          count.
   remove <name> [--purge] Retire a profile. It removes the registry entry and
                           prints everything else the profile still has on this
                           machine, with the command that deletes each one.
@@ -117,20 +114,6 @@ DESKTOP
                           distinct colour per account are legible. --explain
                           restores the full rationale and how to confirm the
                           pin actually took.
-
-SESSIONS SERVER
-  mcp on <name>           Register the profile's sessions server: an MCP
-                          server, started by Claude Code inside that profile's
-                          sessions, that answers questions about the
-                          transcripts in that profile's root and nothing else.
-                          new does this already; this is for a profile that
-                          was turned off, or created before claude was on PATH.
-  mcp off <name>          Remove it from the root's state file. Off means gone,
-                          not hidden, and the file is read back to check.
-  mcp status [name]       on, off or stale for each profile, read from the
-                          root's state file. Nothing is written.
-  mcp serve --root PATH   What the registration runs. Claude Code starts it;
-                          it refuses unless CLAUDE_CONFIG_DIR is PATH.
 
 SHELL
   shellrc [--shell bash|zsh|fish] [--explain]
@@ -428,85 +411,6 @@ level. Only the terminal gets shorter or longer. `--quiet` wins over
 output is produced is in [One stream, two renderings](DESIGN.md#one-stream-two-renderings)
 and [the audit schema](AUDIT-SCHEMA.md).
 
-## The sessions server
-
-Every profile's root holds a month or more of transcripts, and the only way
-back into them used to be `claude --resume`, one session at a time. So each
-profile gets a small MCP server over its own `projects/` directory, and a
-session can ask what an earlier one did without leaving Claude Code:
-
-| Tool | What it returns |
-| --- | --- |
-| `list_projects` | one row per working directory, with counts and the retention window |
-| `list_sessions` | identity columns and a 200-character first-prompt preview, filterable by project, date range, branch and a substring, paged |
-| `session_summary` | last reply, tool histogram, files touched, subagents; no conversation. The last two are capped at 100 and 20, with the total beside each |
-| `get_session` | messages by record range, 2,000 characters each, tool results and thinking left out unless asked for, 40,000 characters per call at most |
-| `get_message` | one message whole, up to a hard cap |
-| `search` | case-insensitive substring over prompts and replies, returning pointers |
-
-`new` registers it, in the root's own state file and through `claude mcp add
---scope user` pinned to that root, which is why the root is no longer
-strictly empty after `new` (docs/FACTS.md F23). The registered command is
-`agpin mcp serve --root <root>`: this tool's own launcher, at its installed
-path, which finds the server's Python environment beside itself and refuses
-to start unless `CLAUDE_CONFIG_DIR` resolves to that same root, symlinks and
-all, which is the check the server itself makes. Claude Code hands a
-stdio server its own environment (F24), so the pin and the server's scope are
-the same variable in the same process tree, and a registration copied into
-another root fails visibly in `/mcp` instead of serving the wrong account's
-transcripts. The server itself opens `projects/` and nothing else: never the
-credential, never the account block of the state file, never `history.jsonl`
-or the paste cache. It is stdio only, one per session, with no port.
-
-<!-- BEGIN GENERATED: example mcp-status (tools/gen-doc-examples.sh) -->
-```sh
-agpin mcp status
-```
-
-```
-brygga         on      /Users/alex/.claude-brygga/.claude.json
-havnelab       on      /Users/alex/.claude-havnelab/.claude.json
-```
-<!-- END GENERATED: example mcp-status -->
-
-<!-- BEGIN GENERATED: example mcp-off (tools/gen-doc-examples.sh) -->
-```sh
-agpin mcp off brygga
-```
-
-```
-Sessions server: off (removed from /Users/alex/.claude-brygga/.claude.json)
-```
-<!-- END GENERATED: example mcp-off -->
-
-<!-- BEGIN GENERATED: example mcp-on (tools/gen-doc-examples.sh) -->
-```sh
-agpin mcp on brygga
-```
-
-```
-Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
-```
-<!-- END GENERATED: example mcp-on -->
-
-`mcp status` is read-only, `mcp off` means gone from the state file and read
-back to check, and `mcp on` is the same registration `new` makes. `list`
-shows the same state, `doctor` reports a registration that names another root
-or a command that is gone as D19, and a `sessions` entry that is somebody
-else's is shown as `foreign` and never touched. Off means the next session in
-that root starts no server; a server already running inside an open session
-lives until that session exits.
-
-The server runs on Python and the framework FastMCP. Its environment is built
-once, at install time, beside the installed tree, from a lockfile that ships
-inside the signed release: [Install](INSTALL.md#the-sessions-servers-environment)
-says how, and what it costs on a Mac with no developer tools. A session start
-then takes about one second longer and touches no network. The design, the
-measurements behind it and what it renegotiates in
-[Why nothing is shared](DESIGN.md#why-nothing-is-shared) are in
-[the proposal](proposals/2026-09-15-sessions-mcp.md); the server's own README
-is [`server/README.md`](../server/README.md).
-
 ## explain
 
 `agpin explain` states the scheme in plain language and shows where this
@@ -563,11 +467,7 @@ No symlinks, no shared parent, no copied settings, no seeding a new root from an
 old one, no template. A new root holds nothing from any other profile. That
 means it also has none of the hooks or guardrails your other profiles have, and
 the fix for that is to set them up in the new root directly, never to copy them
-across. The one thing new does put into a root is a registration for the root's
-own sessions server, one line in the root's state file written by the agent's
-own CLI: it names this tool and this root, it is the same shape in every root,
-and it points at nothing outside the root, so two roots still share no file and
-no content. mcp off takes it out again.
+across.
 
 WHAT THIS TOOL STORES
 
@@ -579,10 +479,7 @@ derived from the pinned root every time it is needed, so it cannot drift away
 from the root it names.
 
 The tool never reads, writes or moves a credential, never edits the agent's own
-state files by hand, and never migrates data between roots. The one change it
-makes to a state file, the sessions server registration, goes through the
-agent's own CLI pinned to the root, so the file is only ever written by the
-program that owns it.
+state files, and never migrates data between roots.
 
 ON THIS MACHINE
 

@@ -259,8 +259,8 @@ case_json_lists_both_new_rules() {
     printf '%s\n' "$out" | python3 -m json.tool >/dev/null 2>&1 || {
         fail "doctor --json is not valid JSON" "$out"; return
     }
-    assert_equals "19" "$(audit_json 'len(d["rules"])')" || return
-    assert_equals "D19" "$(audit_json 'd["rules"][-1]["rule"]')" || return
+    assert_equals "18" "$(audit_json 'len(d["rules"])')" || return
+    assert_equals "D18" "$(audit_json 'd["rules"][-1]["rule"]')" || return
     assert_contains "$(audit_json '[r for r in d["rules"] if r["rule"] == "D17"][0]["title"]')" \
         "Dock"
 }

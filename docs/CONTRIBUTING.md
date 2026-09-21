@@ -7,23 +7,11 @@ here is needed to use the tool.
 ## Development
 
 ```sh
-tests/run.sh              # 491 tests, no dependencies
+tests/run.sh              # 452 tests, no dependencies
 shellcheck bin/agent-profile tools/*.sh tests/run.sh tests/cases/*.sh
 tools/lint-bash32.sh      # refuse bash 4 constructs
 tests/run.sh 75-ide       # one case file, by any part of its name
 ```
-
-The sessions server under `server/` has its own tests, in Python, against
-generated fixtures that contain no real transcript:
-
-```sh
-cd server && uv sync --frozen --group dev && uv run --frozen --group dev pytest -q
-```
-
-Its dependencies are pinned in `server/uv.lock`, and `server/requirements.txt`
-is exported from it with hashes for the installer path that has no `uv`; run
-the two commands at the end of [`server/README.md`](../server/README.md) after
-changing either.
 
 CI runs the suite on macOS under both `/bin/bash` (the real 3.2) and Homebrew's
 latest bash, and on Ubuntu. Tests never touch a real config root: every path
@@ -67,7 +55,6 @@ agpin new brygga
 
 ```
 Created profile brygga
-Sessions server: on (registered in /Users/alex/.claude-brygga/.claude.json)
 Next: agpin run brygga   (it will ask you to log in)
 ```
 <!-- END GENERATED: example new -->
