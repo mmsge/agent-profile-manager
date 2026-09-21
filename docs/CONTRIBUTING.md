@@ -225,6 +225,19 @@ if the run never happened.
 The formula still cannot be updated before the release, because until it
 exists there is no sum to pin.
 
+The last check runs after the release exists rather than before it.
+`.github/workflows/install-smoke.yml` runs on `macos-latest`, a clean Mac with
+Homebrew and nothing of this tool on it, installs the release with the
+one-liner exactly as `README.md` prints it, with `cosign` installed so the
+signature is checked and not only the sum, and then runs `version`, `new`,
+`list`, `doctor` and `shellrc` in a throwaway home. Nothing is faked: no
+stand-ins and no `AGENT_PROFILE_PLATFORM`. `release.yml` asks for it by name
+once the release is published, the same way it asks for the formula pull
+request, and a person runs it from the Actions tab to try a named release or,
+once one exists, a Homebrew tap. It does not sign in, so `run` is not
+exercised, and a red run says what a coworker would have seen. The audit
+document each job produced is kept as an artifact.
+
 ## Status
 
 macOS only. Both halves are implemented. A cross-platform port is

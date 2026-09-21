@@ -59,8 +59,8 @@ jobs:
       # And start the run that builds it. A push made with GITHUB_TOKEN starts
       # no workflow run, or every workflow could start itself, so the run has
       # to be asked for by name. workflow_dispatch is the documented exception
-      # to that rule, and homebrew-formula.yml and the homebrew job below ask
-      # for their runs the same way.
+      # to that rule, and homebrew-formula.yml and the homebrew and smoke jobs
+      # below ask for their runs the same way.
       actions: write
 
     steps:
@@ -553,3 +553,32 @@ jobs:
           fi
           gh workflow run homebrew-formula.yml --ref "$DEFAULT_BRANCH" -f tag="$TAG"
           echo "Asked homebrew-formula.yml for a pull request pinning $TAG."
+
+  # The release exists, so a clean Mac can install it. install-smoke.yml does
+  # that on macos-latest, with the one-liner exactly as README.md prints it,
+  # and runs the first commands a coworker would. Asked for by name for the
+  # same reason as the formula: the release above fires no event. A failure
+  # here changes nothing about the release either; it says what a coworker
+  # would have seen, which is what it is for.
+  smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Ask for the install smoke test on a clean Mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "could not read the repository's default branch, so there is no ref" >&2
+            echo "to run the smoke test from. The release is published; run the" >&2
+            echo "Install smoke workflow by hand with version $TAG." >&2
+            exit 1
+          fi
+          gh workflow run install-smoke.yml --ref "$DEFAULT_BRANCH" -f version="$TAG"
+          echo "Asked install-smoke.yml to install $TAG on a clean Mac."

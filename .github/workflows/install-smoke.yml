@@ -1,0 +1,168 @@
+name: Install smoke
+
+# A Mac that has never seen the tool installs it the way README.md says, and
+# runs the first commands a coworker would. Nothing is faked: no stand-ins,
+# no AGENT_PROFILE_PLATFORM, a throwaway home on a clean macos-latest runner,
+# which is the closest thing to a coworker's machine that runs without a
+# person. It does not sign in, so `run` is not exercised; `new`, `list`,
+# `doctor` and `shellrc` are, and `version` is checked against the release.
+#
+# cosign is installed first, so the run checks the release's signature and not
+# only its checksum. That is the check tools/install.sh makes on a Mac that
+# has cosign, and it is the one that fails on a release signed under a branch
+# rather than a tag: every release before v0.11.0 was, so this cannot pass on
+# those, and that is the point of it.
+#
+# Two ways in. release.yml asks for it by name once a release is published,
+# because a release created with GITHUB_TOKEN fires no release: published
+# event, the same reason it asks for the formula pull request by name. A
+# person runs it from the Actions tab to try a named release, or to try a
+# Homebrew tap once one exists.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          The release to install, with the leading v, for example v0.11.0.
+          Empty installs the newest release, which is what the one-liner does.
+        required: false
+        type: string
+      tap:
+        description: >-
+          A Homebrew tap to install from as well, for example mmsge/agpin.
+          Empty skips that job. The formula is named after the tap.
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  one-liner:
+    name: the one-liner on a clean Mac
+    runs-on: macos-latest
+    steps:
+      - name: Install cosign, so the signature is checked and not only the sum
+        run: brew install cosign
+
+      - name: Install with the one-liner, then run the first commands
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: |
+          set -eu
+          # A home of its own. The runner's real home is never read or written
+          # by the tool, so what this run finds is what a fresh Mac has.
+          HOME="$RUNNER_TEMP/home"
+          export HOME
+          mkdir -p "$HOME"
+
+          echo "::group::install"
+          # The one-liner exactly as README.md prints it, with --version added
+          # when a release was named, which is what the release run does.
+          if [ -n "$VERSION" ]; then
+            curl -fsSL https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh | bash -s -- --version "$VERSION"
+          else
+            curl -fsSL https://raw.githubusercontent.com/mmsge/agent-profile-manager/hovud/tools/install.sh | bash
+          fi
+          echo "::endgroup::"
+
+          PATH="$HOME/.local/bin:$PATH"
+          export PATH
+
+          echo "::group::agpin version"
+          agpin version
+          if [ -n "$VERSION" ] && ! agpin version | grep -F -- "${VERSION#v}" >/dev/null; then
+            echo "the installed version is not $VERSION" >&2
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "::group::agpin new brygga"
+          agpin new brygga
+          echo "::endgroup::"
+
+          echo "::group::agpin list"
+          agpin list
+          echo "::endgroup::"
+
+          echo "::group::agpin doctor"
+          # 0 is a clean machine and 2 is findings, and a Mac that has never
+          # signed in has at least D05. Anything else is the tool failing.
+          status=0
+          agpin doctor || status=$?
+          case "$status" in
+            0|2) echo "doctor exited $status" ;;
+            *) echo "doctor exited $status; only 0 and 2 are expected on a clean Mac" >&2; exit 1 ;;
+          esac
+          agpin doctor --json > "$RUNNER_TEMP/doctor.json" || true
+          echo "::endgroup::"
+
+          echo "::group::agpin shellrc --shell zsh"
+          agpin shellrc --shell zsh
+          echo "::endgroup::"
+
+      - name: Keep the audit document, so a red run can be read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doctor-one-liner
+          path: ${{ runner.temp }}/doctor.json
+          if-no-files-found: ignore
+
+  brew:
+    name: brew install from the tap
+    if: inputs.tap != ''
+    runs-on: macos-latest
+    steps:
+      - name: brew install, brew test, then the first commands
+        env:
+          TAP: ${{ inputs.tap }}
+        run: |
+          set -eu
+          name="${TAP##*/}"
+
+          echo "::group::brew install $name"
+          brew tap "$TAP"
+          brew install "$name"
+          brew test "$name"
+          echo "::endgroup::"
+
+          HOME="$RUNNER_TEMP/home"
+          export HOME
+          mkdir -p "$HOME"
+
+          echo "::group::$name version"
+          "$name" version
+          echo "::endgroup::"
+
+          echo "::group::$name new brygga"
+          "$name" new brygga
+          echo "::endgroup::"
+
+          echo "::group::$name list"
+          "$name" list
+          echo "::endgroup::"
+
+          echo "::group::$name doctor"
+          status=0
+          "$name" doctor || status=$?
+          case "$status" in
+            0|2) echo "doctor exited $status" ;;
+            *) echo "doctor exited $status; only 0 and 2 are expected on a clean Mac" >&2; exit 1 ;;
+          esac
+          "$name" doctor --json > "$RUNNER_TEMP/doctor-brew.json" || true
+          echo "::endgroup::"
+
+          echo "::group::$name shellrc --shell zsh"
+          "$name" shellrc --shell zsh
+          echo "::endgroup::"
+
+      - name: Keep the audit document, so a red run can be read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doctor-brew
+          path: ${{ runner.temp }}/doctor-brew.json
+          if-no-files-found: ignore
