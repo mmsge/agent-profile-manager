@@ -1,7 +1,8 @@
 # Install
 
 The one-liner, what it verifies and what it trusts, Homebrew, the options,
-staying current, the development install and the Windows status. Every
+staying current, the development install, and where Windows, Linux and WSL
+stand. Every
 output shown is generated from a real run of the installer against a release
 laid out the way GitHub lays one out.
 
@@ -418,3 +419,32 @@ app's embedded Claude Code reads the config root from the app's process
 environment, which is F01 asked again for Windows. Until somebody answers it,
 no Windows launcher should ship, because a launcher that pins nothing looks
 exactly like one that works.
+
+## Linux and WSL
+
+Not supported yet, and closer than Windows. What is true today, read from the
+tool rather than promised:
+
+- **The shell half runs.** `new`, `list`, `shell`, `env`, `path`, `which`,
+  `run`, `guard`, `completion`, `shellrc`, `pick`, `explain` and `remove` use
+  nothing that is macOS only, and the whole suite runs on a Linux leg of CI on
+  every change, beside the two macOS legs.
+- **The credential is a file.** Off macOS, Claude Code keeps
+  `.credentials.json` inside the config root, F09 in
+  [`docs/FACTS.md`](FACTS.md#f09-credentials-are-keyed-to-the-config-root-path),
+  so it follows the root exactly as the Keychain entry does on a Mac.
+- **`doctor` runs the file rules and says what it could not check.** Without
+  a Keychain, D11 and D12 do not run and D05 asks only whether an account is
+  on record. Without `osadecompile`, D13 and D14 do not run. D17 and D18 do
+  not run, because the Dock, the login items and the app data directory are
+  macOS. D16 is limited, because where a JetBrains IDE keeps its plugins is
+  known for macOS only. Each of those is reported as `not_run` or `limited`
+  in the document, never as a pass.
+- **`app`, `desktop` and `ide` are macOS.** They pin through `open --env` and
+  AppleScript applets, and `verify` cannot check F13 or the facts that need
+  the desktop app. None of the three refuses cleanly off macOS yet; that is
+  part of [issue #88](https://github.com/mmsge/agent-profile-manager/issues/88).
+- **Nobody has used it on a real Linux machine.** The Linux leg of CI runs
+  with stand-ins for the Keychain and the desktop, so nothing here is
+  `VERIFIED` in the sense `docs/FACTS.md` uses, and WSL has not been tried at
+  all.

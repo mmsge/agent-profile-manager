@@ -67,7 +67,7 @@ Check each of these. The command beside it is how.
 
 | Need | Check |
 | --- | --- |
-| A Mac. The tool is macOS only; see [Windows](INSTALL.md#windows). | `uname` prints `Darwin` |
+| A Mac. macOS is the only supported platform; [Platforms](../README.md#platforms) says where Windows, Linux and WSL stand. | `uname` prints `Darwin` |
 | Claude Code installed, with `claude` on `PATH` | `command -v claude` prints a path |
 | Claude Desktop, if the desktop app is to be pinned | `ls /Applications/Claude.app` |
 | `python3`, which every command that reads JSON uses | `python3 --version` prints one; `xcode-select --install` if it does not |
