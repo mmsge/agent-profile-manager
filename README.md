@@ -224,13 +224,8 @@ time; see [Just asking](docs/USE.md#just-asking).
 | Guide | Who it is for |
 | --- | --- |
 | [Setting up a Mac](docs/SETUP.md) | A person setting up their own machine, or a Claude Code session doing it for them. Every step with its command, the output to expect, and how to check it worked. Both the clean machine and the one that has run unpinned for months. |
-<<<<<<< HEAD
 | [Daily use](docs/USE.md) | Everyone, after setup. Every command, the guard, the picker, pinning a shell, completions and output levels. |
-| [Install](docs/INSTALL.md) | Anyone deciding what to trust. The one-liner and what it verifies, Homebrew, the options, staying current, the development install and the Windows status. |
-=======
-| [Daily use](docs/USE.md) | Everyone, after setup. Every command, the guard, the picker, pinning a shell, completions, output levels and the sessions server. |
 | [Install](docs/INSTALL.md) | Anyone deciding what to trust. The one-liner and what it verifies, Homebrew, the options, staying current, the development install, and where Windows, Linux and WSL stand. |
->>>>>>> origin/hovud
 | [The desktop and the IDEs](docs/DESKTOP.md) | Anyone who opens Claude anywhere but a terminal. Which launch paths carry a pin, which leak, and which rule catches each. |
 | [The audit](docs/AUDIT.md) | Anyone who has to prove the separation holds. The rules, what each one reads, the JSON document, `verify`, the leak test and the exit codes. |
 | [What this does not protect against](docs/LIMITS.md) | A security-minded reader. Every gap that is still open, one honest paragraph each, and three things that are not what they look like. |
