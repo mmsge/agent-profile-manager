@@ -14,6 +14,7 @@ agpin run brygga          # the same thing, spelled out
 agpin shell brygga        # a subshell pinned to that profile
 eval "$(agpin env brygga)"  # pin the shell you are already in
 agpin which               # what am I pinned to?
+agpin teams brygga on     # agent teams for that profile's terminal and IDE sessions
 agpin list                # every profile, its account and sessions
 agpin doctor              # is the separation actually holding?
 agpin doctor --json       # the same audit, as one JSON document
@@ -78,6 +79,14 @@ PINNED EXECUTION
   which [--label] [--explain]
                           Which profile this shell is pinned to, if any.
                           --explain adds why an unpinned shell matters.
+  teams <name> [on|off] [--explain]
+                          Turn the agent's experimental agent teams on or off
+                          for a profile, or say which it is. Kept in the
+                          registry entry, outside the root, and exported by
+                          run, shell, env, code and idea. The desktop app has
+                          no agent teams, so desktop and app are unchanged.
+                          --explain adds what it reaches and what to know
+                          before turning it on.
 
 IDEs
   code <name> [path] [--app NAME] [--new-instance]
@@ -286,6 +295,67 @@ without ever touching the shell's own environment, so the prompt keeps
 showing whatever the shell was already pinned to, or nothing. Run `agpin
 which` for the true state of the invocation you are about to make, not the
 prompt.
+
+## Agent teams
+
+Claude Code's [agent teams](https://code.claude.com/docs/en/agent-teams), one
+session leading several teammate sessions, are experimental and off by
+default. They are turned on by one variable in the process environment, which
+is the thing this tool already controls per profile, so the switch is per
+profile and lives in the registry entry, outside the root:
+
+<!-- BEGIN GENERATED: example teams-on (tools/gen-doc-examples.sh) -->
+```sh
+agpin teams brygga on
+```
+
+```
+Agent teams on for brygga.
+From now on agpin run, shell, env, code and idea export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
+Not the desktop app: it has no agent teams, so desktop and app are unchanged.
+Next: agpin run brygga
+```
+<!-- END GENERATED: example teams-on -->
+
+From then on `run`, `shell`, `code` and `idea` carry the variable beside the
+root, and `env` prints it as a second export:
+
+<!-- BEGIN GENERATED: example teams-env (tools/gen-doc-examples.sh) -->
+```sh
+agpin env brygga
+```
+
+```
+export CLAUDE_CONFIG_DIR='/Users/alex/.claude-brygga'
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+<!-- END GENERATED: example teams-env -->
+
+`agpin teams brygga` with no state says which it is, `off` turns it back off,
+and `--explain` on any of the three prints what the switch reaches and what
+to know before throwing it. A shell pinned with `env` before the change keeps
+the exports it was given until it is pinned again, and `which` reports the
+variable from the environment, never from the registry, for the same reason
+it derives the label from the root.
+
+**The desktop app is not covered.** The Claude Code documentation is plain
+that agent teams "are available in the CLI, not in Desktop", so `desktop` and
+`app` are unchanged by the switch: a launcher carrying a variable the app
+ignores would claim more than it does. Three more things, all from the same
+documentation and quoted in [F26](FACTS.md#f26-agent-teams-are-one-variable-and-the-desktop-app-has-none):
+`claude -p` ignores the variable; a root whose own `settings.json` sets it
+to `0` stays off, because a settings file wins over an export for this
+variable and this tool never reads a root's settings to say so; and enabling
+it changes ordinary delegation, so a subagent the agent names becomes a
+teammate and teams can form without being asked for. Whether the second
+`--env` that `code` and `idea` add reaches the editor the way the first does
+is the one part not yet checked on a Mac, and F26 says how to check it.
+
+Nothing is written inside the root for any of this. Setting the variable in
+the root's `settings.json` `env` block would reach the same sessions, but it
+means rewriting a file that carries hooks and permission rules this tool does
+not understand, which is why that stays on the not-built list in
+[Design notes](DESIGN.md#not-built-and-deliberately).
 
 ## Refusing to run unpinned
 

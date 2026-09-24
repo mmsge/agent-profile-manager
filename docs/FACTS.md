@@ -422,6 +422,78 @@ shows one identity must show the other beside it. `explain` states this, and it
 is why `new` records `app_data` and `root` as two separate registry keys rather
 than deriving one from the other.
 
+### F26 Agent teams are one variable, and the desktop app has none
+
+**Status:** `DOCUMENTED` 2026-09-24 for the switch, its reach and the desktop
+gap, quoted verbatim. `UNVERIFIED` for a second `--env` on one `open` line.
+
+This is the fact `teams` rests on. Claude Code's agent teams, one session
+leading several teammate sessions, are off unless one variable says
+otherwise, and the documentation names both places it can be set:
+
+"Agent teams are experimental and disabled by default. Enable them by setting
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your settings.json or environment.
+Without that variable, no team is set up at session start, no team directories
+are written, and Claude does not spawn or propose teammates."
+([agent teams](https://code.claude.com/docs/en/agent-teams))
+
+The process environment is the one this tool already controls per profile,
+which is why `teams` puts the variable there rather than into the root's
+`settings.json`. Four consequences, each from the same page:
+
+- **The desktop app is out.** From the desktop page: "Agent teams:
+  coordinated teams, where Claude as the team lead assigns tasks to teammates
+  from a shared task list, are available in the CLI, not in Desktop."
+  ([desktop](https://code.claude.com/docs/en/desktop)). So `desktop` and
+  `app` do not carry the variable, on purpose: an applet line carrying a
+  variable the app ignores would be a launcher claiming more than it does,
+  and D13 audits that line.
+- **Only interactive sessions.** "Spawning teammates also requires an
+  interactive session. In non-interactive mode with the `-p` flag, including
+  Agent SDK sessions, Claude doesn't spawn teammates." A pinned `claude -p`
+  carries the variable and ignores it.
+- **A settings file wins over the export.** Under "Claude spawns teammates
+  instead of subagents": "Setting the variable to `0` in your user
+  `settings.json` overrides a shell export." So a root whose `settings.json`
+  sets it to `0` stays off however the profile is switched, and this tool
+  does not read the root to say so: settings-content validation is on the
+  not-built list in `docs/DESIGN.md`.
+- **It changes ordinary delegation.** "Enabling agent teams also changes
+  ordinary delegation. Claude may name a subagent on its own, and while agent
+  teams are enabled, a subagent that Claude names launches as a teammate, so
+  teams can form even when you didn't ask for one." This is why `teams
+  --explain` says so before the switch is thrown.
+
+Where a team's files land is the same page: "Team config:
+`~/.claude/teams/{team-name}/config.json`" and "Task list:
+`~/.claude/tasks/{team-name}/`". The `tasks/` directory is listed on the
+`.claude` directory page, which F08 quotes as moving under `CLAUDE_CONFIG_DIR`
+whole, so a team's task list stays inside its profile's root. `teams/` is not
+on that page; it is removed when the session ends, and nothing here depends
+on where it lived.
+
+**The one unverified part.** `code` and `idea` carry the switch as a second
+`--env` on the same `open` line, before `--args`. F13 quotes `open --help`
+on `--env` as a single flag and says nothing about repeating it. Nothing has
+checked on a Mac that the second `--env` reaches the process as the first
+does. If it does not, the IDE launches with the root pinned and agent teams
+off, which is safe, and the switch is silently short of what `teams`
+claims for `code` and `idea`.
+
+**How to re-check.** On a Mac, with agent teams on for a profile, launch an
+IDE with `agpin code <profile>` and, in a Claude Code session inside it, ask
+for a teammate. A teammate appearing means the second `--env` arrived. Or,
+without an IDE, launch any application that shows its environment:
+
+```sh
+open -n -a Terminal --env A=1 --env B=2
+env | grep -E '^(A|B)='
+```
+
+Both lines printing means `--env` repeats. Change the status above to
+`VERIFIED` with the date and macOS version, or, if only `A` prints, open an
+issue: `code` and `idea` then need a different way to carry the switch.
+
 ---
 
 ## IDE extensions

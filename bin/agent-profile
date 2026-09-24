@@ -167,6 +167,11 @@ KNOWN_AGENTS="claude"
 #                 a path to a binary inside it (docs/FACTS.md F05)
 #   app_flag      the flag that selects the app's own data directory
 #   applet_prefix name prefix for the AppleScript applet that launches it
+#   teams_envvar  the variable that turns the agent's experimental agent
+#                 teams on, exported beside envvar by the terminal and IDE
+#                 launchers when a profile has asked for it (docs/FACTS.md
+#                 F26). The desktop app has no agent teams, so the applet
+#                 never carries it.
 agent_def() {
     _ad_agent="$1"
     _ad_field="$2"
@@ -189,6 +194,7 @@ agent_def() {
                 app_bundle)   printf '%s\n' "$AGENT_PROFILE_APP_BUNDLE" ;;
                 app_flag)     printf '%s\n' "--user-data-dir" ;;
                 applet_prefix) printf '%s\n' "Claude-" ;;
+                teams_envvar) printf '%s\n' "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" ;;
                 *) die "internal: unknown agent field '$_ad_field'" ;;
             esac
             ;;
@@ -988,6 +994,35 @@ profile_root() {
 }
 
 # ---------------------------------------------------------------------------
+# Per-profile options
+#
+# A profile can ask for more than its root. Each option is one line in the
+# registry entry, outside every root, and reaches the agent the same way the
+# root does: as a variable in the process environment of whatever the
+# launchers start. Nothing is written inside a root for it, which keeps the
+# rule the whole tool rests on, and keeps settings.json the reader's own.
+#
+# Only one option exists today, agent teams. It is off unless the entry says
+# `agent_teams=on`, so an entry written by an older version reads as off.
+# ---------------------------------------------------------------------------
+
+# profile_teams <name>: succeeds when the profile has agent teams on.
+profile_teams() {
+    [ "$(reg_get "$1" agent_teams)" = "on" ]
+}
+
+# profile_extra_env <name>: the VAR=VALUE lines a launcher exports beside the
+# root, one per line, empty when the profile has asked for nothing. Every
+# launcher that puts the root into an environment reads this, so an option
+# cannot reach `run` and miss `env`, or reach the terminal and miss the IDE.
+profile_extra_env() {
+    _pxe_agent=$(profile_agent "$1")
+    if profile_teams "$1"; then
+        printf '%s=1\n' "$(agent_def "$_pxe_agent" teams_envvar)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Label derivation
 #
 # The prompt label is resolved from the pinned root every time it is needed and
@@ -1051,17 +1086,27 @@ label_for_root() {
 # Pinned execution
 # ---------------------------------------------------------------------------
 
-# run_pinned <agent> <root> <command> [args...]
+# run_pinned <profile> <command> [args...]
 #
 # Everything that execs goes through here, so AGENT_PROFILE_DRY_RUN=1 makes
 # run, shell and desktop assertable in tests without launching anything.
+#
+# It takes the profile rather than its root because the root is no longer the
+# only thing a profile puts into the environment: profile_extra_env adds the
+# per-profile options, and the dry-run line shows every export in the order
+# they are made, so a test can pin that the option travels with the root.
 run_pinned() {
-    _rp_agent="$1"; shift
-    _rp_root="$1"; shift
+    _rp_name="$1"; shift
+    _rp_agent=$(profile_agent "$_rp_name")
+    _rp_root=$(profile_root "$_rp_name")
     _rp_var=$(agent_def "$_rp_agent" envvar)
+    _rp_extra=$(profile_extra_env "$_rp_name")
 
     if [ -n "$AGENT_PROFILE_DRY_RUN" ]; then
         printf '%s=%s' "$_rp_var" "$_rp_root"
+        for _rp_pair in $_rp_extra; do
+            printf ' %s' "$_rp_pair"
+        done
         for _rp_arg in "$@"; do
             printf ' %s' "$_rp_arg"
         done
@@ -1070,6 +1115,9 @@ run_pinned() {
     fi
 
     export "$_rp_var=$_rp_root"
+    for _rp_pair in $_rp_extra; do
+        export "${_rp_pair%%=*}=${_rp_pair#*=}"
+    done
     exec "$@"
 }
 
@@ -1146,24 +1194,42 @@ ide_running() {
 # The user data directory is passed after --args, because it is the
 # application's argument rather than open's, the same ordering --env depends on
 # (docs/FACTS.md F13).
+# open_ide <profile> <application> <user-data-dir-or-empty> [path]
+#
+# The IDE counterpart of open_pinned. The root travels in --env, as it does
+# for the desktop app, and so does every per-profile option: one --env per
+# variable, all of them before --args, because what follows --args belongs to
+# the editor. That a second --env reaches the process the way the first does
+# is docs/FACTS.md F26, and the one part of it not yet checked on a Mac.
 open_ide() {
-    _oi_agent="$1"; shift
-    _oi_root="$1"; shift
+    _oi_name="$1"; shift
     _oi_app="$1"; shift
     _oi_data="$1"; shift
+    _oi_agent=$(profile_agent "$_oi_name")
+    _oi_root=$(profile_root "$_oi_name")
     _oi_var=$(agent_def "$_oi_agent" envvar)
+    _oi_extra=$(profile_extra_env "$_oi_name")
 
+    # What follows --args, rebuilt in place so one exec line below covers
+    # every combination of a user data directory and a path.
     if [ -n "$_oi_data" ] && [ $# -gt 0 ]; then
-        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" \
-            --args --user-data-dir "$_oi_data" "$@"
+        set -- --args --user-data-dir "$_oi_data" "$@"
     elif [ -n "$_oi_data" ]; then
-        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" \
-            --args --user-data-dir "$_oi_data"
+        set -- --args --user-data-dir "$_oi_data"
     elif [ $# -gt 0 ]; then
-        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" --args "$@"
-    else
-        open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root"
+        set -- --args "$@"
     fi
+
+    # One line per count of option pairs, because bash 3.2 has no array to
+    # splice a variable number of --env flags into an exec with, and the root
+    # may hold a space, so it cannot go through word splitting. Only one
+    # option exists, so only the zero and one forms are reachable; a second
+    # option needs a third line here, and the suite would say so.
+    case "$(printf '%s\n' "$_oi_extra" | grep -c .)" in
+        0) open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" "$@" ;;
+        1) open_exec open -n -a "$_oi_app" --env "$_oi_var=$_oi_root" --env "$_oi_extra" "$@" ;;
+        *) die "internal: open_ide carries one per-profile option, and this profile has more" ;;
+    esac
 }
 
 # open_exec <open> [args...]: print the command under a dry run, exec it
@@ -2008,21 +2074,18 @@ cmd_run() {
     _run_name="$1"; shift
     require_profile "$_run_name"
     _run_agent=$(profile_agent "$_run_name")
-    _run_root=$(profile_root "$_run_name")
     _run_bin=$(agent_def "$_run_agent" binary)
     [ -n "$AGENT_PROFILE_DRY_RUN" ] || command -v "$_run_bin" >/dev/null 2>&1 || \
         die "the '$_run_bin' command is not on your PATH"
-    run_pinned "$_run_agent" "$_run_root" "$_run_bin" "$@"
+    run_pinned "$_run_name" "$_run_bin" "$@"
 }
 
 cmd_shell() {
     [ $# -ge 1 ] || die "usage: $SELF shell <profile>"
     require_profile "$1"
-    _sh_agent=$(profile_agent "$1")
-    _sh_root=$(profile_root "$1")
     _sh_shell="${SHELL:-/bin/bash}"
     printf 'Pinned to %s. Type exit to leave.\n' "$1" >&2
-    run_pinned "$_sh_agent" "$_sh_root" "$_sh_shell"
+    run_pinned "$1" "$_sh_shell"
 }
 
 cmd_env() {
@@ -2031,6 +2094,120 @@ cmd_env() {
     _env_agent=$(profile_agent "$1")
     _env_root=$(profile_root "$1")
     printf 'export %s=%s\n' "$(agent_def "$_env_agent" envvar)" "$(shell_quote "$_env_root")"
+    # The options ride along as further exports, so a shell pinned this way
+    # runs the agent exactly as `run` would. They are plain VAR=1 pairs the
+    # tool built itself, so word splitting is safe here.
+    for _env_pair in $(profile_extra_env "$1"); do
+        printf 'export %s\n' "$_env_pair"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# teams
+#
+# Claude Code's agent teams are off by default and turned on by one variable,
+# CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1, read from the process environment or
+# from the env block of settings.json (docs/FACTS.md F26). This command keeps
+# the choice per profile, in the registry entry, and the launchers export it:
+# run, shell, env, code and idea. Not desktop and not app: the desktop app has
+# no agent teams, and an applet line that carried a variable the app ignores
+# would be a launcher claiming more than it does.
+#
+# Stored outside the root on purpose. Writing the env block into the root's
+# settings.json would reach the same sessions, but it means rewriting a file
+# that carries hooks and permission rules this tool does not understand, which
+# is why that is on the not-built list (docs/DESIGN.md).
+# ---------------------------------------------------------------------------
+
+cmd_teams() {
+    _tm_name=""
+    _tm_state=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --explain) AGENT_PROFILE_EXPLAIN=1 ;;
+            on|off)
+                [ -z "$_tm_state" ] || die "unexpected argument '$1'
+Try: $SELF teams <profile> [on|off] [--explain]"
+                _tm_state="$1"
+                ;;
+            -*) die "unknown option '$1'
+Try: $SELF teams <profile> [on|off] [--explain]" ;;
+            *)
+                [ -z "$_tm_name" ] || die "teams takes on or off, not '$1'
+Try: $SELF teams <profile> [on|off] [--explain]"
+                _tm_name="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$_tm_name" ] || die "usage: $SELF teams <profile> [on|off] [--explain]"
+    require_profile "$_tm_name"
+    _tm_agent=$(profile_agent "$_tm_name")
+    _tm_var=$(agent_def "$_tm_agent" teams_envvar)
+
+    _tm_have="off"
+    profile_teams "$_tm_name" && _tm_have="on"
+
+    if [ -z "$_tm_state" ]; then
+        printf 'Agent teams are %s for %s.\n' "$_tm_have" "$_tm_name"
+        if [ "$_tm_have" = "on" ]; then
+            printf 'Exported as %s=1 by: %s run, shell, env, code and idea.\n' "$_tm_var" "$SELF"
+        else
+            printf 'Turn on with: %s teams %s on\n' "$SELF" "$_tm_name"
+        fi
+        teams_explain "$_tm_name"
+        return "$EX_OK"
+    fi
+
+    if [ "$_tm_state" = "$_tm_have" ]; then
+        # Already so. Say it, because "applied" and "never applied" must not
+        # look the same from here, the way app says so on a second run.
+        printf 'Agent teams are already %s for %s. Nothing to do.\n' "$_tm_have" "$_tm_name"
+        teams_explain "$_tm_name"
+        return "$EX_OK"
+    fi
+
+    reg_set "$_tm_name" agent_teams "$_tm_state"
+    printf 'Agent teams %s for %s.\n' "$_tm_state" "$_tm_name"
+    if [ "$_tm_state" = "on" ]; then
+        printf 'From now on %s run, shell, env, code and idea export %s=1.\n' "$SELF" "$_tm_var"
+        printf 'Not the desktop app: it has no agent teams, so desktop and app are unchanged.\n'
+        printf 'Next: %s run %s\n' "$SELF" "$_tm_name"
+    else
+        printf 'A shell pinned with %s env before this keeps its exports until it is pinned again.\n' "$SELF"
+    fi
+    teams_explain "$_tm_name"
+    return "$EX_OK"
+}
+
+# teams_explain <name>: the long form, under --explain only. What the switch
+# does and does not reach, and the three things worth knowing before turning
+# it on, all from the documentation F26 quotes.
+teams_explain() {
+    [ -n "$AGENT_PROFILE_EXPLAIN" ] || return 0
+    _te_agent=$(profile_agent "$1")
+    _te_var=$(agent_def "$_te_agent" teams_envvar)
+    printf '\n'
+    printf 'The switch is one line in this profile'"'"'s registry entry, outside its root,\n'
+    printf 'and nothing is written inside the root for it. The launchers export it:\n'
+    printf '  %s run %s      %s=1 in the process environment\n' "$SELF" "$1" "$_te_var"
+    printf '  %s shell %s    the same, for the subshell\n' "$SELF" "$1"
+    printf '  %s env %s      a second export line, for eval\n' "$SELF" "$1"
+    printf '  %s code %s     a second --env before --args, and idea likewise\n' "$SELF" "$1"
+    printf '\n'
+    printf 'Where it cannot reach:\n'
+    printf '  the desktop app     it has no agent teams at all; desktop and app are unchanged\n'
+    printf '  claude -p           non-interactive runs ignore it\n'
+    printf '  a root whose settings.json sets %s to 0\n' "$_te_var"
+    printf '                      a settings file overrides a shell export for this variable\n'
+    printf '\n'
+    printf 'Three things to know before turning it on. It is experimental, and the\n'
+    printf 'documentation lists what does not work yet. It changes ordinary delegation:\n'
+    printf 'a subagent the agent names becomes a teammate, so teams form unasked. And\n'
+    printf 'each teammate is a full session with its own context, so it costs tokens in\n'
+    printf 'proportion. The evidence for all of this is docs/FACTS.md F26.\n'
 }
 
 cmd_path() {
@@ -2084,6 +2261,15 @@ cmd_which() {
             printf '  profile   %s\n' "$_wh_named"
         else
             printf '  profile   (not registered; no registry entry claims this root)\n'
+        fi
+        # Read from the environment, like the root, never from the registry:
+        # a shell pinned before `teams on` was run has no such export, and
+        # saying it had would be the prompt lying by another route.
+        _wh_teams_var=$(agent_def "$_wh_agent" teams_envvar)
+        _wh_teams=""
+        eval "_wh_teams=\${$_wh_teams_var:-}"
+        if [ "$_wh_teams" = "1" ]; then
+            printf '  %s=1   (agent teams on)\n' "$_wh_teams_var"
         fi
         return 0
     done
@@ -2586,7 +2772,6 @@ Try: $SELF $_ci_cmd <profile> [path] [--app NAME] [--new-instance]"
     [ -n "$_ci_name" ] || die "usage: $SELF $_ci_cmd <profile> [path] [--app NAME] [--new-instance]"
     require_profile "$_ci_name"
     _ci_agent=$(profile_agent "$_ci_name")
-    _ci_root=$(profile_root "$_ci_name")
 
     # The default application is the first IDE this subcommand covers, read
     # from the seam rather than written here, so a family's default and the
@@ -2673,9 +2858,9 @@ under this profile, so the pin applies whatever else is open."
     # a path check while open would have found it. A name that resolves to
     # nothing fails in open, with open's own message.
     if [ -n "$_ci_have_path" ]; then
-        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_data" "$_ci_path"
+        open_ide "$_ci_name" "$_ci_app" "$_ci_data" "$_ci_path"
     else
-        open_ide "$_ci_agent" "$_ci_root" "$_ci_app" "$_ci_data"
+        open_ide "$_ci_name" "$_ci_app" "$_ci_data"
     fi
 }
 
@@ -4657,7 +4842,7 @@ _@SELF@_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="new list ls remove run shell env path which guard shellrc desktop code idea app doctor verify explain completion version help"
+    cmds="new list ls remove run shell env path which teams guard shellrc desktop code idea app doctor verify explain completion version help"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds $(__@SELF@_profiles)" -- "$cur") )
@@ -4677,6 +4862,9 @@ _@SELF@_complete() {
             ;;
         run|shell|env|path|desktop)
             COMPREPLY=( $(compgen -W "$(__@SELF@_profiles)" -- "$cur") )
+            ;;
+        teams)
+            COMPREPLY=( $(compgen -W "$(__@SELF@_profiles) on off --explain" -- "$cur") )
             ;;
         code|idea)
             case "$prev" in
@@ -4746,6 +4934,7 @@ _@SELF@() {
         'env:print exports, for eval'
         'path:print the config root of a profile'
         'which:which profile this shell is pinned to'
+        'teams:turn agent teams on or off for a profile'
         'guard:print the unpinned-run guard'
         'shellrc:print the rc-file block for one shell'
         'desktop:launch the desktop app pinned to a profile'
@@ -4782,6 +4971,12 @@ _@SELF@() {
         run|shell|env|path|desktop)
             profiles=(${(f)"$(__@SELF@_profiles)"})
             _describe -t profiles 'profile' profiles
+            ;;
+        teams)
+            profiles=(${(f)"$(__@SELF@_profiles)"})
+            _describe -t profiles 'profile' profiles
+            _values 'state' on off
+            _arguments '--explain[what it reaches and what to know first]'
             ;;
         code|idea)
             profiles=(${(f)"$(__@SELF@_profiles)"})
@@ -4853,6 +5048,7 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a shell -d 'Open a subshell pinne
 complete -c @SELF@ -n '__fish_use_subcommand' -a env -d 'Print exports, for eval'
 complete -c @SELF@ -n '__fish_use_subcommand' -a path -d 'Print the config root of a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a which -d 'Which profile this shell is pinned to'
+complete -c @SELF@ -n '__fish_use_subcommand' -a teams -d 'Turn agent teams on or off for a profile'
 complete -c @SELF@ -n '__fish_use_subcommand' -a guard -d 'Print the unpinned-run guard'
 complete -c @SELF@ -n '__fish_use_subcommand' -a shellrc -d 'Print the rc-file block for one shell'
 complete -c @SELF@ -n '__fish_use_subcommand' -a desktop -d 'Launch the desktop app pinned to a profile'
@@ -4867,7 +5063,9 @@ complete -c @SELF@ -n '__fish_use_subcommand' -a version -d 'Print the version'
 complete -c @SELF@ -n '__fish_use_subcommand' -a help -d 'Show help'
 complete -c @SELF@ -n '__fish_use_subcommand' -a '(__@SELF@_profiles)' -d Profile
 
-complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app code idea' -a '(__@SELF@_profiles)' -d Profile
+complete -c @SELF@ -n '__fish_seen_subcommand_from run shell env path desktop remove app code idea teams' -a '(__@SELF@_profiles)' -d Profile
+complete -c @SELF@ -n '__fish_seen_subcommand_from teams' -a 'on off' -d State
+complete -c @SELF@ -n '__fish_seen_subcommand_from teams' -l explain -d 'What it reaches and what to know first'
 
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l agent -d Agent -a claude
 complete -c @SELF@ -n '__fish_seen_subcommand_from new' -l root -d 'Config root path'
@@ -5098,6 +5296,14 @@ PINNED EXECUTION
   which [--label] [--explain]
                           Which profile this shell is pinned to, if any.
                           --explain adds why an unpinned shell matters.
+  teams <name> [on|off] [--explain]
+                          Turn the agent's experimental agent teams on or off
+                          for a profile, or say which it is. Kept in the
+                          registry entry, outside the root, and exported by
+                          run, shell, env, code and idea. The desktop app has
+                          no agent teams, so desktop and app are unchanged.
+                          --explain adds what it reaches and what to know
+                          before turning it on.
 
 IDEs
   code <name> [path] [--app NAME] [--new-instance]
@@ -5234,6 +5440,7 @@ main() {
         env)      cmd_env "$@" ;;
         path)     cmd_path "$@" ;;
         which)    cmd_which "$@" ;;
+        teams)    cmd_teams "$@" ;;
         guard)    cmd_guard "$@" ;;
         shellrc)  cmd_shellrc "$@" ;;
         completion) cmd_completion "$@" ;;

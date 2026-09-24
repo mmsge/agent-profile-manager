@@ -119,6 +119,15 @@ it that says which root it is using. For the desktop, the launcher is the
 guarantee, `doctor`'s D13 is the check, and
 [the leak test](AUDIT.md#the-leak-test) settles any argument.
 
+The applet carries the root and the app data directory, and nothing else.
+In particular it never carries the agent teams switch that `agpin teams`
+turns on for a profile's terminal and IDE sessions, because the desktop app
+has no agent teams: the Claude Code documentation says they "are available in
+the CLI, not in Desktop", and [F26](FACTS.md#f26-agent-teams-are-one-variable-and-the-desktop-app-has-none)
+quotes it. A launcher carrying a variable the app ignores would claim more
+than it does, and D13 reads that line. [Agent teams](USE.md#agent-teams) has
+the switch.
+
 Put the applet, not the app, in the Dock and in the login items. `doctor`'s
 D17 reports the app's own icon sitting in the Dock and D18 reports the default
 app data directory once such a launch has written to it, but neither can see
