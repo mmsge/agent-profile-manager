@@ -539,6 +539,37 @@ ex_env() {
     agpin env brygga
 }
 
+scenario teams-on
+ex_teams_on() {
+    two_profiles
+    SHOWN='agpin teams brygga on'
+    agpin teams brygga on
+}
+
+scenario teams-env
+ex_teams_env() {
+    two_profiles
+    quiet teams brygga on
+    SHOWN='agpin env brygga'
+    agpin env brygga
+}
+
+scenario teams-status
+ex_teams_status() {
+    two_profiles
+    quiet teams brygga on
+    SHOWN='agpin teams brygga'
+    agpin teams brygga
+}
+
+scenario teams-off
+ex_teams_off() {
+    two_profiles
+    quiet teams brygga on
+    SHOWN='agpin teams brygga off'
+    agpin teams brygga off
+}
+
 scenario explain
 ex_explain() {
     two_profiles
@@ -748,6 +779,13 @@ ex_err_unsafe_character() {
     quiet new weird --app-data "$H/Library/Application Support/Weird\$Name"
     SHOWN='agpin app weird'
     agpin app weird
+}
+
+scenario err-teams-state
+ex_err_teams_state() {
+    two_profiles
+    SHOWN='agpin teams brygga enable'
+    agpin teams brygga enable
 }
 
 scenario err-unknown-command

@@ -73,6 +73,26 @@ bare profile name is short for `run`, so the two are looked up in that order.
 
 Fix: `agpin help` for the commands, `agpin list` for the profiles.
 
+## "teams takes on or off, not '\<word\>'"
+
+<!-- BEGIN GENERATED: example err-teams-state (tools/gen-doc-examples.sh) -->
+```sh
+agpin teams brygga enable
+```
+
+```
+agpin: teams takes on or off, not 'enable'
+Try: agpin teams <profile> [on|off] [--explain]
+```
+<!-- END GENERATED: example err-teams-state -->
+
+Cause: the second word after the profile was not `on` or `off`. Nothing was
+changed: the registry entry is written only once the state is one of the two.
+
+Fix: `agpin teams <profile> on`, `agpin teams <profile> off`, or no state at
+all to be told which it is. [Agent teams](USE.md#agent-teams) has what the
+switch reaches.
+
 ## "the 'claude' command is not on your PATH"
 
 <!-- BEGIN GENERATED: example err-claude-not-on-path (tools/gen-doc-examples.sh) -->

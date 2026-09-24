@@ -43,7 +43,7 @@ complete_for() {
 case_bash_completion_lists_every_subcommand_at_the_first_word() {
     HOME=$(new_home); export HOME
     out=$(complete_for agent-profile "")
-    for c in new list ls remove run shell env path which guard shellrc desktop app \
+    for c in new list ls remove run shell env path which teams guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "$c" || return
     done
@@ -74,6 +74,16 @@ case_bash_completion_offers_profiles_and_purge_after_remove() {
     out=$(complete_for agent-profile remove "")
     assert_contains "$out" "brygga" || return
     assert_contains "$out" "--purge"
+}
+
+case_bash_completion_offers_profiles_and_states_after_teams() {
+    HOME=$(new_home); export HOME
+    "$AP" new brygga >/dev/null 2>&1
+    out=$(complete_for agent-profile teams "")
+    assert_contains "$out" "brygga" || return
+    assert_contains "$out" "on" || return
+    assert_contains "$out" "off" || return
+    assert_contains "$out" "--explain"
 }
 
 case_bash_completion_offers_the_agent_after_new_dash_dash_agent() {
@@ -160,7 +170,7 @@ case_zsh_completion_has_the_compdef_pragma() {
 case_zsh_completion_lists_every_subcommand() {
     HOME=$(new_home); export HOME
     out=$("$AP" completion zsh 2>&1)
-    for c in new list ls remove run shell env path which guard shellrc desktop app \
+    for c in new list ls remove run shell env path which teams guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "'$c:" || return
     done
@@ -204,7 +214,7 @@ case_fish_completion_registers_the_command() {
 case_fish_completion_lists_every_subcommand() {
     HOME=$(new_home); export HOME
     out=$("$AP" completion fish 2>&1)
-    for c in new list ls remove run shell env path which guard shellrc desktop app \
+    for c in new list ls remove run shell env path which teams guard shellrc desktop app \
              doctor verify explain completion version help; do
         assert_contains "$out" "-a $c " || return
     done
@@ -267,6 +277,7 @@ run_case "bash completion lists every subcommand"     case_bash_completion_lists
 run_case "bash completion offers profile names too"   case_bash_completion_offers_profile_names_at_the_first_word_too
 run_case "bash completion: only profiles after run"   case_bash_completion_offers_only_profiles_after_run
 run_case "bash completion: profiles and --purge"      case_bash_completion_offers_profiles_and_purge_after_remove
+run_case "bash completion: profiles and states after teams" case_bash_completion_offers_profiles_and_states_after_teams
 run_case "bash completion: agent after --agent"       case_bash_completion_offers_the_agent_after_new_dash_dash_agent
 run_case "bash completion: flags after new"           case_bash_completion_offers_flags_after_new
 run_case "bash completion: shells after guard --shell" case_bash_completion_offers_shells_after_guard_dash_dash_shell

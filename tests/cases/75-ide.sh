@@ -95,6 +95,47 @@ case_code_puts_env_before_args() {
     esac
 }
 
+# A profile with agent teams on carries the switch into the IDE the same way
+# it carries the root: a second --env, before --args, because everything
+# after --args belongs to the editor (docs/FACTS.md F26). A profile with it
+# off carries exactly one --env, so the line 75-ide has always pinned is
+# unchanged for everyone who never touched the switch.
+case_code_carries_agent_teams_in_a_second_env() {
+    ide_fixture
+    "$AP" teams brygga on >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1)
+    assert_contains "$out" "--env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga --env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 --args /tmp/project" || return
+
+    before=${out%%--args*}
+    case "$before" in
+        *"--env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"*) ;;
+        *) fail "the teams --env must come before --args" "got: $out"; return ;;
+    esac
+}
+
+case_code_carries_one_env_when_teams_is_off() {
+    ide_fixture
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project 2>&1)
+    assert_not_contains "$out" "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" || return
+    assert_equals "1" "$(printf '%s\n' "$out" | grep -o -- '--env' | wc -l | tr -d ' ')"
+}
+
+case_idea_carries_agent_teams_too() {
+    ide_fixture
+    "$AP" teams brygga on >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide idea brygga --app PyCharm 2>&1)
+    assert_contains "$out" "-a PyCharm --env CLAUDE_CONFIG_DIR=$HOME/.claude-brygga --env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" || return
+    assert_not_contains "$out" "--args"
+}
+
+case_new_instance_keeps_agent_teams_before_args() {
+    ide_fixture
+    "$AP" teams brygga on >/dev/null 2>&1
+    out=$(AGENT_PROFILE_DRY_RUN=1 ide code brygga /tmp/project --new-instance 2>&1)
+    assert_contains "$out" "--env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 --args --user-data-dir" || return
+    assert_contains "$out" "/tmp/project"
+}
+
 # -n is the difference between pinning an IDE and handing a path to the
 # unpinned one already running. Without it the window opens, the project
 # opens, and every session in it writes to the default root.
@@ -397,6 +438,10 @@ case_help_and_completions_name_the_ide_commands() {
 }
 
 run_case "code puts --env before --args"              case_code_puts_env_before_args
+run_case "code carries agent teams in a second --env"  case_code_carries_agent_teams_in_a_second_env
+run_case "code carries one --env when teams is off"     case_code_carries_one_env_when_teams_is_off
+run_case "idea carries agent teams too"                 case_idea_carries_agent_teams_too
+run_case "--new-instance keeps agent teams before --args" case_new_instance_keeps_agent_teams_before_args
 run_case "code forces a new instance with -n"         case_code_forces_a_new_instance
 run_case "code defaults to VS Code"                   case_code_defaults_to_vs_code
 run_case "code omits --args without a path"           case_code_omits_args_without_a_path
